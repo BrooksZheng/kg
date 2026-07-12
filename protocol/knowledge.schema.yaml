@@ -1,0 +1,39 @@
+# kg protocol — Knowledge Entry Schema (RFC-001 §5.2)
+# Frontmatter schema for knowledge/*.md. The entry IS the published artifact
+# (reference carrier): KYAML frontmatter (this schema) + a Markdown body in
+# English. Only the AGENTS.md managed block and skill drafts are rendered
+# derivatives — never hand-edit those; edit the entry and re-render.
+#
+# Implementation extensions over the RFC 5.2 sketch (documented deliberately):
+#   - evidence[].type gains `observation` (ref = an OBS-... id) so compiled
+#     entries can cite the observations they came from;
+#   - optional `superseded_by` records merge losers (the archived entry points
+#     at the surviving entry; the survivor points back via `supersedes`).
+
+kind: kg.knowledge_entry
+version: 1
+
+id_format: KN-NNNN
+file_pattern: "knowledge/KN-NNNN-<slug>.md"
+
+fields:
+  id: { type: string, required: true, pattern: "^KN-[0-9]{4}$" }
+  # One-sentence normative statement. This exact line is what the AGENTS.md
+  # managed index shows, so keep it self-contained.
+  claim: { type: string, required: true }
+  category: { type: enum, required: true, values: "project_knowledge|procedure|project_contract|executable_constraint" }
+  scope: { type: map, required: true }
+  scope.paths: { type: string_list, required: false }
+  scope.domains: { type: string_list, required: false }
+  evidence: { type: map_list, required: true, min_items: 1 }
+  evidence[].type: { type: enum, required: true, values: "diff|test|log|quote|observation" }
+  evidence[].ref: { type: string, required: true }
+  authority: { type: enum, required: true, values: "user_explicit_constraint|verified_runtime_behavior|machine_constraint|current_code_and_schema|formal_decision|project_knowledge|past_task_conclusion|agent_inference|external_general_knowledge" }
+  confidence: { type: float, required: true, min: 0, max: 1 }
+  lifecycle: { type: enum, required: true, values: "candidate|active|deprecated|archived|rejected|conflicted" }
+  supersedes: { type: string_or_null, required: true, pattern: "^KN-[0-9]{4}$" }
+  superseded_by: { type: string_or_null, required: false, pattern: "^KN-[0-9]{4}$" }
+  last_verified: { type: date, required: true }
+  # Must be filled when the entry is demoted/retired as wrong or harmful:
+  # what damage did the bad knowledge cause (RFC D6 "knowledge regret").
+  regret: { type: string_or_null, required: true }

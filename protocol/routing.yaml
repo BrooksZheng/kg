@@ -1,0 +1,54 @@
+# kg protocol — Compiler Routing Table (RFC-001 §5.5 / D2)
+# Every observation processed by kg-compile maps to the single verdict below
+# OR to exactly one of the five categories. The category decides the
+# destination carrier and the autonomy tier.
+
+kind: kg.routing
+version: 1
+
+# A verdict produces NO files — only a line in the compile report. It is a
+# legal and COMMON outcome: recording it distinguishes "reviewed, nothing
+# worth keeping" from "forgot to run", and gives collectors/compilers an
+# honest empty-handed exit (anti-fabrication).
+verdicts: [no_change]
+
+# autonomy:
+#   auto         compiler publishes directly — entry created with
+#                lifecycle: active, AGENTS.md index re-rendered
+#   human_review entry created as candidate + a .kg/queue/ item; a human
+#                ruling promotes (candidate -> active) or rejects
+#   human        no entry at all — only a .kg/queue/ item
+categories:
+  needs_human_decision:
+    description: "Conflicting evidence or a major unknown; goes to the human ruling queue."
+    destination: ".kg/queue/"
+    autonomy: human
+  project_knowledge:
+    description: "Explanatory knowledge — what something is / why it is so."
+    destination: "knowledge/*.md + AGENTS.md managed index line"
+    autonomy: auto
+  procedure:
+    description: "Repeatable operation or troubleshooting flow."
+    destination: "knowledge/*.md (mature procedures may be PROPOSED as a standalone skill — the proposal itself is human_review)"
+    autonomy: auto
+  project_contract:
+    description: "Stable contract, architecture boundary, or acceptance requirement."
+    destination: "AGENTS.md managed block / scoped rule"
+    autonomy: human_review
+  executable_constraint:
+    description: "Should be turned into a test / lint / type / CI gate."
+    destination: "test / lint / type / CI proposal"
+    autonomy: human_review
+
+# Regardless of category, these ALWAYS require a human ruling via .kg/queue/:
+always_human_review:
+  - "any change to the AGENTS.md managed block beyond re-rendering the index from active entries"
+  - "proposing a new skill (e.g. a procedure graduating to a skill)"
+
+# Routing actions a compile run may take per entry:
+actions: [add, update, merge, demote, retire]
+
+# Subtraction duty: every compile run MUST explicitly answer "what did we
+# merge / demote / retire this round". An empty answer is allowed but must be
+# stated in the report — silence is a protocol violation.
+subtraction_duty: true

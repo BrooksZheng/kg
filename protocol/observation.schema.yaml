@@ -1,0 +1,42 @@
+# kg protocol — Observation Schema (RFC-001 §5.1)
+# The single intake format for the collection side. Observations are written
+# ONLY via the kg-observe skill, one file per observation, into
+# .kg/observations/<id>.yaml (append-only inbox; kg-compile moves processed
+# files into .kg/observations/processed/).
+#
+# File format: KYAML — the strict YAML subset used by all kg machine-parsed
+# surfaces (see README "KYAML subset"): mappings, `- ` block lists, inline
+# `[a, b]` lists and `{ k: v }` maps with scalar values only; 2-space
+# indentation; no anchors, no tags, no multiline scalars.
+#
+# Field-spec conventions (interpreted by scripts/lib/protocol.mjs):
+#   - dotted paths address nested fields        context.task
+#   - `[]` addresses items of a list field      evidence[].type
+#   - enum values are one `|`-separated string  (KYAML inline maps cannot
+#     contain lists)
+#   - unknown fields are rejected (strict surfaces)
+
+kind: kg.observation
+version: 1
+
+id_format: OBS-YYYYMMDD-NNN
+
+fields:
+  id: { type: string, required: true, pattern: "^OBS-[0-9]{8}-[0-9]{3}$" }
+  at: { type: timestamp, required: true }
+  source: { type: enum, required: true, values: "human_correction|task_outcome|test_failure|review|agent_insight" }
+  # One-sentence normative or factual statement — the thing worth keeping.
+  claim: { type: string, required: true }
+  context: { type: map, required: false }
+  context.task: { type: string, required: false }
+  context.paths: { type: string_list, required: false }
+  # At least one piece of evidence; a bare opinion is not an observation.
+  evidence: { type: map_list, required: true, min_items: 1 }
+  evidence[].type: { type: enum, required: true, values: "diff|test|log|quote" }
+  evidence[].ref: { type: string, required: true }
+  urgency: { type: enum, required: true, values: "fast_track|batch" }
+
+defaults:
+  # Applied by kg-observe when the field is missing.
+  urgency: batch
+  urgency_by_source: { human_correction: fast_track }
