@@ -1,0 +1,16 @@
+id: Q-20260712-002
+at: 2026-07-12T15:44:10Z
+kind: promotion
+category: project_contract
+claim: "Activate KN-0004: installed host layout is .agents/skills self-contained copies only; root checkout layout is source-repo-only."
+evidence:
+  - { type: quote, ref: "compiled from OBS-20260712-010 (human correction, user_explicit_constraint); already enacted on trial branch cc519e6bd7" }
+options:
+  - "accept (promote to active)"
+  - reject
+  - "accept + also add a lint/check that fails when skills/ or protocol/ appear at a host root"
+recommendation: "accept — the human stated the constraint explicitly and the trial branch already conforms; the machine-check option can wait for a second occurrence"
+entry: KN-0004
+source_observations: [OBS-20260712-010]
+resolution: pending
+resolution_note: null

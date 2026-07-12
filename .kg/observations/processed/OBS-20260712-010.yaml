@@ -1,0 +1,11 @@
+id: OBS-20260712-010
+at: 2026-07-12T15:43:04Z
+source: human_correction
+claim: "The installed layout in a host repo is .agents/skills/kg-* self-contained copies ONLY - never the plugin checkout layout (root skills/ protocol/ scripts/). Root layout is for the plugin's own source repo; distribution UX should converge on registry-style installs (npx skills add) landing directly in .agents."
+context:
+  task: "preparing a clean trial branch for the human to dogfood kg"
+  paths: ["skills/kg-init/**", README.md]
+evidence:
+  - { type: quote, ref: "human 2026-07-12: users install via npx skills add style, skills go straight to .agents - surprised that protocol/ and scripts/ sat in the project root; agent had vendored the whole plugin checkout instead of the --copy installed layout" }
+  - { type: diff, ref: "trial branch cursor/kg-trial-72da cc519e6bd7 - relocated to .agents/skills self-contained layout via kg-init --copy staging" }
+urgency: fast_track
