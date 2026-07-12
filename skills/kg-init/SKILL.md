@@ -1,9 +1,16 @@
 ---
 name: kg-init
-description: Install the kg (Project Knowledge Growth) pipeline into a host repository. Trigger when a human asks to set up / install / initialize kg (or "knowledge growth", "知识管道") in a repo, when adopting the kg plugin in a new project, or when the kg directories (.kg/, knowledge/) or the AGENTS.md managed block are missing or damaged and need repair — the installer is idempotent and safe to re-run.
+description: Install the kg (Project Knowledge Growth) pipeline into a host repository. MANUAL INVOCATION ONLY — run this skill exclusively when a human explicitly asks to set up / install / initialize / repair kg (or "knowledge growth", "知识管道") in a repo. Never auto-trigger it from inferred context (missing .kg/ directories, damaged anchors, etc.); if you detect a broken install, report it to the human and wait for their explicit go-ahead. The installer is idempotent and safe to re-run.
+disable-model-invocation: true
 ---
 
 # kg-init — install kg into a host repo
+
+> **Manual trigger only.** Installing kg mutates the host repo's `AGENTS.md`,
+> ignore files, and skill wiring — that is a human decision. Platforms that
+> honor `disable-model-invocation` enforce this mechanically; on platforms
+> that don't (Cursor, Codex), the description above is the binding rule:
+> an explicit human request is the only valid trigger.
 
 One command:
 

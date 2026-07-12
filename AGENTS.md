@@ -9,4 +9,5 @@ Active project knowledge (read the entry before working in its scope):
 
 - KN-0001 [project_knowledge] KYAML inline maps cannot contain lists; schema field specs encode enums as one pipe-separated string. → `knowledge/KN-0001-kyaml-inline-maps-cannot-contain-lists.md`
 - KN-0002 [project_knowledge] Build records in canonical field order before writing; kyaml.stringify preserves insertion order. → `knowledge/KN-0002-build-records-in-canonical-field-order.md`
+- KN-0003 [project_contract] Skill scripts must reach shared code only via the _lib.mjs resolver, and both install modes must preserve the lib/../../protocol layout. → `knowledge/KN-0003-skill-scripts-must-reach-shared-code.md`
 <!-- kg:end -->

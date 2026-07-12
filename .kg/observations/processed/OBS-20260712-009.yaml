@@ -1,0 +1,10 @@
+id: OBS-20260712-009
+at: 2026-07-12T15:26:25Z
+source: human_correction
+claim: "kg-init must never be model-auto-invoked - installation and repair run only on an explicit human request (disable-model-invocation: true plus manual-only description)."
+context:
+  task: "post-delivery human review of the kg MVP"
+  paths: ["skills/kg-init/**"]
+evidence:
+  - { type: quote, ref: "human 2026-07-12: request kg-init manual-trigger only (disable-model-invocation: true) - installing mutates host AGENTS.md/ignore/wiring, a human decision; fix landed in skills/kg-init/SKILL.md in the same session" }
+urgency: fast_track

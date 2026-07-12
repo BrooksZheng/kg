@@ -11,7 +11,7 @@ evidence:
   - { type: diff, ref: "install.mjs --copy embeds scripts/lib and protocol inside each vendored skill dir" }
 authority: formal_decision
 confidence: 0.9
-lifecycle: candidate
+lifecycle: active
 supersedes: null
 last_verified: 2026-07-12
 regret: null

@@ -12,5 +12,5 @@ options:
 recommendation: "accept — the invariant is already load-bearing in shipped code and was verified end-to-end in the copy-mode drill"
 entry: KN-0003
 source_observations: [OBS-20260712-002, OBS-20260712-004]
-resolution: pending
-resolution_note: null
+resolution: accepted
+resolution_note: "human ruling 2026-07-12: 裁决我接受 — promote KN-0003 to active as recommended"

@@ -5,6 +5,10 @@
 - 来源:ChatGPT 设计对话([分享链接](https://chatgpt.com/share/6a53318a-c9f0-83ea-8377-946f192c9773))+ 本 session 的 8 轮反向面试
 - Review 记录:2026-07-12 人工 review 四条反馈已按共识落入本文(`.kg/` 读取隔离、
   `no_change` 定性为裁定、D5 种子知识否决、D6 澄清)
+- 验收记录:2026-07-12 人接受 T1-T5 实现(「RFC 你的实现我也接受」),含 5.4 的
+  已记录偏离(`conflicted` 仅从 live 状态进入,理由见 `protocol/lifecycle.yaml`);
+  同日纠正:kg-init 仅允许人工显式触发(`disable-model-invocation: true` +
+  manual-only 描述),禁止模型自主调用
 - 分支:`cursor/knowledge-growth-plugin-72da`(orphan,与 main 无共同历史,不合并回 main)
 
 ---
