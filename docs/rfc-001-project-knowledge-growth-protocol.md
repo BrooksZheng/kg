@@ -2,6 +2,8 @@
 
 - 状态:**draft**(待人确认;确认后改 `confirmed` 并开始实现)
 - 来源:ChatGPT 设计对话([分享链接](https://chatgpt.com/share/6a53318a-c9f0-83ea-8377-946f192c9773))+ 本 session 的 8 轮反向面试
+- Review 记录:2026-07-12 人工 review 四条反馈已按共识落入本文(`.kg/` 读取隔离、
+  `no_change` 定性为裁定、D5 种子知识否决、D6 澄清)
 - 分支:`cursor/knowledge-growth-plugin-72da`(orphan,与 main 无共同历史,不合并回 main)
 
 ---
@@ -28,10 +30,15 @@
 
 ### D2 · MVP 编译输出分类集
 
-**推荐** 6 类(ChatGPT 方案 8 类裁剪):
+**推荐**(ChatGPT 方案 8 类裁剪为「1 裁定 + 5 类别」):
 
 ```text
-no_change               本次无值得沉淀的知识(合法且常见的结果)
+编译裁定(不产生任何文件,只记编译报告一行):
+no_change               本次无值得沉淀的知识——合法且常见的结果。
+                        显式记录以区分「审视过没东西」与「忘了跑」,
+                        并给采集/编译端一个合法交白卷的出口(防凑数造假)
+
+知识类别(产生条目或队列项):
 needs_human_decision    证据冲突或重大未知,进裁决队列
 project_knowledge       解释性知识(是什么/为什么)          → 自动 active
 procedure               可重复操作/排查流程                → 自动 active
@@ -49,7 +56,7 @@ executable_constraint   应转化为 test/lint/type/CI 的约束  → 人审
 
 ```text
 skills/
-  kg-init/SKILL.md      + scripts/   安装:生成宿主目录、植入 AGENTS.md 锚点
+  kg-init/SKILL.md      + scripts/   安装:生成宿主目录、植入 AGENTS.md 锚点、写平台 ignore
   kg-observe/SKILL.md   + scripts/   采集:落盘观察,schema 校验,阈值检查
   kg-compile/SKILL.md   + scripts/   编译:去重/碰撞/路由/发布/减法/裁决队列
 protocol/
@@ -65,9 +72,9 @@ README.md
 宿主侧(`kg-init` 生成):
 
 ```text
-.kg/                    管道状态(机器管理,人只读)
+.kg/                    管道状态——工作 agent 禁读(见 5.6 读取隔离)
   config.yaml
-  observations/         inbox,append-only
+  observations/         inbox,append-only,只经 kg-observe 写入
   queue/                needs_human_decision 裁决清单
   reports/              编译报告(含指标)
 knowledge/              知识条目 = SoT(可见,git 追踪,frontmatter + 正文)
@@ -84,12 +91,11 @@ AGENTS.md               含 kg 托管段(锚点 + 由 active 条目渲染的索�
 claim、证据、选项、推荐),并在编译报告末尾输出裁决清单;人在任意 agent 会话里口头
 裁决(agent 代为落盘)或直接编辑队列文件。不引入 PR 流程、不做交互式 CLI。
 
-### D5 · 种子知识导入
+### D5 · 种子知识导入 —— **已否决(人,2026-07-12)**
 
-**推荐**:做。把 main 分支已被实证的 harness 教训(生命周期钩子死循环、自觉流程
-衰减必须闸门化、句式→载体路由、AGENTS 行数预算与减法纪律等)转写为第一批带证据的
-知识条目,随 `kg-init` 一起进入新工程。这是内容复用,不是架构兼容——与 Q1 不冲突。
-否决即全零启动。
+本版本不做:宿主是全新项目,知识库从第一条真实观察零启动。「扫描既有老项目、
+批量提炼初始知识」记入未来方向(设想为独立 skill `kg-scan`,brownfield 接入
+场景专用),本版本不设计、不实现。
 
 ### D6 · 成功指标(MVP 轻量版)
 
@@ -220,6 +226,12 @@ observation → candidate → active → deprecated → archived
 
 - 安装 = `kg-init`:生成 `.kg/` 与 `knowledge/`,在宿主 AGENTS.md 植入**托管段**
   (HTML 注释锚点包裹,3-5 行常驻入口 + 索引;段内容器脚本渲染,行数预算脚本强制);
+- **`.kg/` 读取隔离**:`.kg/` 内是未经编译验证的原始 claim 与管道状态,工作 agent
+  在任务中读它 = 未审知识绕过整条「编译→分级→发布」管道直接注入决策。两道防线:
+  ① AGENTS.md 托管段固定一行硬规则——「任务中禁止读取 `.kg/`;写入只经
+  `kg-observe`,读取只发生在 `kg-compile` 会话」(平台无关,主防线);
+  ② `kg-init` 尽力写平台 ignore 文件(如 Cursor `.cursorignore`;各平台语义
+  不一,只作补充不作依赖);
 - 平台发现:Cursor 经 `.agents/skills/`(symlink 或复制),Codex 经 AGENTS.md 锚点
   指令;新平台 = 新发现路径,零逻辑改动;
 - 所有知识变更都是 git diff:版本、review、回滚、归责全部复用 git。
@@ -228,10 +240,11 @@ observation → candidate → active → deprecated → archived
 
 **做**:三个 skill(`kg-init` / `kg-observe` / `kg-compile`)+ 五个协议文件 +
 内嵌脚本(schema 校验、生命周期迁移校验、AGENTS 托管段渲染与预算检查、观察阈值
-提醒)+ 种子知识(D5)。
+提醒)。
 
 **不做**(显式推迟):向量检索、MCP server、生命周期钩子、Claude Code plugin 壳、
-多仓库共享知识、自动修改宿主既有规则、多 agent 评审委员会、独立度量设施。
+多仓库共享知识、自动修改宿主既有规则、多 agent 评审委员会、独立度量设施、
+种子知识 / 老项目扫描(`kg-scan`,brownfield 接入,D5 已否决本版本不做)。
 
 ## 七、Tasks
 
@@ -240,11 +253,10 @@ observation → candidate → active → deprecated → archived
 | T1 | 协议层 | `protocol/` 五文件 + 校验脚本骨架 | pending |
 | T2 | kg-observe | SKILL.md + 落盘/校验/阈值脚本 | pending |
 | T3 | kg-compile | SKILL.md + 路由/渲染/减法/报告脚本 | pending |
-| T4 | kg-init | SKILL.md + 宿主生成/锚点植入脚本 | pending |
-| T5 | 种子知识 | main 教训 → 初始 `knowledge/` 条目 | pending |
-| T6 | 自举演练 | 用本 plugin 的开发过程跑一轮完整闭环,修接口毛刺 | pending |
+| T4 | kg-init | SKILL.md + 宿主生成/锚点植入/ignore 脚本 | pending |
+| T5 | 自举演练 | 用本 plugin 的开发过程跑一轮完整闭环,修接口毛刺 | pending |
 
-顺序:T1 定接口,T2-T4 依赖 T1;T5/T6 收尾。每个 task 一个 commit 系列,T6 前
+顺序:T1 定接口,T2-T4 依赖 T1;T5 收尾。每个 task 一个 commit 系列,T5 前
 plugin 必须能在空目录上完成 init → observe → compile → publish 全链路。
 
 ## 八、开源竞品扫描(2026-07,详见采访记录)
