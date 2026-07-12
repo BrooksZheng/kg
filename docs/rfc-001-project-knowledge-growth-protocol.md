@@ -247,7 +247,22 @@ observation → candidate → active → deprecated → archived
 顺序:T1 定接口,T2-T4 依赖 T1;T5/T6 收尾。每个 task 一个 commit 系列,T6 前
 plugin 必须能在空目录上完成 init → observe → compile → publish 全链路。
 
-## 八、风险与开放问题
+## 八、开源竞品扫描(2026-07,详见采访记录)
+
+三个流派,无一与本设计完全重合:
+
+| 流派 | 代表 | 核心机制 | 与 kg 的差距 |
+| --- | --- | --- | --- |
+| 工作流沉淀 | [compound-engineering-plugin](https://github.com/EveryInc/compound-engineering-plugin)(Every,~7k stars)、self-improving-agent、claude-reflect-system | 任务收尾把学习写回 CLAUDE.md / rules / skill | 绑定 Claude Code(plugin/钩子/slash commands);无生命周期、权威模型、减法纪律 |
+| 知识编译引擎 | [agent-knowledge](https://github.com/yucx-go/agent-knowledge)(compiled-memory) | Claim + Evidence → Compiled Truth,矛盾检测——唯一同用「编译器」心智模型的项目 | MCP server + 检索运行时;知识住数据库而非 git,不路由原生载体 |
+| 通用记忆基建 | mem0(~47k stars)、Letta、Zep、Cognee、claude-mem、OpenLTM | DB + 向量/图检索 + session 注入 | 解决「回忆」不解决「治理」;无人审分级、不随代码走 git review |
+
+kg 的差异化空位 = 五属性同时成立:发布即注入原生载体、git-native 治理、
+分级自治 + 生命周期 + regret/减法、零引擎零钩子纯 skill 形态、散文→机器约束升级
+路径。定位风险:「compound engineering」已是流派名词,对外话术须主动区分
+「工作流插件」vs「知识编译协议」。`kg` 名称当前无冲突。
+
+## 九、风险与开放问题
 
 - **自觉衰减**:无钩子平台上,采集依赖 skill description 触发——AGENTS 锚点里的
   一行采集提示是唯一兜底;若 dogfood 显示遗漏率高,升级路径是 Claude Code plugin
