@@ -87,8 +87,10 @@ live entry is contested, transition it to `conflicted`.
 
 Lifecycle changes (promote after a human accepts, demote, retire, merge,
 conflict) go through `transition-entry.mjs` — it machine-validates against
-`protocol/lifecycle.yaml` and enforces `--regret` on demotion and
-`--superseded-by` on merges. If it rejects a transition, the transition is
+`protocol/lifecycle.yaml`: `--regret` is required on demotion, and archiving
+from a live state (candidate/active/conflicted) requires `--superseded-by`
+(merge — the survivor's `supersedes` back-pointer is written for you) OR
+`--regret` (direct retire). If it rejects a transition, the transition is
 illegal; fix the plan, not the validator.
 
 Apply pending human rulings at the start of publishing: for each `.kg/queue/`

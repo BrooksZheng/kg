@@ -1,0 +1,11 @@
+id: OBS-20260712-008
+at: 2026-07-12T09:24:16Z
+source: review
+claim: "Path identity guards must compare fs.realpathSync (with a resolve fallback for missing paths), not path.resolve — a symlink alias of the same directory evades lexical comparison."
+context:
+  task: verifier-round-2-item1
+  paths: [skills/kg-init/scripts/install.mjs]
+evidence:
+  - { type: quote, ref: "verifier round 2: a symlink alias of the plugin root evaded the path.resolve src==dest guard" }
+  - { type: log, ref: "/tmp/kg-rp-alias drill: vendored re-run through an aliased host root now skips instead of deleting the source" }
+urgency: batch

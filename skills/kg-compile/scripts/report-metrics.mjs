@@ -69,6 +69,9 @@ for (let i = 0; i < corrections.length; i++) {
 // --- 2. candidate acceptance rate ---------------------------------------------
 
 const legalResolutions = protocol.loadRouting().queue_resolutions;
+if (legalResolutions == null) {
+  host.fail("protocol/routing.yaml missing key `queue_resolutions` — protocol files older than scripts?");
+}
 let accepted = 0;
 let rejected = 0;
 let pendingQueue = 0;

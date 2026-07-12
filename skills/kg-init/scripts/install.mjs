@@ -115,10 +115,22 @@ if (existing.split(/\r?\n/).some((l) => l.trim() === ignoreLine)) {
 const agentsSkillsDir = path.join(hostRoot, ".agents", "skills");
 fs.mkdirSync(agentsSkillsDir, { recursive: true });
 
+// Canonical path identity: realpath when the path exists (so symlink aliases
+// of the same directory compare equal), lexical resolve as the fallback for
+// not-yet-existing destinations.
+function canonical(p) {
+  try {
+    return fs.realpathSync(p);
+  } catch {
+    return path.resolve(p);
+  }
+}
+
 function copyDir(src, dest) {
   // Never let a refresh destroy its own source (e.g. installer re-run from
-  // inside a vendored host, where PLUGIN_ROOT resolves into .agents/).
-  if (path.resolve(src) === path.resolve(dest)) {
+  // inside a vendored host, where PLUGIN_ROOT resolves into .agents/, or a
+  // src/dest reached through a symlink alias).
+  if (canonical(src) === canonical(dest)) {
     host.fail(`refusing to copy a directory onto itself: ${src}`);
   }
   fs.rmSync(dest, { recursive: true, force: true });
@@ -129,7 +141,7 @@ for (const name of SKILL_NAMES) {
   const src = path.join(PLUGIN_ROOT, "skills", name);
   const dest = path.join(agentsSkillsDir, name);
   if (!fs.existsSync(src)) host.fail(`plugin skill missing: ${src}`);
-  if (path.resolve(src) === path.resolve(dest)) {
+  if (canonical(src) === canonical(dest)) {
     // Re-run from inside a vendored install: the "plugin" IS the host's
     // .agents/skills tree. Nothing to wire; deleting would self-destruct.
     log(`vendored install already in place for ${name} — skipped`);

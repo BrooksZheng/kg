@@ -38,6 +38,9 @@ const supersededBy = flagValue("--superseded-by");
 const hostRoot = host.findHostRoot();
 const paths = host.kgPaths(hostRoot);
 const lifecycle = protocol.loadLifecycle();
+if (lifecycle.archive_from_live_requires_reason == null) {
+  host.fail("protocol/lifecycle.yaml missing key `archive_from_live_requires_reason` — protocol files older than scripts?");
+}
 
 const files = host.listFiles(paths.knowledge, ".md");
 const findEntry = (id) => files.find((f) => path.basename(f).startsWith(`${id}-`) || path.basename(f) === `${id}.md`);
@@ -60,17 +63,25 @@ if (!allowed.includes(toState)) {
 if (lifecycle.regret_required_on_enter.includes(toState) && !(regret && regret.trim())) {
   host.fail(`transition to \`${toState}\` requires --regret "<reason>" — demotion without a recorded regret is forbidden`);
 }
+// ANY use of --superseded-by is a merge and goes through the same survivor
+// machinery, regardless of the from-state (deprecated -> archived included).
 let survivorFile = null;
-if (toState === "archived" && lifecycle.archive_from_live_requires_reason.includes(from)) {
-  if (!supersededBy && !(regret && regret.trim())) {
-    host.fail(
-      `archiving a \`${from}\` entry needs a reason — pass --superseded-by <surviving KN-id> (merge) or --regret "<reason>" (retire)`,
-    );
+if (supersededBy) {
+  if (supersededBy === frontmatter.id) {
+    host.fail(`--superseded-by must name a DIFFERENT entry — ${frontmatter.id} cannot supersede itself`);
   }
-  if (supersededBy) {
-    survivorFile = findEntry(supersededBy);
-    if (!survivorFile) host.fail(`surviving entry \`${supersededBy}\` not found in ${paths.knowledge}`);
-  }
+  survivorFile = findEntry(supersededBy);
+  if (!survivorFile) host.fail(`surviving entry \`${supersededBy}\` not found in ${paths.knowledge}`);
+}
+if (
+  toState === "archived" &&
+  lifecycle.archive_from_live_requires_reason.includes(from) &&
+  !supersededBy &&
+  !(regret && regret.trim())
+) {
+  host.fail(
+    `archiving a \`${from}\` entry needs a reason — pass --superseded-by <surviving KN-id> (merge) or --regret "<reason>" (retire)`,
+  );
 }
 
 frontmatter.lifecycle = toState;

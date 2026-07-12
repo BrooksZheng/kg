@@ -39,6 +39,14 @@ const unknown = Object.keys(frontmatter).filter((k) => !knownFields.has(k));
 if (unknown.length) {
   host.fail(`unknown draft field(s): ${unknown.join(", ")} — typo? (schema: protocol/knowledge.schema.yaml)`);
 }
+// New entries always start with these null; they are only settable through
+// transition-entry.mjs. Rejecting (instead of silently nulling) makes the
+// canonical rebuild below lossless.
+for (const f of ["regret", "superseded_by"]) {
+  if (frontmatter[f] !== undefined && frontmatter[f] !== null) {
+    host.fail(`draft sets \`${f}\` — this field is only settable via transition-entry.mjs; new entries start with it null`);
+  }
+}
 
 const routing = protocol.loadRouting();
 const category = frontmatter.category;
