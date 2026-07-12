@@ -1,7 +1,7 @@
 // Shared-lib resolver. Works in both layouts:
-//   plugin layout:   <plugin>/skills/kg-observe/scripts/  ->  <plugin>/scripts/lib/
-//   copied layout:   .agents/skills/kg-observe/scripts/   ->  ./lib/  (kg-init copy
-//                    mode places scripts/lib and protocol/ inside the skill dir)
+//   plugin layout:   <plugin>/skills/<skill>/scripts/     ->  <plugin>/scripts/lib/
+//   copied layout:   .agents/skills/<skill>/scripts/      ->  ./lib/  (kg-init copy
+//                    mode embeds scripts/lib and protocol/ inside each skill dir)
 import fs from "node:fs";
 
 const here = new URL(".", import.meta.url);
@@ -15,3 +15,4 @@ if (!libUrl) {
 export const kyaml = await import(new URL("kyaml.mjs", libUrl).href);
 export const protocol = await import(new URL("protocol.mjs", libUrl).href);
 export const host = await import(new URL("host.mjs", libUrl).href);
+export const agentsBlock = await import(new URL("agents-block.mjs", libUrl).href);
