@@ -1,0 +1,8 @@
+id: OBS-20260712-005
+at: 2026-07-12T08:52:44Z
+source: agent_insight
+claim: "fs.cpSync with recursive true is stable on Node 18 and safe for the copy-mode installer."
+context: { task: T4-kg-init }
+evidence:
+  - { type: log, ref: "/tmp/kg-copy-test run: copied skills executed end-to-end with plugin paths absent" }
+urgency: batch

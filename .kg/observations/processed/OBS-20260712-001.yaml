@@ -1,0 +1,11 @@
+id: OBS-20260712-001
+at: 2026-07-12T08:52:44Z
+source: task_outcome
+claim: "KYAML inline maps cannot contain lists, so schema field specs must encode enum values as one pipe-separated string."
+context:
+  task: T1-protocol-layer
+  paths: ["protocol/**", scripts/lib/kyaml.mjs]
+evidence:
+  - { type: quote, ref: "scripts/lib/kyaml.mjs splitItems() rejects nested inline collections by design" }
+  - { type: diff, ref: "protocol/observation.schema.yaml field-spec conventions comment" }
+urgency: batch

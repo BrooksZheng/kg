@@ -1,0 +1,16 @@
+id: Q-20260712-001
+at: 2026-07-12T08:53:32Z
+kind: promotion
+category: project_contract
+claim: "Activate KN-0003: _lib.mjs resolver + lib/../../protocol layout are a binding contract for all install modes."
+evidence:
+  - { type: quote, ref: "compiled from OBS-20260712-002 + OBS-20260712-004; verified by /tmp/kg-copy-test vendored run" }
+options:
+  - "accept (promote to active)"
+  - reject
+  - "narrow scope to copy mode only"
+recommendation: "accept — the invariant is already load-bearing in shipped code and was verified end-to-end in the copy-mode drill"
+entry: KN-0003
+source_observations: [OBS-20260712-002, OBS-20260712-004]
+resolution: pending
+resolution_note: null

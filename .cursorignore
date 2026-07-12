@@ -1,0 +1,3 @@
+# kg: keep uncompiled pipeline state out of agent context (secondary defense;
+# the primary defense is the hard rule in the AGENTS.md kg block)
+.kg/

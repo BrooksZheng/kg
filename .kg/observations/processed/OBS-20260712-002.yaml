@@ -1,0 +1,10 @@
+id: OBS-20260712-002
+at: 2026-07-12T08:52:44Z
+source: task_outcome
+claim: "Skill scripts locate shared code via a two-candidate resolver in _lib.mjs: ../../../scripts/lib in the plugin checkout, ./lib in a vendored copy."
+context:
+  task: T2-T4-skills
+  paths: ["skills/*/scripts/_lib.mjs", "scripts/lib/**"]
+evidence:
+  - { type: diff, ref: "commit 30b5821386: agents-block extracted to scripts/lib so kg-init and kg-compile share one renderer" }
+urgency: batch

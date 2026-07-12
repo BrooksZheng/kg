@@ -1,0 +1,13 @@
+id: OBS-20260712-004
+at: 2026-07-12T08:52:44Z
+source: task_outcome
+claim: "protocol/ is resolved as lib/../../protocol; both install modes must preserve this layout, which is why copy mode embeds scripts/lib and protocol inside each skill dir."
+context:
+  task: T4-kg-init
+  paths:
+    - scripts/lib/protocol.mjs
+    - skills/kg-init/scripts/install.mjs
+evidence:
+  - { type: quote, ref: "scripts/lib/protocol.mjs: PROTOCOL_DIR = LIB_DIR/../../protocol" }
+  - { type: diff, ref: "install.mjs --copy: copyDir(scripts/lib -> skill/scripts/lib) and copyDir(protocol -> skill/protocol)" }
+urgency: batch

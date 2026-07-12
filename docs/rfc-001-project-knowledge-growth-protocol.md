@@ -251,11 +251,11 @@ observation → candidate → active → deprecated → archived
 
 | # | 任务 | 产出 | 状态 |
 | --- | --- | --- | --- |
-| T1 | 协议层 | `protocol/` 五文件 + 校验脚本骨架 | pending |
-| T2 | kg-observe | SKILL.md + 落盘/校验/阈值脚本 | pending |
-| T3 | kg-compile | SKILL.md + 路由/渲染/减法/报告脚本 | pending |
-| T4 | kg-init | SKILL.md + 宿主生成/锚点植入/ignore 脚本 | pending |
-| T5 | 自举演练 | 用本 plugin 的开发过程跑一轮完整闭环,修接口毛刺 | pending |
+| T1 | 协议层 | `protocol/` 五文件 + 校验脚本骨架 | delivered |
+| T2 | kg-observe | SKILL.md + 落盘/校验/阈值脚本 | delivered |
+| T3 | kg-compile | SKILL.md + 路由/渲染/减法/报告脚本 | delivered |
+| T4 | kg-init | SKILL.md + 宿主生成/锚点植入/ignore 脚本 | delivered |
+| T5 | 自举演练 | 用本 plugin 的开发过程跑一轮完整闭环,修接口毛刺 | delivered |
 
 顺序:T1 定接口,T2-T4 依赖 T1;T5 收尾。每个 task 一个 commit 系列,T5 前
 plugin 必须能在空目录上完成 init → observe → compile → publish 全链路。

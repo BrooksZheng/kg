@@ -1,0 +1,10 @@
+id: OBS-20260712-003
+at: 2026-07-12T08:52:44Z
+source: task_outcome
+claim: "kyaml.stringify preserves insertion order, so scripts must build records in canonical field order before writing."
+context:
+  task: T2-kg-observe
+  paths: [skills/kg-observe/scripts/add-observation.mjs]
+evidence:
+  - { type: diff, ref: "commit 08c2a757d7: add-observation rebuilds the record in schema order after autofill appended id/at/urgency at the end" }
+urgency: batch
