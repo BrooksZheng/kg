@@ -24,7 +24,11 @@ id_format: OBS-YYYYMMDD-NNN
 fields:
   id: { type: string, required: true, pattern: "^OBS-[0-9]{8}-[0-9]{3}$" }
   at: { type: timestamp, required: true }
-  source: { type: enum, required: true, values: "human_correction|task_outcome|test_failure|review|agent_insight" }
+  # human_decision = a decision the human explicitly made in conversation
+  # (architecture design, directory layout, tech selection, spec ruling).
+  # At compile time it typically maps to user_explicit_constraint (the ruling
+  # itself) or formal_decision (the resulting ADR-style entry) authority.
+  source: { type: enum, required: true, values: "human_correction|human_decision|task_outcome|test_failure|review|agent_insight" }
   # One-sentence normative or factual statement — the thing worth keeping.
   claim: { type: string, required: true }
   context: { type: map, required: false }

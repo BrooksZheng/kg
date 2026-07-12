@@ -62,6 +62,12 @@ there is no separate script for content edits. Every hand-edit must be logged
 with `log-update.mjs <KN-id>` so the round's action log and report see it,
 and re-validated with `validate-knowledge.mjs`.
 
+**`human_decision` observations** carry the human's explicit in-conversation
+ruling: cite the quoted decision as evidence and map authority to
+`user_explicit_constraint` (the ruling itself) or `formal_decision` (the
+resulting ADR-style entry). Rejected alternatives recorded with the decision
+belong in the entry body — they prevent re-proposal.
+
 **Collision detection**: when an observation contradicts an existing entry or
 another observation, rank both sides with `protocol/authority.yaml`. The
 ranking gives you a RECOMMENDATION — you must NEVER silently pick a side.

@@ -1,0 +1,11 @@
+id: OBS-20260712-011
+at: 2026-07-12T16:26:54Z
+source: human_decision
+claim: "kg captures knowledge-creation sessions via two collection triggers: explicit human request, and a proactive offer at design-session wrap-up - one observation per decision (source: human_decision), rejected alternatives recorded as evidence."
+context:
+  task: "design ruling on capturing architecture/tech-selection discussions"
+  paths: ["skills/kg-observe/**", protocol/observation.schema.yaml]
+evidence:
+  - { type: quote, ref: "human 2026-07-12: asked whether the pipeline works when the conversation itself creates knowledge (directory design, tech selection); approved the three-part fix with 可以" }
+  - { type: diff, ref: "kg-observe SKILL triggers 3-4 + Decision capture section; observation.schema.yaml source enum + human_decision" }
+urgency: batch

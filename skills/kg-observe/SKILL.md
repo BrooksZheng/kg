@@ -1,6 +1,6 @@
 ---
 name: kg-observe
-description: Record a knowledge observation into the host repo's .kg/observations/ inbox. Trigger at the END of every work task (before declaring it done, review the task for reusable signals), and IMMEDIATELY whenever the human corrects the agent — human corrections are fast-track and must be captured on the spot, mid-task. Also applies when a test failure, review comment, or task outcome reveals something project-specific and reusable.
+description: Record a knowledge observation into the host repo's .kg/observations/ inbox. Trigger at the END of every work task (before declaring it done, review the task for reusable signals), IMMEDIATELY whenever the human corrects the agent (human corrections are fast-track, captured on the spot mid-task), whenever the human explicitly asks to record knowledge ("note this", "记一下", "record this decision"), and at the natural wrap-up of a knowledge-creation session (architecture design, directory layout, tech selection, spec discussion) — proactively OFFER to record the decisions made, one observation per decision. Also applies when a test failure, review comment, or task outcome reveals something project-specific and reusable.
 ---
 
 # kg-observe — capture raw knowledge signals
@@ -21,6 +21,36 @@ say TO the human follows the human's language.
 2. **End of task.** Before declaring a task done, spend one minute asking:
    did this task teach anything a future agent would need? Sources:
    `task_outcome`, `test_failure`, `review`, `agent_insight`.
+3. **Explicit human request.** "Note this" / "记一下" / "record this decision"
+   — record whatever the human points at, on the spot, no judgment call
+   needed on whether it qualifies.
+4. **Knowledge-creation sessions.** Some conversations ARE the work:
+   architecture design, directory-structure discussion, tech selection, spec
+   rulings. These have no "task done" moment, so at the natural wrap-up
+   (topic settled, human moving on) proactively offer: "this discussion
+   produced N decisions — record them into kg?" Wait for the human's
+   go-ahead; then record one observation per decision (see below).
+
+## Decision capture (source: `human_decision`)
+
+A design discussion that settles 5 decisions yields 5 observations — never
+one blob for the whole conversation.
+
+- **claim** = the decision itself, as a normative statement ("The web app
+  uses feature-directory structure; features never import each other."),
+  not a meeting summary.
+- **evidence** — `type: quote` of the human's ruling words; ALSO record the
+  rejected alternatives and why ("rejected: flat src/, because...") — a
+  rejected option is knowledge too, it stops future agents from re-proposing
+  it.
+- `source: human_decision` defaults to `urgency: batch`. If the decisions
+  must bind the very next tasks (typical for a new project's first
+  architecture session), suggest running a kg-compile session right after
+  recording instead of waiting for the threshold.
+- Contract-category decisions (structure, boundaries) will still pass
+  through candidate + human queue ruling at compile time even though the
+  human just made them — that second confirmation is by design (git audit
+  trail, and a guard against the agent misreading the conversation).
 
 ## `no_change` is a legal and common outcome
 
