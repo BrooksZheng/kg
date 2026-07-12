@@ -55,5 +55,5 @@ for (const file of files) {
   }
 }
 
-console.log(`kg: ${files.length - bad}/${files.length} knowledge entr${files.length - bad === 1 ? "y" : "ies"} valid`);
+console.log(`kg: ${files.length - bad}/${files.length} knowledge entr${files.length === 1 ? "y" : "ies"} valid`);
 process.exit(bad ? 1 : 0);

@@ -17,7 +17,12 @@ export function renderBlockLines(hostRoot) {
 
   const active = [];
   for (const file of listFiles(paths.knowledge, ".md")) {
-    const { frontmatter } = splitFrontmatter(fs.readFileSync(file, "utf8"));
+    let frontmatter;
+    try {
+      ({ frontmatter } = splitFrontmatter(fs.readFileSync(file, "utf8")));
+    } catch (err) {
+      fail(`knowledge/${path.basename(file)} is not a valid entry — ${err.message}\n  (every .md under knowledge/ must be a kg entry; move stray files elsewhere)`);
+    }
     if (frontmatter.lifecycle === "active") {
       active.push({ ...frontmatter, relPath: path.relative(hostRoot, file) });
     }
@@ -33,8 +38,11 @@ export function renderBlockLines(hostRoot) {
   ];
   if (active.length) {
     lines.push("", "Active project knowledge (read the entry before working in its scope):", "");
+    // Defuse HTML comment sequences in claim text so a malicious or unlucky
+    // claim cannot terminate/corrupt the managed block's anchors.
+    const sanitize = (s) => String(s).replaceAll("<!--", "<! --").replaceAll("-->", "-- >").replace(/\r?\n/g, " ");
     for (const e of active) {
-      lines.push(`- ${e.id} [${e.category}] ${e.claim} → \`${e.relPath}\``);
+      lines.push(`- ${e.id} [${e.category}] ${sanitize(e.claim)} → \`${e.relPath}\``);
     }
   }
   return { lines, budget: config.agents_block_budget_lines, activeCount: active.length };

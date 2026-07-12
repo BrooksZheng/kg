@@ -30,6 +30,16 @@ try {
   host.fail(`draft parse failed — ${err.message}`);
 }
 
+// Reject unknown draft fields up front — otherwise a typo (`confidnce:`)
+// would be silently dropped by the canonical rebuild below and surface only
+// as a misleading "required field is missing" error.
+const knowledgeSchema = protocol.loadKnowledgeSchema();
+const knownFields = new Set(Object.keys(knowledgeSchema.fields).map((p) => p.split(/[.\[]/)[0]));
+const unknown = Object.keys(frontmatter).filter((k) => !knownFields.has(k));
+if (unknown.length) {
+  host.fail(`unknown draft field(s): ${unknown.join(", ")} — typo? (schema: protocol/knowledge.schema.yaml)`);
+}
+
 const routing = protocol.loadRouting();
 const category = frontmatter.category;
 const route = routing.categories?.[category];
@@ -60,7 +70,7 @@ const record = {
   regret: null,
 };
 
-const errors = protocol.validateRecord(record, protocol.loadKnowledgeSchema());
+const errors = protocol.validateRecord(record, knowledgeSchema);
 if (errors.length) {
   console.error(`kg: entry rejected (${errors.length} error${errors.length > 1 ? "s" : ""}):`);
   for (const e of errors) console.error(`  - ${e}`);

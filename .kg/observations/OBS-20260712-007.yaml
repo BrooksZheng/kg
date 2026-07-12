@@ -1,0 +1,11 @@
+id: OBS-20260712-007
+at: 2026-07-12T09:16:00Z
+source: review
+claim: "Scripts that rebuild records from a field whitelist must reject unknown input fields first, or typos surface as misleading required-field-missing errors."
+context:
+  task: verifier-round-1-nit2
+  paths: [skills/kg-compile/scripts/add-entry.mjs]
+evidence:
+  - { type: quote, ref: "verifier: a draft with confidnce: reported confidence as missing, masking the actual typo" }
+  - { type: diff, ref: "add-entry.mjs now derives known top-level fields from the schema and fails on unknown draft keys" }
+urgency: batch

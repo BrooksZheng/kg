@@ -68,18 +68,26 @@ for (let i = 0; i < corrections.length; i++) {
 
 // --- 2. candidate acceptance rate ---------------------------------------------
 
+const legalResolutions = protocol.loadRouting().queue_resolutions;
 let accepted = 0;
 let rejected = 0;
 let pendingQueue = 0;
+const badResolutions = [];
 for (const file of host.listFiles(paths.queue, ".yaml")) {
   try {
     const item = kyaml.parse(fs.readFileSync(file, "utf8"));
-    if (item.resolution === "accepted") accepted += 1;
+    if (!legalResolutions.includes(item.resolution)) {
+      badResolutions.push(`${item.id ?? file}: \`${item.resolution}\``);
+      pendingQueue += 1;
+    } else if (item.resolution === "accepted") accepted += 1;
     else if (item.resolution === "rejected") rejected += 1;
     else pendingQueue += 1;
   } catch {
     pendingQueue += 1;
   }
+}
+for (const bad of badResolutions) {
+  console.error(`kg: WARNING — unrecognized queue resolution ${bad} (legal: ${legalResolutions.join(" | ")}); treated as pending — fix the file`);
 }
 
 // --- 3. regret log --------------------------------------------------------------
@@ -106,7 +114,7 @@ const subs = count("merge") + count("demote") + count("retire");
 const lines = [
   "### kg metrics (machine-computed)",
   "",
-  `- repeat-correction count: ${repeatPairs.length}` +
+  `- repeat-correction count (cumulative across all rounds, not new-this-round): ${repeatPairs.length}` +
     (repeatPairs.length
       ? ` — ${repeatPairs.map(([a, b]) => `${a}~${b}`).join(", ")} (heuristic match — verify before treating as a system failure)`
       : ""),
@@ -114,7 +122,7 @@ const lines = [
     (pendingQueue ? ` — ${pendingQueue} still pending` : ""),
   regrets.length === 0 ? "- knowledge regret log: empty" : "- knowledge regret log:",
   ...regrets.map((r) => `  - ${r.id} (${r.lifecycle}): ${r.regret}`),
-  `- subtraction ratio this round: ${subs}/${adds || 0} (merge+demote+retire / add)` +
+  `- subtraction ratio this round: ${subs}/${adds} (merge+demote+retire / add)` +
     (adds > 0 && subs === 0 ? " — additions without subtraction; state explicitly in the report why nothing could be merged or retired" : ""),
 ];
-console.log(lines.filter((l) => l !== null).join("\n"));
+console.log(lines.join("\n"));

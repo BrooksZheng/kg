@@ -10,8 +10,10 @@
 // Rules enforced (from lifecycle.yaml):
 //   - `to` must be reachable from the entry's current state;
 //   - entering a state listed in regret_required_on_enter needs --regret;
-//   - archiving a live entry (merge) needs --superseded-by pointing at the
-//     surviving entry, which must exist.
+//   - archiving from a state in archive_from_live_requires_reason needs
+//     --superseded-by (merge — the surviving entry must exist, and its
+//     `supersedes` back-pointer is written automatically) OR --regret
+//     (direct retire).
 // Demote/retire/merge actions are logged for the subtraction-ratio metric.
 
 import fs from "node:fs";
@@ -58,17 +60,40 @@ if (!allowed.includes(toState)) {
 if (lifecycle.regret_required_on_enter.includes(toState) && !(regret && regret.trim())) {
   host.fail(`transition to \`${toState}\` requires --regret "<reason>" — demotion without a recorded regret is forbidden`);
 }
-if (toState === "archived" && lifecycle.merge_requires_superseded_by.includes(from)) {
-  if (!supersededBy) {
-    host.fail(`archiving a \`${from}\` entry is a merge — pass --superseded-by <surviving KN-id>`);
+let survivorFile = null;
+if (toState === "archived" && lifecycle.archive_from_live_requires_reason.includes(from)) {
+  if (!supersededBy && !(regret && regret.trim())) {
+    host.fail(
+      `archiving a \`${from}\` entry needs a reason — pass --superseded-by <surviving KN-id> (merge) or --regret "<reason>" (retire)`,
+    );
   }
-  if (!findEntry(supersededBy)) host.fail(`surviving entry \`${supersededBy}\` not found in ${paths.knowledge}`);
+  if (supersededBy) {
+    survivorFile = findEntry(supersededBy);
+    if (!survivorFile) host.fail(`surviving entry \`${supersededBy}\` not found in ${paths.knowledge}`);
+  }
 }
 
 frontmatter.lifecycle = toState;
 if (regret) frontmatter.regret = regret.trim();
 if (supersededBy) frontmatter.superseded_by = supersededBy;
 fs.writeFileSync(file, `---\n${kyaml.stringify(frontmatter)}---\n${body.startsWith("\n") ? body : "\n" + body}`);
+
+// Merge back-pointer: the survivor records which entry it absorbed.
+if (survivorFile) {
+  const survivor = protocol.splitFrontmatter(fs.readFileSync(survivorFile, "utf8"));
+  if (!survivor.frontmatter.supersedes) {
+    survivor.frontmatter.supersedes = frontmatter.id;
+    fs.writeFileSync(
+      survivorFile,
+      `---\n${kyaml.stringify(survivor.frontmatter)}---\n${survivor.body.startsWith("\n") ? survivor.body : "\n" + survivor.body}`,
+    );
+    console.log(`kg: ${supersededBy}: supersedes set to ${frontmatter.id}`);
+  } else if (survivor.frontmatter.supersedes !== frontmatter.id) {
+    console.log(
+      `kg: WARNING — ${supersededBy} already supersedes ${survivor.frontmatter.supersedes}; record the additional merge of ${frontmatter.id} in the survivor's body`,
+    );
+  }
+}
 
 const action =
   toState === "deprecated" ? "demote"

@@ -22,11 +22,21 @@ with `node <script>.mjs` from anywhere inside the host repo.
 
 ### 1. Load inputs
 
+- Check for a stale round log: if `.kg/reports/.round-actions.jsonl` exists
+  at session start, a previous compile session died between writing its
+  report and running `--clear-round`. Recovery: confirm the actions in it are
+  covered by the latest report in `.kg/reports/`, then run
+  `report-metrics.mjs --clear-round` before doing anything else — otherwise
+  the leftover actions pollute this round's subtraction ratio.
 - Validate the inbox: `node .../kg-observe/scripts/validate-observations.mjs`.
   Malformed observations are excluded from compilation; list them in the
   report for repair.
 - Read every pending observation in `.kg/observations/` AND every existing
   entry in `knowledge/` (all lifecycle states — dedupe needs the full set).
+  If platform ignore rules (e.g. the `.cursorignore` line kg-init writes)
+  block your file-read tools from `.kg/`, read through the terminal or the
+  skill scripts instead — the isolation rule targets work tasks, and this
+  session is the sanctioned exception.
 
 ### 2. Judge each observation
 
@@ -45,6 +55,12 @@ Map every observation to the verdict or exactly one category
 claim, prefer `update` (refresh `last_verified`, extend evidence/scope of the
 existing entry) over `add`. Multiple pending observations about one claim
 compile into ONE entry citing all of them.
+
+**Updates**: hand-editing an entry's evidence, scope, `last_verified`, claim
+wording, or body — never `lifecycle:` — IS the sanctioned update mechanism;
+there is no separate script for content edits. Every hand-edit must be logged
+with `log-update.mjs <KN-id>` so the round's action log and report see it,
+and re-validated with `validate-knowledge.mjs`.
 
 **Collision detection**: when an observation contradicts an existing entry or
 another observation, rank both sides with `protocol/authority.yaml`. The

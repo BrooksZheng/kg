@@ -67,6 +67,7 @@ export function nextObservationId(paths, now = new Date()) {
       if (base.startsWith(prefix)) max = Math.max(max, Number.parseInt(base.slice(prefix.length), 10) || 0);
     }
   }
+  if (max + 1 > 999) fail(`observation id space exhausted for ${day} (999/day) — this volume means the pipeline is misused; investigate before recording more`);
   return `${prefix}${String(max + 1).padStart(3, "0")}`;
 }
 
@@ -77,6 +78,7 @@ export function nextKnowledgeId(paths) {
     const m = /^KN-(\d{4})/.exec(path.basename(file));
     if (m) max = Math.max(max, Number.parseInt(m[1], 10));
   }
+  if (max + 1 > 9999) fail("knowledge id space exhausted (KN-9999) — the id format needs a protocol revision, not a silently invalid id");
   return `KN-${String(max + 1).padStart(4, "0")}`;
 }
 

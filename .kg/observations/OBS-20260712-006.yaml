@@ -1,0 +1,11 @@
+id: OBS-20260712-006
+at: 2026-07-12T09:16:00Z
+source: review
+claim: "Installer refresh operations must compare resolved src and dest before rmSync: a vendored re-run resolves PLUGIN_ROOT into the host .agents tree, making src==dest and deleting the source."
+context:
+  task: verifier-round-1-B1
+  paths: [skills/kg-init/scripts/install.mjs]
+evidence:
+  - { type: quote, ref: "verifier B1: copy-mode re-run from inside a vendored host destroyed the skill dir (rmSync then cpSync ENOENT)" }
+  - { type: log, ref: "/tmp/kg-copy-test2: double re-run from inside the host now skips with vendored-install-already-in-place" }
+urgency: batch

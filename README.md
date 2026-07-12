@@ -26,6 +26,7 @@ scripts/lib/    shared Node stdlib modules (KYAML parser, validator, host helper
                 AGENTS block renderer) — single copy; skill scripts reach it via
                 each skill's scripts/_lib.mjs resolver, and `kg-init --copy`
                 embeds it (plus protocol/) into vendored skill dirs
+docs/           the RFC — protocol design, rulings, and task ledger
 knowledge/      this repo's own compiled knowledge (kg dogfoods itself)
 .kg/            this repo's own pipeline state (bootstrap artifacts, committed)
 ```

@@ -7,8 +7,10 @@
 # Implementation extensions over the RFC 5.2 sketch (documented deliberately):
 #   - evidence[].type gains `observation` (ref = an OBS-... id) so compiled
 #     entries can cite the observations they came from;
-#   - optional `superseded_by` records merge losers (the archived entry points
-#     at the surviving entry; the survivor points back via `supersedes`).
+#   - optional `superseded_by` records merge losers: the archived entry points
+#     at the surviving entry, and transition-entry.mjs writes the survivor's
+#     `supersedes` back-pointer automatically (when the survivor already
+#     supersedes another entry, the extra merge is recorded in its body).
 
 kind: kg.knowledge_entry
 version: 1

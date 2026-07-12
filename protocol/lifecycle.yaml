@@ -1,5 +1,5 @@
 # kg protocol — Lifecycle State Machine (RFC-001 §5.4)
-# Machine-enforced by kg-compile's compile-transition.mjs: illegal transitions
+# Machine-enforced by kg-compile's transition-entry.mjs: illegal transitions
 # fail hard. There is NO `experimental` state (RFC D2 — tiered autonomy
 # already covers gradual rollout).
 #
@@ -34,8 +34,9 @@ transitions:
 # is machine-rejected.
 regret_required_on_enter: [deprecated]
 
-# Archiving straight from a live state is only legal as a MERGE: the archived
-# entry must set `superseded_by` to the surviving entry id (and the survivor
-# should name it in `supersedes`). Retiring a deprecated entry needs nothing
-# extra — its regret was recorded on demotion.
-merge_requires_superseded_by: [candidate, active]
+# Archiving from any live state (candidate/active/conflicted) must carry a
+# reason: either it is a MERGE — `superseded_by` set to the surviving entry
+# id (the tool writes the survivor's `supersedes` back-pointer) — or a direct
+# RETIRE with `regret` recording what the knowledge cost. Only retiring a
+# `deprecated` entry needs nothing extra: its regret was recorded on demotion.
+archive_from_live_requires_reason: [candidate, active, conflicted]

@@ -48,6 +48,11 @@ always_human_review:
 # Routing actions a compile run may take per entry:
 actions: [add, update, merge, demote, retire]
 
+# Legal `resolution` values on .kg/queue/ items. Anything else is a typo —
+# the metrics script warns, because a misspelled ruling (e.g. `accept`)
+# would otherwise sit "pending" forever, silently.
+queue_resolutions: [pending, accepted, rejected]
+
 # Subtraction duty: every compile run MUST explicitly answer "what did we
 # merge / demote / retire this round". An empty answer is allowed but must be
 # stated in the report — silence is a protocol violation.
