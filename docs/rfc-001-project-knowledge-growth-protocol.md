@@ -1,6 +1,7 @@
 # RFC-001 · Project Knowledge Growth Protocol
 
-- 状态:**draft**(待人确认;确认后改 `confirmed` 并开始实现)
+- 状态:**confirmed**(人,2026-07-12:「其他裁决就按你推荐的来。开干吧」——
+  D1/D2/D3/D4/D6 按推荐生效,D5 维持否决)
 - 来源:ChatGPT 设计对话([分享链接](https://chatgpt.com/share/6a53318a-c9f0-83ea-8377-946f192c9773))+ 本 session 的 8 轮反向面试
 - Review 记录:2026-07-12 人工 review 四条反馈已按共识落入本文(`.kg/` 读取隔离、
   `no_change` 定性为裁定、D5 种子知识否决、D6 澄清)
@@ -21,7 +22,7 @@
 | Q7 | 第一个 dogfood 宿主 | **在 plugin 之上从零重建 Blue Apron 工程**——plugin 是新工程的第一块基石,新工程的 AGENTS.md 从第一天起就是编译产物 |
 | Q8 | 分发意图与语言 | **预备对外的通用件**:skill 正文 / schema / 代码注释英文;对人的报告与交互输出跟随用户语言(中文) |
 
-## 二、待裁决决策点(确认 RFC 时逐条表态,默认按推荐执行)
+## 二、决策点(已全部裁决,2026-07-12:D1-D4/D6 按推荐,D5 否决)
 
 ### D1 · 命名
 
