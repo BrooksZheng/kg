@@ -116,6 +116,11 @@ const agentsSkillsDir = path.join(hostRoot, ".agents", "skills");
 fs.mkdirSync(agentsSkillsDir, { recursive: true });
 
 function copyDir(src, dest) {
+  // Never let a refresh destroy its own source (e.g. installer re-run from
+  // inside a vendored host, where PLUGIN_ROOT resolves into .agents/).
+  if (path.resolve(src) === path.resolve(dest)) {
+    host.fail(`refusing to copy a directory onto itself: ${src}`);
+  }
   fs.rmSync(dest, { recursive: true, force: true });
   fs.cpSync(src, dest, { recursive: true });
 }
@@ -124,6 +129,12 @@ for (const name of SKILL_NAMES) {
   const src = path.join(PLUGIN_ROOT, "skills", name);
   const dest = path.join(agentsSkillsDir, name);
   if (!fs.existsSync(src)) host.fail(`plugin skill missing: ${src}`);
+  if (path.resolve(src) === path.resolve(dest)) {
+    // Re-run from inside a vendored install: the "plugin" IS the host's
+    // .agents/skills tree. Nothing to wire; deleting would self-destruct.
+    log(`vendored install already in place for ${name} — skipped`);
+    continue;
+  }
   if (copyMode) {
     copyDir(src, dest);
     // Make the copied skill self-contained: embed shared lib + protocol where
