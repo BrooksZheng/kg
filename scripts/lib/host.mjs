@@ -84,3 +84,27 @@ export function fail(message) {
   console.error(`kg: error: ${message}`);
   process.exit(1);
 }
+
+// --- compile-round action log ------------------------------------------------
+// Every publishing script appends what it did to a JSONL scratch file; the
+// report-metrics script reads it to compute the subtraction ratio and clears
+// it once the compile report is finalized.
+
+export function roundLogFile(paths) {
+  return path.join(paths.reports, ".round-actions.jsonl");
+}
+
+export function appendRoundAction(paths, action) {
+  fs.mkdirSync(paths.reports, { recursive: true });
+  fs.appendFileSync(roundLogFile(paths), JSON.stringify({ at: new Date().toISOString(), ...action }) + "\n");
+}
+
+export function readRoundActions(paths) {
+  const file = roundLogFile(paths);
+  if (!fs.existsSync(file)) return [];
+  return fs
+    .readFileSync(file, "utf8")
+    .split("\n")
+    .filter((l) => l.trim() !== "")
+    .map((l) => JSON.parse(l));
+}
