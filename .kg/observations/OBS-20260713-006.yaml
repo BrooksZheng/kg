@@ -1,0 +1,11 @@
+id: OBS-20260713-006
+at: 2026-07-13T14:06:42Z
+source: human_decision
+claim: "Fragmentation is treated at the render layer: knowledge entries stay atomic (one claim per entry) and merge is reserved for true duplication or supersession, never topical aggregation."
+context:
+  task: "rfc-002 interview: AGENTS.md carrier redesign and kg two-layer positioning"
+  paths: ["knowledge/**", "skills/kg-compile/**"]
+evidence:
+  - { type: quote, ref: "human: 那肯定是后者 — choosing section-level precision when asked what should happen if one section of an aggregated thick doc proves wrong" }
+  - { type: quote, ref: "rejected: storage-layer aggregation of related KN entries into thick documents, because claim degrades to a topic, lifecycle coarsens (one wrong section taints the whole doc), and evidence/regret attribution blurs — see docs/rfc-002-agents-md-compiled-artifact.md R1" }
+urgency: batch

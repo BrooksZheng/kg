@@ -1,0 +1,14 @@
+id: OBS-20260713-013
+at: 2026-07-13T14:06:43Z
+source: human_decision
+claim: "AGENTS.md prose sections follow a three-source model: code-derivable sections are computed from repo state at render time (zero copies, rot-proof); convention/architecture sections render from KN entry bodies; intent sections originate only from human-decision entries and are human-review-only."
+context:
+  task: "rfc-002 interview: AGENTS.md carrier redesign and kg two-layer positioning"
+  paths:
+    - AGENTS.md
+    - scripts/lib/agents-block.mjs
+    - protocol/routing.yaml
+evidence:
+  - { type: quote, ref: "human: 我不太确定，但是按照你的推荐来吧 — explicitly delegating the mechanism choice to the agent while retaining intent authority" }
+  - { type: quote, ref: "rejected: everything-as-entries, because copying code-derivable facts into entries creates a second source of truth and the rot merely changes address — see docs/rfc-002-agents-md-compiled-artifact.md R8" }
+urgency: batch

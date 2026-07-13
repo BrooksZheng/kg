@@ -1,0 +1,11 @@
+id: OBS-20260713-012
+at: 2026-07-13T14:06:43Z
+source: human_decision
+claim: "AGENTS.md ownership flips: the entire file becomes a rendered artifact (realizing RFC-001 Q7); humans supply intent and retain ruling power, and human suggestions enter through the pipeline (human_decision observation, compile, render) instead of hand-editing the file."
+context:
+  task: "rfc-002 interview: AGENTS.md carrier redesign and kg two-layer positioning"
+  paths: [AGENTS.md, scripts/lib/agents-block.mjs]
+evidence:
+  - { type: quote, ref: "human: 那散文区要是能 agent 全面接管最棒了…仍然强调人的重要性，知识需要人跟 agent 协作产生…人天生纠结于散文区的内容，写什么，怎么写，写不明白个为什么，然后腐烂" }
+  - { type: quote, ref: "rejected: human-owned prose zone with kg proposals only, because humans demonstrably fail to keep prose fresh (the human's own words above are the evidence) — see docs/rfc-002-agents-md-compiled-artifact.md R7" }
+urgency: batch

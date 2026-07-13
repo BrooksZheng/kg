@@ -1,0 +1,11 @@
+id: OBS-20260713-009
+at: 2026-07-13T14:06:42Z
+source: human_decision
+claim: "Index rendering is tiered (a+): project_contract entries keep full claim lines in root AGENTS.md; project_knowledge/procedure entries with scope.paths sink to nested AGENTS.md managed blocks in their subtree; pathless domains fold into domain lines in the root index."
+context:
+  task: "rfc-002 interview: AGENTS.md carrier redesign and kg two-layer positioning"
+  paths: [scripts/lib/agents-block.mjs]
+evidence:
+  - { type: quote, ref: "human: 我选 a+" }
+  - { type: quote, ref: "rejected: folding everything in root including contracts, because a contract claim IS the rule text and hiding it equals not publishing it — see docs/rfc-002-agents-md-compiled-artifact.md R4" }
+urgency: batch
