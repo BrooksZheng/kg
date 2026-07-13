@@ -90,6 +90,25 @@ for (const name of SKILL_NAMES) {
   }
 }
 
+// The per-skill _lib.mjs resolvers must stay byte-identical; kg-init's copy is
+// the canonical one.
+const canonicalLibResolver = path.join(ROOT, "skills", "kg-init", "scripts", "_lib.mjs");
+for (const name of SKILL_NAMES.filter((n) => n !== "kg-init")) {
+  const dest = path.join(ROOT, "skills", name, "scripts", "_lib.mjs");
+  const relDest = path.relative(ROOT, dest);
+  if (fs.existsSync(dest) && fs.readFileSync(canonicalLibResolver).equals(fs.readFileSync(dest))) {
+    console.log(`kg: ${relDest} in sync`);
+    continue;
+  }
+  drifted += 1;
+  if (checkMode) {
+    console.error(`kg: ${relDest} DRIFTED from skills/kg-init/scripts/_lib.mjs`);
+  } else {
+    fs.copyFileSync(canonicalLibResolver, dest);
+    console.log(`kg: refreshed ${relDest} from skills/kg-init/scripts/_lib.mjs`);
+  }
+}
+
 if (checkMode && drifted > 0) {
   console.error(`kg: ${drifted} vendored cop${drifted === 1 ? "y" : "ies"} out of sync — run: node scripts/sync-vendored.mjs`);
   process.exit(1);
