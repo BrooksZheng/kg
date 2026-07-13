@@ -13,6 +13,58 @@ The protocol design and all rulings live in
 (Chinese — the incubation working language for human-facing docs; skill bodies,
 schemas, and code are English).
 
+## Why this project exists
+
+Agents forget. Every session starts from zero: the same wrong assumption gets
+corrected for the third time, the same test trap is rediscovered, the same
+rejected design gets re-proposed. The signals that would prevent this — human
+corrections, task outcomes, test failures, review feedback — are emitted
+constantly during agent work, and then evaporate when the session ends.
+
+The common countermeasure makes things worse: people append every lesson to
+`AGENTS.md` / `CLAUDE.md` by hand until the context file is a swamp of stale,
+unranked, contradictory prose that costs tokens every session and convinces
+no one. Knowledge only ever grows; nothing verifies it, nothing retires it,
+and nobody can tell an established contract from a passing remark.
+
+kg treats this as a **compilation problem, not a memory problem**:
+
+- **Claims need evidence.** An observation is claim + evidence + scope,
+  recorded in-task in seconds. An opinion without a diff, test name, log
+  excerpt, or quote is not knowledge.
+- **A compiler judges, a collector doesn't.** Collection is light and never
+  turns into an analysis session; a dedicated compile session dedupes,
+  detects collisions, ranks authority, and routes each claim — with
+  `no_change` as a legal, honest verdict (no fabricating lessons to look
+  productive).
+- **Publishing = injection into native carriers.** Compiled knowledge lands
+  where agents already look — the `AGENTS.md` managed block, reference docs
+  under `knowledge/`, skill drafts, test/lint proposals — so there is no
+  retrieval runtime, no database, no vector store to operate.
+- **Knowledge must also shrink.** A lifecycle state machine plus a mandatory
+  subtraction duty (every compile round answers "what did we merge / demote /
+  retire") and a regret log keep the corpus small enough to stay credible.
+  The managed block has a hard line budget — bloat is an alarm, not a norm.
+- **Humans rule where it matters.** Low-risk categories auto-activate;
+  contracts and machine constraints stop at candidate until a human ruling,
+  recorded git-native in a queue — no PR ceremony, no separate service.
+
+Existing tools each cover a slice: workflow plugins write lessons back but
+are platform-bound with no lifecycle or subtraction discipline; memory
+infrastructure (vector/graph stores) solves recall but not governance, and
+lives outside git review. kg's bet is that the five properties must hold
+*simultaneously* — native-carrier injection, git-native governance, tiered
+autonomy with lifecycle + regret, zero-engine pure-skill form, and a
+prose-to-machine-constraint upgrade path.
+
+The single hypothesis this incubation exists to test:
+
+> Compiled project knowledge measurably reduces repeated corrections,
+> repeated failures, and useless context injection.
+
+This repo dogfoods the pipeline on itself — `knowledge/` and `.kg/` here are
+real output, not fixtures.
+
 ## Layout
 
 ```text
