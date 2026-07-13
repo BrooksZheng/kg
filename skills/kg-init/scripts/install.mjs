@@ -184,5 +184,46 @@ for (const name of SKILL_NAMES) {
   }
 }
 
+// --- 5. Claude Code wiring (only when the host shows Claude markers) ------------
+// Claude Code discovers skills under .claude/skills/ and reads CLAUDE.md, not
+// AGENTS.md. Wire both: symlink each skill from .claude/skills/ to the
+// canonical .agents/skills/ copy, and bridge the managed block via the
+// officially recommended `@AGENTS.md` import in CLAUDE.md.
+
+const claudeDir = path.join(hostRoot, ".claude");
+const claudeMd = path.join(hostRoot, "CLAUDE.md");
+if (fs.existsSync(claudeDir) || fs.existsSync(claudeMd)) {
+  const claudeSkillsDir = path.join(claudeDir, "skills");
+  fs.mkdirSync(claudeSkillsDir, { recursive: true });
+  for (const name of SKILL_NAMES) {
+    const canonicalSkill = path.join(agentsSkillsDir, name);
+    const dest = path.join(claudeSkillsDir, name);
+    if (fs.existsSync(dest)) {
+      // Anything already resolving to the canonical copy (e.g. a symlink
+      // planted by `npx skills add`) counts as wired, whatever its link text.
+      if (canonical(dest) === canonical(canonicalSkill)) {
+        log(`.claude/skills/${name} already wired`);
+        continue;
+      }
+      host.fail(`.claude/skills/${name} exists but does not resolve to .agents/skills/${name} — remove it, then re-run`);
+    }
+    const target = path.relative(claudeSkillsDir, canonicalSkill);
+    fs.symlinkSync(target, dest);
+    log(`symlinked .claude/skills/${name} -> ${target}`);
+  }
+
+  const claudeText = fs.existsSync(claudeMd) ? fs.readFileSync(claudeMd, "utf8") : null;
+  if (claudeText === null) {
+    fs.writeFileSync(claudeMd, "@AGENTS.md\n");
+    log("created CLAUDE.md importing AGENTS.md (Claude Code does not read AGENTS.md natively)");
+  } else if (claudeText.includes("AGENTS.md")) {
+    log("CLAUDE.md already references AGENTS.md");
+  } else {
+    const sep = claudeText.endsWith("\n") ? "" : "\n";
+    fs.writeFileSync(claudeMd, `${claudeText}${sep}\n@AGENTS.md\n`);
+    log("appended @AGENTS.md import to CLAUDE.md (existing content untouched)");
+  }
+}
+
 log(`install complete at ${hostRoot}`);
 log("next: work normally; record observations via kg-observe; compile when the threshold reminder fires.");

@@ -49,14 +49,26 @@ kg's skill dirs are self-contained, so the standard
 npx skills add brookszheng/kg
 
 # 2. complete the host wiring (.kg/ tree, AGENTS.md managed block,
-#    .cursorignore) — idempotent, safe to re-run
+#    .cursorignore, Claude Code bridge) — idempotent, safe to re-run
 node .agents/skills/kg-init/scripts/install.mjs
 ```
 
 Step 2 is required: the skills CLI only delivers the skill files; the
 `.kg/` pipeline tree and the `AGENTS.md` managed block are planted by
 kg-init. Commit everything it created (`.kg/`, `knowledge/`, `AGENTS.md`,
-`.cursorignore`, `.agents/skills/kg-*`).
+`.cursorignore`, `.agents/skills/kg-*`, and `.claude/skills/kg-*` +
+`CLAUDE.md` on Claude Code hosts).
+
+`npx skills add owner/repo` installs from the repo's **default branch**.
+To test a not-yet-merged branch, install from a local checkout instead
+(branch names containing `/` do not survive the CLI's URL parsing):
+
+```bash
+git clone -b <branch> https://github.com/<owner>/kg /tmp/kg && npx skills add /tmp/kg
+```
+
+If a script fails with `cannot locate shared lib`, the installed copies
+predate the self-contained layout — reinstall from an up-to-date source.
 
 ### Option B — from a local checkout of this repo
 
@@ -65,6 +77,19 @@ kg-init. Commit everything it created (`.kg/`, `knowledge/`, `AGENTS.md`,
 # checkout updates automatically); add --copy to vendor self-contained copies
 node skills/kg-init/scripts/install.mjs /path/to/host [--copy]
 ```
+
+### Agent platform coverage
+
+- **Cursor** — discovers skills under `.agents/skills/`; the managed block
+  lives in `AGENTS.md`, which Cursor reads natively.
+- **Codex** — reads `AGENTS.md` natively; the block's pointer lines lead to
+  the skill files. No extra wiring.
+- **Claude Code** — reads `CLAUDE.md` (not `AGENTS.md`) and discovers skills
+  under `.claude/skills/`. When the host shows Claude markers (a `.claude/`
+  dir or a `CLAUDE.md`), kg-init symlinks `.claude/skills/kg-*` to the
+  canonical `.agents/skills/` copies and ensures `CLAUDE.md` imports
+  `AGENTS.md` (creates a one-line `@AGENTS.md` file, or appends the import —
+  existing content untouched).
 
 ## Upgrade (consumers)
 

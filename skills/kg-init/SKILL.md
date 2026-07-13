@@ -44,7 +44,10 @@ and never touches AGENTS.md content outside the anchors.
 knowledge/               knowledge entries = source of truth, git-tracked
 AGENTS.md                kg managed block planted between anchors
 .cursorignore            `.kg/` line added (best-effort secondary defense)
-.agents/skills/kg-*      Cursor-native skill discovery (symlink or copy)
+.agents/skills/kg-*      canonical skill discovery (symlink or copy)
+.claude/skills/kg-*      Claude Code discovery — symlinks to .agents/skills/,
+                         only when the host shows Claude markers
+CLAUDE.md                `@AGENTS.md` import ensured (Claude-marker hosts only)
 ```
 
 ## The managed block and read isolation
@@ -69,6 +72,13 @@ sessions. The `.cursorignore` entry is a secondary, best-effort defense only
   `protocol/`) when the host repo cannot reference the plugin directory.
 - **Codex**: no wiring needed — the AGENTS.md managed block is injected every
   session and its pointer lines lead to the skill files.
+- **Claude Code**: reads `CLAUDE.md` (not `AGENTS.md`) and discovers skills
+  under `.claude/skills/`. When the host has a `.claude/` dir or a
+  `CLAUDE.md`, the installer symlinks `.claude/skills/kg-*` to the canonical
+  `.agents/skills/` copies (symlinks planted by `npx skills add` are
+  recognized and left alone) and ensures `CLAUDE.md` carries the officially
+  recommended `@AGENTS.md` import so the managed block reaches Claude
+  sessions. Hosts without Claude markers are left untouched.
 - A new platform = a new discovery path only; no logic changes.
 
 ## After installing
