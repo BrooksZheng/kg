@@ -10,7 +10,7 @@ evidence:
   - { type: quote, ref: "docs/rfc-002-agents-md-compiled-artifact.md R1 (confirmed 2026-07-13)" }
 authority: formal_decision
 confidence: 0.9
-lifecycle: candidate
+lifecycle: active
 supersedes: null
 last_verified: 2026-07-13
 regret: null

@@ -9,5 +9,5 @@ options: ["accept (promote to active)", reject]
 recommendation: "accept — RFC-002 R1 was explicitly ruled and confirmed by the human in the interview; the entry only republishes that ruling as a binding compile-time contract"
 entry: KN-0009
 source_observations: [OBS-20260713-006]
-resolution: pending
-resolution_note: null
+resolution: accepted
+resolution_note: "human ruling 2026-07-13: 都接受 — promote KN-0009 to active as recommended"

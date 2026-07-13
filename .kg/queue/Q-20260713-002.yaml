@@ -9,5 +9,5 @@ options: ["accept (promote to active)", reject]
 recommendation: "accept — the human confirmed the doctrine verbatim into RFC-002; this entry makes the patch-policy/alarm-condition contract discoverable from the index"
 entry: KN-0010
 source_observations: [OBS-20260713-015]
-resolution: pending
-resolution_note: null
+resolution: accepted
+resolution_note: "human ruling 2026-07-13: 都接受 — promote KN-0010 to active as recommended"
