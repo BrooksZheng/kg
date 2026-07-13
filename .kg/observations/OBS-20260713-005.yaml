@@ -1,0 +1,11 @@
+id: OBS-20260713-005
+at: 2026-07-13T07:49:57Z
+source: task_outcome
+claim: "Claude Code reads CLAUDE.md (never AGENTS.md) and discovers skills under .claude/skills/; kg-init wires both — .claude/skills/kg-* symlinks to the canonical .agents/skills/ copies plus an @AGENTS.md import in CLAUDE.md — but only when the host shows Claude markers (.claude/ dir or CLAUDE.md)."
+context:
+  task: skills-add-support
+  paths: ["skills/kg-init/**"]
+evidence:
+  - { type: quote, ref: "official Claude Code memory docs: Claude Code reads CLAUDE.md, not AGENTS.md; @AGENTS.md import is the recommended bridge" }
+  - { type: diff, ref: "install.mjs step 5: Claude wiring, verified against npx skills add -a claude-code layout in /tmp/kg-demo" }
+urgency: batch
