@@ -151,9 +151,20 @@ for (const name of SKILL_NAMES) {
     copyDir(src, dest);
     // Make the copied skill self-contained: embed shared lib + protocol where
     // the _lib.mjs resolver's `./lib` fallback finds them (scripts/lib/ ->
-    // ../../protocol resolves to <skill>/protocol).
-    copyDir(path.join(PLUGIN_ROOT, "scripts", "lib"), path.join(dest, "scripts", "lib"));
-    copyDir(path.join(PLUGIN_ROOT, "protocol"), path.join(dest, "protocol"));
+    // ../../protocol resolves to <skill>/protocol). In the plugin checkout the
+    // root copies are the source of truth and overlay whatever the skill dir
+    // carried; when installing FROM an already-vendored skill (no root
+    // scripts/lib/ next to PLUGIN_ROOT), the recursive copy above already
+    // brought the embedded copies along — just verify they arrived.
+    for (const [rootRel, destRel] of [
+      [["scripts", "lib"], ["scripts", "lib"]],
+      [["protocol"], ["protocol"]],
+    ]) {
+      const rootSrc = path.join(PLUGIN_ROOT, ...rootRel);
+      const embedded = path.join(dest, ...destRel);
+      if (fs.existsSync(rootSrc)) copyDir(rootSrc, embedded);
+      else if (!fs.existsSync(embedded)) host.fail(`cannot make ${name} self-contained: neither ${rootSrc} nor an embedded ${destRel.join("/")} copy exists`);
+    }
     log(`copied skill ${name} -> .agents/skills/${name} (self-contained)`);
   } else {
     let current = null;
