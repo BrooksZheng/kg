@@ -1,0 +1,5 @@
+# RFC-002 scoped blocks under kg infrastructure — render artifacts for dogfood
+# only; never commit (they would ship inside skill packages to consumers).
+protocol/AGENTS.md
+skills/AGENTS.md
+skills/*/AGENTS.md

@@ -126,7 +126,7 @@ function canonical(p) {
   }
 }
 
-function copyDir(src, dest) {
+function copyDir(src, dest, { skipAgentsMd = false } = {}) {
   // Never let a refresh destroy its own source (e.g. installer re-run from
   // inside a vendored host, where PLUGIN_ROOT resolves into .agents/, or a
   // src/dest reached through a symlink alias).
@@ -134,7 +134,10 @@ function copyDir(src, dest) {
     host.fail(`refusing to copy a directory onto itself: ${src}`);
   }
   fs.rmSync(dest, { recursive: true, force: true });
-  fs.cpSync(src, dest, { recursive: true });
+  fs.cpSync(src, dest, {
+    recursive: true,
+    filter: skipAgentsMd ? (srcPath) => path.basename(srcPath) !== "AGENTS.md" : undefined,
+  });
 }
 
 for (const name of SKILL_NAMES) {
@@ -148,7 +151,7 @@ for (const name of SKILL_NAMES) {
     continue;
   }
   if (copyMode) {
-    copyDir(src, dest);
+    copyDir(src, dest, { skipAgentsMd: true });
     // Make the copied skill self-contained: embed shared lib + protocol where
     // the _lib.mjs resolver's `./lib` fallback finds them (scripts/lib/ ->
     // ../../protocol resolves to <skill>/protocol). In the plugin checkout the

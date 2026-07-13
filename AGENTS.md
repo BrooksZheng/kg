@@ -9,7 +9,6 @@ Active project knowledge (read the entry before working in its scope):
 
 - KN-0003 [project_contract] Skill scripts must reach shared code only via the _lib.mjs resolver, and both install modes must preserve the lib/../../protocol layout. → `knowledge/KN-0003-skill-scripts-must-reach-shared-code.md`
 - KN-0004 [project_contract] A host repo's installed kg layout is .agents/skills/kg-* self-contained copies only; the root checkout layout (skills/ protocol/ scripts/) belongs exclusively to the plugin source repo. → `knowledge/KN-0004-a-host-repo-s-installed-kg.md`
-- [protocol] → `protocol/AGENTS.md` (1 entry)
-- [protocol+skills] → `skills/AGENTS.md` (2 entries)
-- [skills] → `skills/kg-init/AGENTS.md` (1 entry)
+- [protocol] KN-0001 → `knowledge/KN-0001-kyaml-inline-maps-cannot-contain-lists.md`; KN-0002 → `knowledge/KN-0002-build-records-in-canonical-field-order.md`
+- [skills] KN-0005 → `knowledge/KN-0005-destructive-refresh-rm-then-copy-must.md`; KN-0006 → `knowledge/KN-0006-npx-skills-add-owner-repo-distributes.md`
 <!-- kg:end -->

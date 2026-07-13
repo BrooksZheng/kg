@@ -17,6 +17,16 @@ export const END = "<!-- kg:end -->";
 const SINKABLE = new Set(["project_knowledge", "procedure"]);
 const ROOT_CONTRACT = new Set(["project_contract", "executable_constraint"]);
 
+// kg infrastructure paths must never receive scoped AGENTS.md blocks — they
+// ship inside skill packages or get vendored into them (KN-0004). Sinking here
+// would land a non-functional file on consumers (`npx skills add`, --copy).
+const SINK_DENY_PREFIXES = ["skills/", ".agents/skills/", "protocol/", "scripts/lib/"];
+
+function isDeniedSinkDir(sinkDir) {
+  const norm = `${String(sinkDir).replace(/\\/g, "/").replace(/\/+$/, "")}/`;
+  return SINK_DENY_PREFIXES.some((p) => norm === p || norm.startsWith(p));
+}
+
 function sanitizeClaim(s) {
   return String(s).replaceAll("<!--", "<! --").replaceAll("-->", "-- >").replace(/\r?\n/g, " ");
 }
@@ -61,7 +71,9 @@ function entrySinkDir(entry) {
   if (!SINKABLE.has(entry.category)) return null;
   const paths = entry.scope?.paths;
   if (!Array.isArray(paths) || paths.length === 0) return null;
-  return sinkDirFromPattern(paths[0]);
+  const dir = sinkDirFromPattern(paths[0]);
+  if (!dir || isDeniedSinkDir(dir)) return null;
+  return dir;
 }
 
 function primaryDomain(entry) {
