@@ -1,0 +1,13 @@
+id: Q-20260713-002
+at: 2026-07-13T14:49:41Z
+kind: promotion
+category: project_contract
+claim: "Activate KN-0010: the two-layer doctrine — ledger layer is the stable product, render layer is a replaceable platform adapter; render patches are wear, recurring ledger patches are the failure alarm."
+evidence:
+  - { type: quote, ref: "human: 可以，写进 RFC-002 — confirming the doctrine after a plain-language re-alignment (OBS-20260713-015; RFC-002 §二 R10, confirmed)" }
+options: ["accept (promote to active)", reject]
+recommendation: "accept — the human confirmed the doctrine verbatim into RFC-002; this entry makes the patch-policy/alarm-condition contract discoverable from the index"
+entry: KN-0010
+source_observations: [OBS-20260713-015]
+resolution: pending
+resolution_note: null
