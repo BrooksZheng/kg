@@ -1,0 +1,10 @@
+id: OBS-20260713-008
+at: 2026-07-13T14:06:42Z
+source: human_decision
+claim: "rescope (changing a knowledge entry's placement carrier) becomes a legal compiler action alongside merge/demote/retire, so budget pressure no longer conflates valid-but-not-globally-relevant knowledge with knowledge that should be retired."
+context:
+  task: "rfc-002 interview: AGENTS.md carrier redesign and kg two-layer positioning"
+  paths: ["skills/kg-compile/**", protocol/routing.yaml]
+evidence:
+  - { type: quote, ref: "settled as a stated consequence of the atomic-storage and tiered-budget rulings (human: 那肯定是后者 / 选 b), announced in-session without objection — see docs/rfc-002-agents-md-compiled-artifact.md R3" }
+urgency: batch

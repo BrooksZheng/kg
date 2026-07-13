@@ -1,0 +1,11 @@
+id: OBS-20260713-015
+at: 2026-07-13T14:06:43Z
+source: human_decision
+claim: "kg's constitutional self-positioning is the two-layer doctrine: the ledger layer (schemas, authority ranking, lifecycle, queue, evidence/regret chain) is the product with a stability commitment; the render layer (folding, sinking, budgets, three-source assembly) is a platform-generation adapter expected to be replaced wholesale, whose patches count as normal wear, not debt."
+context:
+  task: "rfc-002 interview: AGENTS.md carrier redesign and kg two-layer positioning"
+  paths: [docs/rfc-002-agents-md-compiled-artifact.md, "protocol/**"]
+evidence:
+  - { type: quote, ref: "human: 可以，写进 RFC-002 — after asking for and receiving a plain-language re-alignment of the doctrine" }
+  - { type: quote, ref: "alarm condition recorded with the ruling: recurring patches to the ledger layer (schema/authority/lifecycle/queue semantics) are the true failure signal; render-layer patching is expected depreciation — see docs/rfc-002-agents-md-compiled-artifact.md section 2" }
+urgency: batch

@@ -1,0 +1,11 @@
+id: OBS-20260713-014
+at: 2026-07-13T14:06:43Z
+source: human_decision
+claim: "Line budgets are tiered: the root AGENTS.md and every nested managed block each carry their own budget, because a budget's purpose is to force subtraction/rescope pressure and that force must exist at every layer."
+context:
+  task: "rfc-002 interview: AGENTS.md carrier redesign and kg two-layer positioning"
+  paths: [scripts/lib/agents-block.mjs, scripts/lib/host.mjs]
+evidence:
+  - { type: quote, ref: "human: 选 b" }
+  - { type: quote, ref: "rejected: root-only budget, because an unbudgeted layer disables the render-failure alarm and nested blocks would become knowledge dumping grounds — see docs/rfc-002-agents-md-compiled-artifact.md R9" }
+urgency: batch

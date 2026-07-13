@@ -1,0 +1,12 @@
+id: OBS-20260713-007
+at: 2026-07-13T14:06:42Z
+source: human_decision
+claim: "scope.domains becomes effectively required on knowledge entries, with a human-governed controlled vocabulary, because folding/sinking/pointer-line economics all depend on domains being a slow variable."
+context:
+  task: "rfc-002 interview: AGENTS.md carrier redesign and kg two-layer positioning"
+  paths:
+    - protocol/knowledge.schema.yaml
+    - scripts/lib/agents-block.mjs
+evidence:
+  - { type: quote, ref: "human accepted the (a+) tiered rendering whose stated precondition was domains as de-facto required controlled vocabulary; human: 我选 a+ — see docs/rfc-002-agents-md-compiled-artifact.md R2" }
+urgency: batch

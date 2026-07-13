@@ -1,0 +1,11 @@
+id: OBS-20260713-011
+at: 2026-07-13T14:06:43Z
+source: human_decision
+claim: "Creating a new scope domain requires a human ruling via a kind:proposal queue item; reusing an existing domain is automatic — domain vocabulary stays a slow variable only because it is reviewed."
+context:
+  task: "rfc-002 interview: AGENTS.md carrier redesign and kg two-layer positioning"
+  paths: [protocol/routing.yaml, "skills/kg-compile/**"]
+evidence:
+  - { type: quote, ref: "human: b — new domains go to human review" }
+  - { type: quote, ref: "rejected: compiler-autonomous domain creation, because the compiler is a model-agnostic agent role whose naming taste drifts across sessions, re-creating fragmentation at the domain layer — see docs/rfc-002-agents-md-compiled-artifact.md R6" }
+urgency: batch

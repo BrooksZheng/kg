@@ -1,0 +1,11 @@
+id: OBS-20260713-010
+at: 2026-07-13T14:06:43Z
+source: human_decision
+claim: "Every sunk domain keeps a pointer line (domain name plus subtree path, no claim) in the root index, bounded by domain count, so all published knowledge stays reachable from root on any platform regardless of nested-AGENTS.md support."
+context:
+  task: "rfc-002 interview: AGENTS.md carrier redesign and kg two-layer positioning"
+  paths: [scripts/lib/agents-block.mjs]
+evidence:
+  - { type: quote, ref: "human: b — choosing root pointer lines as the platform fallback" }
+  - { type: quote, ref: "rejected: accepting discovery loss on platforms without nested support, because it breaks the publish-as-injection guarantee that is kg's core differentiator — see docs/rfc-002-agents-md-compiled-artifact.md R5" }
+urgency: batch
