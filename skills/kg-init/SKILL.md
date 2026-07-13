@@ -18,6 +18,15 @@ One command:
 node <plugin>/skills/kg-init/scripts/install.mjs [host-root] [--copy] [--threshold N] [--budget N]
 ```
 
+When the skills arrived via a registry installer (`npx skills add`), they
+already sit vendored under `.agents/skills/kg-*` — run the installer from
+there to complete the host wiring (skill discovery is detected as already in
+place and skipped):
+
+```bash
+node .agents/skills/kg-init/scripts/install.mjs
+```
+
 `host-root` defaults to `$KG_ROOT` or the current directory. The installer is
 **idempotent** — running it twice changes nothing the second time; it never
 duplicates the anchor block, never overwrites an existing `.kg/config.yaml`,
