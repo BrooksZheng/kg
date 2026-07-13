@@ -1,0 +1,10 @@
+id: OBS-20260713-003
+at: 2026-07-13T07:33:42Z
+source: task_outcome
+claim: "Node ESM resolves import.meta.url through symlinks, so argv[1]-vs-import.meta.url main-module checks must realpath argv[1] — otherwise symlink-installed scripts silently skip their CLI entrypoint (exit 0, no output)."
+context:
+  task: skills-add-support
+  paths: ["skills/*/scripts/**", scripts/lib/protocol.mjs]
+evidence:
+  - { type: log, ref: "check-threshold.mjs via /tmp/host-sym symlink printed nothing, exit 0; realpathSync(argv[1]) fixed it (commit c009c4c)" }
+urgency: batch

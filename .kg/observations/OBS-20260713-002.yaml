@@ -1,0 +1,14 @@
+id: OBS-20260713-002
+at: 2026-07-13T07:33:31Z
+source: task_outcome
+claim: "Registry installers (npx skills add) copy ONLY the skill directory, so scripts/lib/ and protocol/ must be committed vendored inside every skills/<name>/; scripts/sync-vendored.mjs regenerates them from the root source of truth and --check guards drift."
+context:
+  task: skills-add-support
+  paths:
+    - "skills/*/scripts/lib/**"
+    - "skills/*/protocol/**"
+    - scripts/sync-vendored.mjs
+evidence:
+  - { type: diff, ref: "commit c009c4c: vendored copies committed; skills CLI local-source install verified end-to-end in /tmp/host-npx" }
+  - { type: quote, ref: "vercel-labs/skills README: skill discovery walks skills/<name>/SKILL.md and installs the skill dir only" }
+urgency: batch
