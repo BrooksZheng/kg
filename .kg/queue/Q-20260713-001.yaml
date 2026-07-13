@@ -1,0 +1,13 @@
+id: Q-20260713-001
+at: 2026-07-13T14:49:41Z
+kind: promotion
+category: project_contract
+claim: "Activate KN-0009: knowledge entries stay atomic (one claim per entry); fragmentation is handled at the render layer; merge is reserved for true duplication/supersession."
+evidence:
+  - { type: quote, ref: "human: 那肯定是后者 — choosing section-level precision when asked what should happen if one section of an aggregated thick doc proves wrong (OBS-20260713-006; RFC-002 R1, confirmed)" }
+options: ["accept (promote to active)", reject]
+recommendation: "accept — RFC-002 R1 was explicitly ruled and confirmed by the human in the interview; the entry only republishes that ruling as a binding compile-time contract"
+entry: KN-0009
+source_observations: [OBS-20260713-006]
+resolution: accepted
+resolution_note: "human ruling 2026-07-13: 都接受 — promote KN-0009 to active as recommended"
