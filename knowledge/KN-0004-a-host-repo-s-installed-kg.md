@@ -9,7 +9,7 @@ evidence:
   - { type: diff, ref: "trial branch cursor/kg-trial-72da cc519e6bd7 - relocated from root checkout layout to .agents/skills vendored layout" }
 authority: user_explicit_constraint
 confidence: 0.95
-lifecycle: candidate
+lifecycle: active
 supersedes: null
 last_verified: 2026-07-12
 regret: null
