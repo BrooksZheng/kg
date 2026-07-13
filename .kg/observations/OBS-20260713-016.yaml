@@ -1,0 +1,11 @@
+id: OBS-20260713-016
+at: 2026-07-13T15:45:48Z
+source: agent_insight
+claim: "Karpathy's llm-wiki (gist, 2026) is the closest prior art to kg's compiler mental model and must join the RFC-001 section-8 competitive scan; kg differs on input stream (work-process signals vs external documents), consumption (publish-as-injection vs query), record unit (atomic claim with evidence/authority vs topic page), trust model (governed untrusted compiler vs trusted librarian), and knowledge endpoint (prose graduates into machine constraints vs stays prose)."
+context:
+  task: "rfc-002 interview follow-up: positioning kg against Karpathy's llm-wiki pattern"
+  paths: [docs/rfc-001-project-knowledge-growth-protocol.md]
+evidence:
+  - { type: quote, ref: "https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f — 'The human's job is to curate sources, direct the analysis, ask good questions... The LLM's job is everything else' (trusted-librarian stance, vs kg's protocol built on NOT trusting the compiler: no_change legality, forced conflict queue, mandatory subtraction/regret)" }
+  - { type: quote, ref: "human: 嗯啊，记下来吧 — endorsing the comparison conclusion for the next compile round; note llm-wiki's topic-page unit is exactly the storage-layer aggregation rejected in RFC-002 R1, correct for reading notes yet wrong for behavior-binding engineering knowledge" }
+urgency: batch
