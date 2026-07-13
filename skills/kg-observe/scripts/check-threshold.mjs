@@ -34,6 +34,18 @@ export function printStatus({ pending, fastTrack, threshold }) {
   }
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+// Compare realpaths: Node ESM resolves import.meta.url through symlinks, so a
+// symlink-installed skill (e.g. `npx skills add`, kg-init default mode) would
+// otherwise never match argv[1] and silently skip the main entrypoint.
+function isMain() {
+  if (!process.argv[1]) return false;
+  try {
+    return fs.realpathSync(process.argv[1]) === fileURLToPath(import.meta.url);
+  } catch {
+    return path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+  }
+}
+
+if (isMain()) {
   printStatus(pendingStatus(host.findHostRoot()));
 }

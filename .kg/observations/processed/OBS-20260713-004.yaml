@@ -1,0 +1,11 @@
+id: OBS-20260713-004
+at: 2026-07-13T07:49:44Z
+source: human_correction
+claim: "npx skills add owner/repo installs from the DEFAULT branch only — fixes on unmerged feature branches never reach consumers, and branch-URL installs fail for branch names containing a slash; test unmerged branches via a local clone (npx skills add /path/to/clone)."
+context:
+  task: skills-add-support
+  paths: ["skills/**", README.md]
+evidence:
+  - { type: quote, ref: "human: 执行命令还提示了错误 kg: error: cannot locate shared lib — installed from main which lacks the vendored copies" }
+  - { type: log, ref: "npx skills add https://github.com/BrooksZheng/kg/tree/cursor/skills-add-support-0cf1 -> fatal: Remote branch cursor not found (CLI splits branch at first slash)" }
+urgency: fast_track
