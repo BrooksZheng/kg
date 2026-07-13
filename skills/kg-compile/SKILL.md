@@ -85,11 +85,18 @@ live entry is contested, transition it to `conflicted`.
   `kind: promotion` queue item via `add-queue-item.mjs`. Never activate these
   yourself. For `executable_constraint`, put the concrete test/lint/CI
   proposal in the entry body.
-- **Always human-review**, whatever the category: any change to the AGENTS.md
-  managed block beyond re-rendering the index, and any proposal for a new
-  skill (e.g. a mature procedure graduating to a skill) — `kind: proposal`
-  queue item.
+- **Always human-review**, whatever the category: any hand-edit to `AGENTS.md`
+  beyond re-rendering, any proposal for a new skill (e.g. a mature procedure
+  graduating to a skill) — `kind: proposal` queue item, and any new
+  `scope.domains` value not in `protocol/domains.yaml` — `kind: proposal`
+  with category `needs_human_decision`, then `add-domain.mjs` after acceptance.
 - **Queue only** (`needs_human_decision`): `add-queue-item.mjs`; no entry.
+
+**Domain vocabulary (RFC-002 S2):** `add-entry.mjs` rejects unknown
+`scope.domains`. To propose a new domain: file a `kind: proposal` queue item
+claiming the domain name + description; on human acceptance run
+`add-domain.mjs <name> "<description>"`, sync vendored protocol copies in the
+plugin source if applicable, then publish entries using the new domain.
 
 Lifecycle changes (promote after a human accepts, demote, retire, merge,
 conflict) go through `transition-entry.mjs` — it machine-validates against
@@ -126,9 +133,11 @@ leave pointer-only reachability at root per RFC-002 R3/R4).
    `.kg/queue/` item with its recommendation. The checklist is the ASYNC
    path; when a human is present, run the ruling interview (§6) instead of
    ending on a checklist dump.
-3. Re-render the AGENTS.md managed block: `node .../render-agents.mjs`. If it
-   fails the line budget, that is the context-bloat alarm — go back to step 4
-   and subtract or rescope more; do not raise the budget.
+3. Re-render the full `AGENTS.md`: `node .../render-agents.mjs` (RFC-002 S3
+   assembles intent/layout/conventions + the kg managed block; `--check`
+   detects code-export drift). If any section budget fails, that is the
+   context-bloat alarm — go back to step 4 and subtract or rescope more; do
+   not raise the budget.
 4. Archive processed observations:
    `node .../archive-observations.mjs <OBS-id>...` (or `--all` if every
    pending observation was handled). Malformed/deferred ones stay in the
@@ -171,7 +180,8 @@ exactly how regret gets recorded.
 
 - Never edit files in `.kg/observations/` — the inbox is append-only; you
   only move processed files via `archive-observations.mjs`.
-- Never hand-edit the AGENTS.md managed block; edit entries and re-render.
+- Never hand-edit `AGENTS.md`; edit knowledge entries / section mapping and
+  re-render (`render-agents.mjs` writes the full document).
 - Never bypass `transition-entry.mjs` by editing `lifecycle:` by hand.
 - Conflicts always reach the queue: authority ranks, humans rule.
 - In a ruling interview, evidence is quoted verbatim, never paraphrased;

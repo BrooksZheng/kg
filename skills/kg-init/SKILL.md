@@ -30,7 +30,7 @@ node .agents/skills/kg-init/scripts/install.mjs
 `host-root` defaults to `$KG_ROOT` or the current directory. The installer is
 **idempotent** — running it twice changes nothing the second time; it never
 duplicates the anchor block, never overwrites an existing `.kg/config.yaml`,
-and never touches AGENTS.md content outside the anchors.
+and re-renders `AGENTS.md` as a full compiled document (RFC-002 S3).
 
 ## What gets installed
 
@@ -43,7 +43,7 @@ and never touches AGENTS.md content outside the anchors.
   queue/                 human ruling queue (git-native)
   reports/               compile reports with metrics
 knowledge/               knowledge entries = source of truth, git-tracked
-AGENTS.md                kg managed block planted between anchors
+AGENTS.md                full rendered document (intent/layout/conventions + kg block)
 .cursorignore            `.kg/` line added (best-effort secondary defense)
 .agents/skills/kg-*      canonical skill discovery (symlink or copy)
 .claude/skills/kg-*      Claude Code discovery — symlinks to .agents/skills/,

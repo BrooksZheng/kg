@@ -79,6 +79,9 @@ const record = {
 };
 
 const errors = protocol.validateRecord(record, knowledgeSchema);
+if (record.scope?.domains) {
+  errors.push(...protocol.validateScopeDomains(record.scope.domains));
+}
 if (errors.length) {
   console.error(`kg: entry rejected (${errors.length} error${errors.length > 1 ? "s" : ""}):`);
   for (const e of errors) console.error(`  - ${e}`);

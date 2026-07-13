@@ -1,0 +1,12 @@
+# kg protocol — Controlled Domain Vocabulary (RFC-002 R6 / S2)
+# scope.domains values MUST appear here. New domains require a kind: proposal
+# queue item and a human ruling; then add-domain.mjs appends the entry.
+
+kind: kg.domains
+version: 1
+
+domains:
+  protocol:
+    description: "KYAML schemas, record validation, and protocol machine surfaces"
+  skills:
+    description: "Skill packaging, install layout, distribution, and vendoring"

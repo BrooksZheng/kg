@@ -43,6 +43,9 @@ for (const file of files) {
     if (body.trim() === "") {
       errors.push("entry body is empty — the entry IS the reference doc; write the explanation");
     }
+    if (frontmatter.scope?.domains) {
+      errors.push(...protocol.validateScopeDomains(frontmatter.scope.domains));
+    }
   } catch (err) {
     errors = [err.message];
   }

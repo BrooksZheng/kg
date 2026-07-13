@@ -52,6 +52,8 @@ function loadActiveEntries(hostRoot) {
   return active;
 }
 
+export { loadActiveEntries, renderRootBlockLines };
+
 // Derive a host-relative directory from a scope path pattern.
 function sinkDirFromPattern(pattern) {
   let p = String(pattern);
@@ -241,13 +243,27 @@ function applyBlockAtFile(filePath, lines, budget, label, { check = false } = {}
   return true;
 }
 
-// Rewrite (or verify, with check=true) the managed block in the host's
-// AGENTS.md and every subdirectory block derived from sunk entries.
-export function applyBlock(hostRoot, { check = false } = {}) {
-  const paths = kgPaths(hostRoot);
+// Rewrite scoped subdirectory blocks derived from sunk entries.
+export function applyScopedBlocks(hostRoot, { check = false, sunkByDir } = {}) {
   const config = loadConfig(hostRoot);
   const subdirBudget = config.agents_block_budget_lines_subdir ?? CONFIG_DEFAULTS.agents_block_budget_lines_subdir;
+  const dirs = sunkByDir ?? renderRootBlockLines(hostRoot).sunkByDir;
+  let ok = true;
 
+  for (const [sinkDir, entries] of [...dirs.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+    const subLines = renderSubdirBlockLines(entries, sinkDir);
+    const subFile = path.join(hostRoot, sinkDir, "AGENTS.md");
+    if (!applyBlockAtFile(subFile, subLines, subdirBudget, `scoped block for ${sinkDir}`, { check })) {
+      ok = false;
+    }
+  }
+  return { ok, scopedCount: dirs.size, subdirBudget };
+}
+
+// Rewrite (or verify, with check=true) the kg managed block in AGENTS.md and
+// scoped subdirectory blocks. Prefer applyDocument (RFC-002 S3) for the full file.
+export function applyBlock(hostRoot, { check = false } = {}) {
+  const paths = kgPaths(hostRoot);
   const { lines, budget, activeCount, sunkByDir } = renderRootBlockLines(hostRoot);
   let ok = true;
 
@@ -259,15 +275,10 @@ export function applyBlock(hostRoot, { check = false } = {}) {
     ok = false;
   }
 
-  for (const [sinkDir, entries] of [...sunkByDir.entries()].sort(([a], [b]) => a.localeCompare(b))) {
-    const subLines = renderSubdirBlockLines(entries, sinkDir);
-    const subFile = path.join(hostRoot, sinkDir, "AGENTS.md");
-    if (!applyBlockAtFile(subFile, subLines, subdirBudget, `scoped block for ${sinkDir}`, { check })) {
-      ok = false;
-    }
-  }
+  const scoped = applyScopedBlocks(hostRoot, { check, sunkByDir });
+  if (!scoped.ok) ok = false;
 
-  const stats = `${lines.length}/${budget} root lines, ${activeCount} active entr${activeCount === 1 ? "y" : "ies"}, ${sunkByDir.size} scoped block${sunkByDir.size === 1 ? "" : "s"}`;
+  const stats = `${lines.length}/${budget} root lines, ${activeCount} active entr${activeCount === 1 ? "y" : "ies"}, ${scoped.scopedCount} scoped block${scoped.scopedCount === 1 ? "" : "s"}`;
 
   if (check) {
     if (!ok) process.exit(1);

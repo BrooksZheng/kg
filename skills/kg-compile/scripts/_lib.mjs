@@ -22,3 +22,4 @@ export const kyaml = await import(new URL("kyaml.mjs", libUrl).href);
 export const protocol = await import(new URL("protocol.mjs", libUrl).href);
 export const host = await import(new URL("host.mjs", libUrl).href);
 export const agentsBlock = await import(new URL("agents-block.mjs", libUrl).href);
+export const agentsAssembler = await import(new URL("agents-assembler.mjs", libUrl).href);

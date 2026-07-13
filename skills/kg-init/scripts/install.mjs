@@ -16,9 +16,8 @@
 // What it does:
 //   1. .kg/ tree: config.yaml (fresh installs only), observations/,
 //      observations/processed/, queue/, reports/ — plus knowledge/.
-//   2. AGENTS.md managed block: plants <!-- kg:begin/end --> anchors (creates
-//      the file if absent, appends if present — content outside the anchors
-//      is never touched) and renders the resident block.
+//   2. AGENTS.md: rendered full document (RFC-002 S3) — intent/layout/
+//      conventions sections + kg managed block. Created on first install.
 //   3. Platform ignore (best-effort secondary defense): adds `.kg/` to
 //      .cursorignore. The PRIMARY defense is the hard rule inside the block.
 //   4. Platform discovery: Cursor finds skills under .agents/skills/ —
@@ -28,7 +27,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { kyaml, host, agentsBlock } from "./_lib.mjs";
+import { kyaml, host, agentsAssembler } from "./_lib.mjs";
 
 const args = process.argv.slice(2);
 const copyMode = args.includes("--copy");
@@ -76,23 +75,10 @@ if (fs.existsSync(paths.config)) {
   log(`wrote .kg/config.yaml (threshold ${threshold}, AGENTS budget ${budget})`);
 }
 
-// --- 2. AGENTS.md anchors + render --------------------------------------------
+// --- 2. AGENTS.md full render (RFC-002 S3) ------------------------------------
 
-const { BEGIN, END } = agentsBlock;
-let agentsText = fs.existsSync(paths.agentsMd) ? fs.readFileSync(paths.agentsMd, "utf8") : null;
-if (agentsText === null) {
-  fs.writeFileSync(paths.agentsMd, `${BEGIN}\n${END}\n`);
-  log("created AGENTS.md with kg anchors");
-} else if (agentsText.includes(BEGIN) && agentsText.includes(END)) {
-  log("AGENTS.md anchors already present");
-} else if (agentsText.includes(BEGIN) || agentsText.includes(END)) {
-  host.fail("AGENTS.md has one anchor but not the other — repair it by hand, then re-run");
-} else {
-  const sep = agentsText.endsWith("\n") ? "\n" : "\n\n";
-  fs.writeFileSync(paths.agentsMd, `${agentsText}${sep}${BEGIN}\n${END}\n`);
-  log("appended kg anchors to existing AGENTS.md (existing content untouched)");
-}
-agentsBlock.applyBlock(hostRoot);
+agentsAssembler.applyDocument(hostRoot);
+log(`rendered AGENTS.md (full document) at ${path.relative(hostRoot, paths.agentsMd) || "AGENTS.md"}`);
 
 // --- 3. platform ignore (secondary defense) ------------------------------------
 

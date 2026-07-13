@@ -1,0 +1,16 @@
+# kg protocol — AGENTS.md section → source mapping (RFC-002 R8 / S3)
+# The full AGENTS.md is a rendered product assembled from these sections.
+# Hosts may override via .kg/config.yaml agents_sections_id later; default
+# is this file.
+
+kind: kg.agents_sections
+version: 1
+
+# Per-section line budgets (inclusive of heading lines). The kg managed block
+# budget remains agents_block_budget_lines in .kg/config.yaml.
+# KYAML: one inline map per list item (no multi-line list entries).
+sections:
+  - { id: intent, heading: "## Intent", source: intent_entries, optional: true, budget_lines: 12 }
+  - { id: layout, heading: "## Repository layout", source: code_export, exporter: node_repo_layout, budget_lines: 18 }
+  - { id: conventions, heading: "## Conventions", source: convention_entries, optional: true, budget_lines: 24 }
+  - { id: kg_index, heading: null, source: kg_managed_block }

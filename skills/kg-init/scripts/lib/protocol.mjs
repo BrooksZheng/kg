@@ -15,6 +15,10 @@ import { parse, KyamlError } from "./kyaml.mjs";
 const LIB_DIR = path.dirname(fileURLToPath(import.meta.url));
 const PROTOCOL_DIR = path.join(LIB_DIR, "..", "..", "protocol");
 
+export function protocolDir() {
+  return PROTOCOL_DIR;
+}
+
 export function loadProtocolFile(name) {
   const file = path.join(PROTOCOL_DIR, name);
   return parse(fs.readFileSync(file, "utf8"));
@@ -25,6 +29,41 @@ export const loadKnowledgeSchema = () => loadProtocolFile("knowledge.schema.yaml
 export const loadLifecycle = () => loadProtocolFile("lifecycle.yaml");
 export const loadAuthority = () => loadProtocolFile("authority.yaml");
 export const loadRouting = () => loadProtocolFile("routing.yaml");
+export const loadDomains = () => loadProtocolFile("domains.yaml");
+export const loadAgentsSections = () => loadProtocolFile("agents-sections.yaml");
+
+// Validate scope.domains against the controlled vocabulary (RFC-002 S2).
+export function validateScopeDomains(domains, vocabulary = loadDomains()) {
+  const errors = [];
+  if (!Array.isArray(domains) || domains.length === 0) {
+    errors.push("scope.domains: at least one domain required");
+    return errors;
+  }
+  const known = new Set(Object.keys(vocabulary.domains ?? {}));
+  for (const d of domains) {
+    if (!known.has(d)) {
+      errors.push(
+        `scope.domains: \`${d}\` is not in protocol/domains.yaml — file a kind: proposal queue item and get a human ruling, then run add-domain.mjs`,
+      );
+    }
+  }
+  return errors;
+}
+
+const DOMAINS_HEADER = `# kg protocol — Controlled Domain Vocabulary (RFC-002 R6 / S2)
+# scope.domains values MUST appear here. New domains require a kind: proposal
+# queue item and a human ruling; then add-domain.mjs appends the entry.
+
+`;
+
+export function saveDomains(vocab) {
+  const file = path.join(PROTOCOL_DIR, "domains.yaml");
+  fs.writeFileSync(
+    file,
+    DOMAINS_HEADER + requireKyaml().stringify({ kind: vocab.kind, version: vocab.version, domains: vocab.domains }),
+  );
+  return file;
+}
 
 // --- generic record validation against a schema's `fields` specs -----------
 // Spec paths: `field` (top level), `field.sub` (one-level nested map),
@@ -197,6 +236,8 @@ if (isMain()) {
     "lifecycle.yaml",
     "authority.yaml",
     "routing.yaml",
+    "domains.yaml",
+    "agents-sections.yaml",
   ];
   const docs = {};
   for (const f of files) {
@@ -228,6 +269,13 @@ if (isMain()) {
     const levels = String(kn.fields.authority.values).split("|");
     for (const l of levels) {
       if (!auth.ranking.includes(l)) problems.push(`authority: knowledge authority \`${l}\` missing from ranking`);
+    }
+  }
+  const domains = docs["domains.yaml"];
+  const knEntries = docs["knowledge.schema.yaml"];
+  if (domains && knEntries) {
+    if (!domains.domains || Object.keys(domains.domains).length === 0) {
+      problems.push("domains.yaml: vocabulary must list at least one domain");
     }
   }
   if (problems.length) {

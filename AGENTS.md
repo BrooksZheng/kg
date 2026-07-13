@@ -1,3 +1,43 @@
+# Project context
+
+_Rendered by kg — do not edit by hand. Supply changes via knowledge entries, observations, or `protocol/agents-sections.yaml`; re-run render-agents.mjs._
+
+## Repository layout
+
+```text
+skills/         agent skills (kg-init, kg-observe, kg-compile)
+protocol/       schemas, lifecycle, routing, domains
+scripts/lib/    shared Node modules — source of truth
+knowledge/      compiled knowledge entries
+.kg/            pipeline state (never read during work tasks)
+docs/           RFC and design docs
+```
+
+## Conventions
+
+### KN-0003
+
+## Contract
+Two layout invariants keep skills runnable in both the plugin checkout and a
+vendored (`--copy`) install:
+1. Every skill script imports shared code through its local `_lib.mjs`
+   resolver (candidates: `../../../scripts/lib/`, then `./lib/`). Never
+   import `scripts/lib/*` by a hardcoded relative path from a skill script.
+2. `protocol/` is resolved as `<lib>/../../protocol`. Any new install mode or
+   repo reshuffle must preserve that relationship — this is exactly why
+
+### KN-0004
+
+## Contract
+Two layouts exist and must never be conflated:
+- **Plugin source repo** (development): `skills/`, `protocol/`, `scripts/lib/`
+  at the repo root. This is where kg itself is built.
+- **Installed host repo** (consumption): everything lives under
+  `.agents/skills/kg-*/` as self-contained vendored copies (each skill embeds
+  `scripts/lib/` and `protocol/`), produced by `kg-init --copy`. The host
+  root gains only `.kg/`, `knowledge/`, the AGENTS.md managed block, and the
+
+
 <!-- kg:begin -->
 kg (Project Knowledge Growth) — managed block, rendered from `knowledge/`. Do not edit by hand.
 
