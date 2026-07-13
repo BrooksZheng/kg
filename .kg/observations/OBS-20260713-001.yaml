@@ -1,0 +1,11 @@
+id: OBS-20260713-001
+at: 2026-07-13T06:59:52Z
+source: human_decision
+claim: "Human-present compile sessions collect queue rulings via an in-session interview - per item: one-line claim, verbatim evidence, options, recommendation; rulings execute immediately with the human's words in resolution_note. Hand-editing queue files stays as the async fallback; unattended sessions skip the interview."
+context:
+  task: "UX ruling on how humans deliver queue resolutions"
+  paths: ["skills/kg-compile/**"]
+evidence:
+  - { type: quote, ref: "human 2026-07-13: editing resolution in queue files means opening the file, understanding it alone, then asking the agent what it is - let the agent interview me instead, presenting evidence and recommendations" }
+  - { type: diff, ref: "kg-compile SKILL.md section 6 'Ruling interview' + hard rule: evidence quoted verbatim, ruling words recorded in resolution_note" }
+urgency: batch

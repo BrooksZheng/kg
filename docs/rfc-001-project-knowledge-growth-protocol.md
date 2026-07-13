@@ -9,6 +9,10 @@
   已记录偏离(`conflicted` 仅从 live 状态进入,理由见 `protocol/lifecycle.yaml`);
   同日纠正:kg-init 仅允许人工显式触发(`disable-model-invocation: true` +
   manual-only 描述),禁止模型自主调用
+- 增补记录:2026-07-13 裁决面谈(人提出)——人在场的编译会话以面谈形式收集裁决
+  (逐项呈现 claim/逐字证据/选项/推荐,口头裁决即时落盘并引用原话),queue 文件
+  保持 SoT 与异步兜底。属 D4「口头裁决,agent 代为落盘」语义内的 UX 完善,
+  非交互式 CLI
 - 分支:`cursor/knowledge-growth-plugin-72da`(orphan,与 main 无共同历史,不合并回 main)
 
 ---

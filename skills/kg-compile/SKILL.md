@@ -120,8 +120,9 @@ constraints (propose the constraint, then retire the prose once it lands).
    observations processed and their verdict/category mapping, entries
    added/updated, the subtraction answer, the four metrics, malformed
    observations needing repair, and the **ruling checklist** — every pending
-   `.kg/queue/` item with its recommendation, so the human can rule by
-   editing the files or by telling any agent.
+   `.kg/queue/` item with its recommendation. The checklist is the ASYNC
+   path; when a human is present, run the ruling interview (§6) instead of
+   ending on a checklist dump.
 3. Re-render the AGENTS.md managed block: `node .../render-agents.mjs`. If it
    fails the line budget, that is the context-bloat alarm — go back to step 4
    and subtract more; do not raise the budget.
@@ -130,6 +131,29 @@ constraints (propose the constraint, then retire the prose once it lands).
    pending observation was handled). Malformed/deferred ones stay in the
    inbox.
 5. Clear the round log: `node .../report-metrics.mjs --clear-round`.
+
+### 6. Ruling interview (when a human is present)
+
+The queue file is the RECORD; the conversation is the INTERFACE. Compile
+sessions are usually human-triggered, so end them by interviewing, not by
+telling the human to go read `.kg/queue/`:
+
+- Present pending queue items **one at a time** (more than 3: give a compact
+  ballot first — one line each — then expand items on request). For each
+  item present: the claim in one line; what changes if accepted (which
+  carrier it lands in, what it will bind); the evidence **quoted verbatim**
+  (never paraphrase — cite the queue file path so the human can audit); the
+  options; your recommendation and why.
+- Accept conversational rulings ("accept", "option 2", "reject because...").
+  "Defer" — or no answer — is always legal: the item stays pending; never
+  re-ask or broaden a deferred item in the same session.
+- Execute each ruling immediately: set `resolution`, record the human's
+  exact words in `resolution_note`, run `transition-entry.mjs`, re-render,
+  re-validate, and show the outcome before moving to the next item.
+- Unattended sessions: skip the interview — the report's ruling checklist
+  and the queue files are the async path. A human can rule later in ANY
+  session: an agent asked to "process the kg queue" (「处理裁决队列」)
+  follows this same interview procedure without running a compile round.
 
 ## Fast-track runs
 
@@ -147,3 +171,5 @@ exactly how regret gets recorded.
 - Never hand-edit the AGENTS.md managed block; edit entries and re-render.
 - Never bypass `transition-entry.mjs` by editing `lifecycle:` by hand.
 - Conflicts always reach the queue: authority ranks, humans rule.
+- In a ruling interview, evidence is quoted verbatim, never paraphrased;
+  the human's ruling words go into `resolution_note` for audit.
