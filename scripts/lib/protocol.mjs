@@ -116,6 +116,10 @@ function checkValue(value, spec, fieldKey, label, errors, ctx) {
     case "string_list": {
       if (!Array.isArray(value) || !value.every((v) => typeof v === "string" && v.trim() !== "")) {
         errors.push(`${label}: must be a list of non-empty strings`);
+        return;
+      }
+      if (spec.min_items !== undefined && value.length < spec.min_items) {
+        errors.push(`${label}: needs at least ${spec.min_items} item(s)`);
       }
       return;
     }

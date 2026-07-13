@@ -36,7 +36,8 @@ and never touches AGENTS.md content outside the anchors.
 
 ```text
 .kg/                     pipeline state — working agents MUST NOT read this
-  config.yaml            observation_threshold, agents_block_budget_lines, skills_path
+  config.yaml            observation_threshold, agents_block_budget_lines,
+                         agents_block_budget_lines_subdir, skills_path
   observations/          append-only inbox (kg-observe writes here)
   observations/processed/  compiled observations (kg-compile moves them here)
   queue/                 human ruling queue (git-native)

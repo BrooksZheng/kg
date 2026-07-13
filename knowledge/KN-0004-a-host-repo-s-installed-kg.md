@@ -4,6 +4,7 @@ claim: "A host repo's installed kg layout is .agents/skills/kg-* self-contained 
 category: project_contract
 scope:
   paths: ["skills/kg-init/**", README.md]
+  domains: [skills]
 evidence:
   - { type: observation, ref: OBS-20260712-010 }
   - { type: diff, ref: "trial branch cursor/kg-trial-72da cc519e6bd7 - relocated from root checkout layout to .agents/skills vendored layout" }

@@ -42,13 +42,15 @@ function canonical(p) {
   }
 }
 
+const VENDOR_SKIP_NAMES = new Set(["AGENTS.md"]);
+
 function listFilesRecursive(dir, base = dir) {
   if (!fs.existsSync(dir)) return [];
   const out = [];
   for (const entry of fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) out.push(...listFilesRecursive(full, base));
-    else out.push(path.relative(base, full));
+    else if (!VENDOR_SKIP_NAMES.has(entry.name)) out.push(path.relative(base, full));
   }
   return out;
 }
@@ -84,7 +86,10 @@ for (const name of SKILL_NAMES) {
       console.error(`kg: ${relDest} DRIFTED — ${problems.join(", ")}`);
     } else {
       fs.rmSync(dest, { recursive: true, force: true });
-      fs.cpSync(src, dest, { recursive: true });
+      fs.cpSync(src, dest, {
+        recursive: true,
+        filter: (srcPath) => path.basename(srcPath) !== "AGENTS.md",
+      });
       console.log(`kg: refreshed ${relDest} (${problems.length} difference${problems.length === 1 ? "" : "s"})`);
     }
   }

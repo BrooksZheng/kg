@@ -4,6 +4,7 @@ claim: "Skill scripts must reach shared code only via the _lib.mjs resolver, and
 category: project_contract
 scope:
   paths: ["skills/*/scripts/**", "scripts/lib/**", "protocol/**"]
+  domains: [skills]
 evidence:
   - { type: observation, ref: OBS-20260712-002 }
   - { type: observation, ref: OBS-20260712-004 }

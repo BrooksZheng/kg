@@ -23,6 +23,7 @@ export function findHostRoot(cwd = process.cwd()) {
 export const CONFIG_DEFAULTS = {
   observation_threshold: 5,
   agents_block_budget_lines: 30,
+  agents_block_budget_lines_subdir: 20,
 };
 
 export function loadConfig(hostRoot) {

@@ -106,12 +106,15 @@ item whose `resolution` is no longer `pending`, execute the ruling
 ### 4. Subtraction duty (mandatory)
 
 Every compile run MUST explicitly answer: **"what did we merge / demote /
-retire this round?"** An empty answer is allowed but must be written in the
+retire / rescope this round?"** An empty answer is allowed but must be written in the
 report — silence is a protocol violation. Actively look for: entries
 superseded by newer ones (merge: archive the loser with `--superseded-by`),
 entries that proved wrong (demote with `--regret`), deprecated entries past
 their usefulness (retire to archived), prose entries that became machine
-constraints (propose the constraint, then retire the prose once it lands).
+constraints (propose the constraint, then retire the prose once it lands),
+entries that fail the line budget (rescope: move global claim lines toward
+domain-folded rows, sink path-scoped knowledge to subdirectory blocks, or
+leave pointer-only reachability at root per RFC-002 R3/R4).
 
 ### 5. Report, render, archive
 
@@ -125,7 +128,7 @@ constraints (propose the constraint, then retire the prose once it lands).
    ending on a checklist dump.
 3. Re-render the AGENTS.md managed block: `node .../render-agents.mjs`. If it
    fails the line budget, that is the context-bloat alarm — go back to step 4
-   and subtract more; do not raise the budget.
+   and subtract or rescope more; do not raise the budget.
 4. Archive processed observations:
    `node .../archive-observations.mjs <OBS-id>...` (or `--all` if every
    pending observation was handled). Malformed/deferred ones stay in the

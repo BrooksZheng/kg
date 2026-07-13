@@ -4,6 +4,7 @@ claim: "Record scripts validate the RAW input first (rejecting unknown fields), 
 category: project_knowledge
 scope:
   paths: ["skills/*/scripts/*.mjs", scripts/lib/kyaml.mjs]
+  domains: [protocol]
 evidence:
   - { type: observation, ref: OBS-20260712-003 }
   - { type: observation, ref: OBS-20260712-007 }

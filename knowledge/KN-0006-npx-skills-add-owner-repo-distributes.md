@@ -4,6 +4,7 @@ claim: "npx skills add owner/repo distributes the repo's DEFAULT branch only; un
 category: project_knowledge
 scope:
   paths: ["skills/**", README.md]
+  domains: [skills]
 evidence:
   - { type: observation, ref: OBS-20260713-004 }
   - { type: quote, ref: "human 2026-07-13: 执行命令还提示了错误 kg: error: cannot locate shared lib — real-world npx skills add pulled main, which predates the vendored copies" }

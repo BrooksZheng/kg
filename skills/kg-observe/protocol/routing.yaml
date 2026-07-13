@@ -44,9 +44,10 @@ categories:
 always_human_review:
   - "any change to the AGENTS.md managed block beyond re-rendering the index from active entries"
   - "proposing a new skill (e.g. a procedure graduating to a skill)"
+  - "proposing a new scope.domains vocabulary entry (kind: proposal queue item — see S2 domains.yaml)"
 
 # Routing actions a compile run may take per entry:
-actions: [add, update, merge, demote, retire]
+actions: [add, update, merge, demote, retire, rescope]
 
 # Legal `resolution` values on .kg/queue/ items. Anything else is a typo —
 # the metrics script warns, because a misspelled ruling (e.g. `accept`)
@@ -54,6 +55,6 @@ actions: [add, update, merge, demote, retire]
 queue_resolutions: [pending, accepted, rejected]
 
 # Subtraction duty: every compile run MUST explicitly answer "what did we
-# merge / demote / retire this round". An empty answer is allowed but must be
+# merge / demote / retire / rescope this round". An empty answer is allowed but must be
 # stated in the report — silence is a protocol violation.
 subtraction_duty: true

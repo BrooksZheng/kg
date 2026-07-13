@@ -26,7 +26,7 @@ fields:
   category: { type: enum, required: true, values: "project_knowledge|procedure|project_contract|executable_constraint" }
   scope: { type: map, required: true }
   scope.paths: { type: string_list, required: false }
-  scope.domains: { type: string_list, required: false }
+  scope.domains: { type: string_list, required: true, min_items: 1 }
   evidence: { type: map_list, required: true, min_items: 1 }
   evidence[].type: { type: enum, required: true, values: "diff|test|log|quote|observation" }
   evidence[].ref: { type: string, required: true }

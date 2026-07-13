@@ -4,6 +4,7 @@ claim: "Destructive refresh (rm-then-copy) must first prove src and dest differ 
 category: project_knowledge
 scope:
   paths: [skills/kg-init/scripts/install.mjs]
+  domains: [skills]
 evidence:
   - { type: observation, ref: OBS-20260712-006 }
   - { type: observation, ref: OBS-20260712-008 }

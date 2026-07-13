@@ -4,6 +4,7 @@ claim: "KYAML inline maps cannot contain lists; schema field specs encode enums 
 category: project_knowledge
 scope:
   paths: ["protocol/**", scripts/lib/kyaml.mjs]
+  domains: [protocol]
 evidence:
   - { type: observation, ref: OBS-20260712-001 }
   - { type: quote, ref: "scripts/lib/kyaml.mjs splitItems() rejects nested inline collections by design" }
