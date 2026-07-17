@@ -1,0 +1,10 @@
+id: OBS-20260717-002
+at: 2026-07-17T16:16:46Z
+source: agent_insight
+claim: "The always-loaded kg render target (the AGENTS.md managed block) must stay a compact pointer index with detail lazy-loaded from knowledge/ entries, because model instruction compliance degrades as the always-on instruction count grows — this is the external rationale behind the render-layer budget mechanism."
+context:
+  task: harness-engineering-text-review
+  paths: ["knowledge/**"]
+evidence:
+  - { type: quote, ref: "human-shared harness-engineering analysis (translated from Chinese): beyond roughly 150 instructions model compliance decays markedly; the ideal AGENTS.md is a pointer file of under 50 lines with detail loaded on demand into skills and subdirectory files" }
+urgency: batch
