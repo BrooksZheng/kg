@@ -1,0 +1,10 @@
+id: OBS-20260717-001
+at: 2026-07-17T16:16:46Z
+source: agent_insight
+claim: "kg rendered surfaces and knowledge entries should prefer pointer-form constraints (file paths, commands, entry links) over descriptive prose, because pointer constraints fail loudly like a 404 when they rot while prose constraints rot silently — design for rot."
+context:
+  task: harness-engineering-text-review
+  paths: ["knowledge/**", "skills/kg-compile/**"]
+evidence:
+  - { type: quote, ref: "human-shared harness-engineering analysis (translated from Chinese): documentation-style constraints rot silently; pointer-style constraints (pointing at file paths, commands) report loudly like a 404 when they rot — deliberately choose the form that rots loudly" }
+urgency: batch

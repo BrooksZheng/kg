@@ -1,0 +1,10 @@
+id: OBS-20260717-003
+at: 2026-07-17T16:16:46Z
+source: agent_insight
+claim: "kg likely needs an entropy-management (GC) mechanism in its lifecycle: entries that no task ever triggers should become candidates for pruning, sinking, or archiving, because agent-produced knowledge accumulates faster than it gets cleaned."
+context:
+  task: harness-engineering-text-review
+  paths: ["protocol/**", "skills/kg-compile/**"]
+evidence:
+  - { type: quote, ref: "human-shared harness-engineering analysis (translated from Chinese): AI produces code faster than humans refactor it; teams deploy dedicated cleanup agents to prune dead code and stale docs — the harness needs its own GC mechanism; periodically delete rules the agent never triggered" }
+urgency: batch

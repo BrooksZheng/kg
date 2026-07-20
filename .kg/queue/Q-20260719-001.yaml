@@ -1,0 +1,16 @@
+id: Q-20260719-001
+at: 2026-07-19T05:54:32Z
+kind: proposal
+category: needs_human_decision
+claim: "Add an entropy-management (GC) mechanism to the kg lifecycle: entries that no task ever cites/triggers become candidates for pruning, sinking, or archiving."
+evidence:
+  - { type: quote, ref: "OBS-20260717-003 / human-shared harness-engineering analysis (translated from Chinese): AI produces code faster than humans refactor it; teams deploy dedicated cleanup agents to prune dead code and stale docs — the harness needs its own GC mechanism; periodically delete rules the agent never triggered" }
+options:
+  - "accept minimal: add a staleness sweep to the compile subtraction step — flag entries whose last_verified is older than N rounds/days as retire/demote candidates in the report (no new telemetry)"
+  - "accept full: design usage-tracking (record when a work task reads an entry) so never-triggered entries are detected mechanically — requires new instrumentation, conflicts with kg's zero-hook pure-skill form"
+  - "reject: the existing per-round subtraction duty already covers GC; a dedicated mechanism is premature at 13 entries"
+recommendation: "option 1 (minimal staleness sweep) — the subtraction duty already forces the question every round but gives the compiler no signal to answer it with; last_verified staleness is computable from existing ledger fields, needs no telemetry, and stays render/report-layer (normal wear per KN-0010). Full usage-tracking (option 2) contradicts the zero-hook skill form and should wait for real fleet evidence."
+entry: null
+source_observations: [OBS-20260717-003]
+resolution: pending
+resolution_note: null
