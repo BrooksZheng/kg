@@ -1,0 +1,11 @@
+id: OBS-20260724-001
+at: 2026-07-24T15:11:58Z
+source: task_outcome
+claim: "SKILL.md frontmatter description values that contain colon-space must be quoted; otherwise npx skills add YAML-parses fail and silently skip the skill (e.g. MANUAL INVOCATION ONLY:)."
+context:
+  task: fix-kg-init-skills-cli-discovery
+  paths: ["skills/*/SKILL.md"]
+evidence:
+  - { type: log, ref: "npx skills add brookszheng/kg --list: Skipped kg-init/SKILL.md — Nested mappings are not allowed in compact mappings at line 2, column 14; Found 3 skills" }
+  - { type: diff, ref: "skills/kg-init/SKILL.md: quote description containing MANUAL INVOCATION ONLY:" }
+urgency: batch

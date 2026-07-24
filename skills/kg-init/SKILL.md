@@ -1,6 +1,6 @@
 ---
 name: kg-init
-description: Install and set up the kg (Project Knowledge Growth) pipeline and optional project-document profiles in a host repository. MANUAL INVOCATION ONLY: run this skill exclusively when a human explicitly asks to set up, install, initialize, configure, or repair kg, knowledge growth, a project documentation baseline, or the brownfield bootstrap flow. Never auto-trigger it from inferred context; report a broken or missing install and wait for explicit human approval. The installer is idempotent and preserves existing project documents.
+description: "Install and set up the kg (Project Knowledge Growth) pipeline and optional project-document profiles in a host repository. MANUAL INVOCATION ONLY: run this skill exclusively when a human explicitly asks to set up, install, initialize, configure, or repair kg, knowledge growth, a project documentation baseline, or the brownfield bootstrap flow. Never auto-trigger it from inferred context; report a broken or missing install and wait for explicit human approval. The installer is idempotent and preserves existing project documents."
 disable-model-invocation: true
 ---
 
