@@ -1,0 +1,4 @@
+interface:
+  display_name: "KG Scan"
+  short_description: "Bootstrap project docs from existing code"
+  default_prompt: "Use $kg-scan to inspect this existing codebase and draft evidence-backed architecture, API, glossary, and documentation inventory files."

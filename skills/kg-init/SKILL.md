@@ -1,90 +1,114 @@
 ---
 name: kg-init
-description: Install the kg (Project Knowledge Growth) pipeline into a host repository. MANUAL INVOCATION ONLY — run this skill exclusively when a human explicitly asks to set up / install / initialize / repair kg (or "knowledge growth", "知识管道") in a repo. Never auto-trigger it from inferred context (missing .kg/ directories, damaged anchors, etc.); if you detect a broken install, report it to the human and wait for their explicit go-ahead. The installer is idempotent and safe to re-run.
+description: Install and set up the kg (Project Knowledge Growth) pipeline and optional project-document profiles in a host repository. MANUAL INVOCATION ONLY: run this skill exclusively when a human explicitly asks to set up, install, initialize, configure, or repair kg, knowledge growth, a project documentation baseline, or the brownfield bootstrap flow. Never auto-trigger it from inferred context; report a broken or missing install and wait for explicit human approval. The installer is idempotent and preserves existing project documents.
 disable-model-invocation: true
 ---
 
-# kg-init — install kg into a host repo
+# kg-init
 
-> **Manual trigger only.** Installing kg mutates the host repo's `AGENTS.md`,
-> ignore files, and skill wiring — that is a human decision. Platforms that
-> honor `disable-model-invocation` enforce this mechanically; on platforms
-> that don't (Cursor, Codex), the description above is the binding rule:
-> an explicit human request is the only valid trigger.
+Installing kg mutates the host repository's `AGENTS.md`, ignore files, skill
+wiring, and optional document baseline. Require an explicit human request.
 
-One command:
+## Setup interview
+
+Before a first install, resolve two choices. Ask only when the user has not
+already provided the answer:
+
+1. Project stage: `greenfield` or `brownfield`.
+2. Document profile: `lean`, `standard`, or `none`.
+
+Recommend `standard` for a normal long-lived project. Recommend `lean` for a
+small or short-lived project. Use `none` when the host already has a deliberate
+documentation system and only needs KG wiring.
+
+For brownfield, finish installation first, then continue with `kg-scan`.
+Semantic scanning stays outside the deterministic installer.
+
+## Install
 
 ```bash
-node <plugin>/skills/kg-init/scripts/install.mjs [host-root] [--copy] [--threshold N] [--budget N]
+node <plugin>/skills/kg-init/scripts/install.mjs [host-root] [--copy] \
+  [--threshold N] [--budget N] \
+  [--docs-profile none|lean|standard] \
+  [--project-stage greenfield|brownfield]
 ```
 
-When the skills arrived via a registry installer (`npx skills add`), they
-already sit vendored under `.agents/skills/kg-*` — run the installer from
-there to complete the host wiring (skill discovery is detected as already in
-place and skipped):
+When registry installation already placed the skills under `.agents/skills/`,
+run:
 
 ```bash
-node .agents/skills/kg-init/scripts/install.mjs
+node .agents/skills/kg-init/scripts/install.mjs \
+  --docs-profile standard --project-stage brownfield
 ```
 
-`host-root` defaults to `$KG_ROOT` or the current directory. The installer is
-**idempotent** — running it twice changes nothing the second time; it never
-duplicates the anchor block, never overwrites an existing `.kg/config.yaml`,
-and never touches AGENTS.md content outside the anchors.
+`host-root` defaults to `$KG_ROOT` or the current directory. A direct script
+call defaults to `--docs-profile none` for upgrade compatibility. The Setup
+interview should pass the selected profile explicitly.
 
-## What gets installed
+The installer is idempotent. It never duplicates the managed block, overwrites
+`.kg/config.yaml`, replaces an existing project document, or changes
+`AGENTS.md` content outside the anchors.
+
+## Installed layout
 
 ```text
-.kg/                     pipeline state — working agents MUST NOT read this
-  config.yaml            observation_threshold, agents_block_budget_lines, skills_path
-  observations/          append-only inbox (kg-observe writes here)
-  observations/processed/  compiled observations (kg-compile moves them here)
-  queue/                 human ruling queue (git-native)
-  reports/               compile reports with metrics
-knowledge/               knowledge entries = source of truth, git-tracked
-AGENTS.md                kg managed block planted between anchors
-.cursorignore            `.kg/` line added (best-effort secondary defense)
-.agents/skills/kg-*      canonical skill discovery (symlink or copy)
-.claude/skills/kg-*      Claude Code discovery — symlinks to .agents/skills/,
-                         only when the host shows Claude markers
-CLAUDE.md                `@AGENTS.md` import ensured (Claude-marker hosts only)
+.kg/                       pipeline state; working agents MUST NOT read this
+  config.yaml
+  observations/
+  observations/processed/
+  queue/
+  reports/
+knowledge/                 atomic compiled knowledge
+docs/                      direct-authoring project documents when selected
+  README.md                document map and lifecycle contract
+  architecture/
+  decisions/
+  rfcs/                    standard profile
+  glossary.md
+  standards/               standard profile
+  development.md           standard profile
+AGENTS.md                  kg managed block
+.cursorignore
+.agents/skills/kg-*
+.claude/skills/kg-*        Claude-marker hosts only
+CLAUDE.md                  Claude-marker hosts only
 ```
 
-## The managed block and read isolation
+## Direct document authoring
 
-The installer plants `<!-- kg:begin -->` / `<!-- kg:end -->` anchors in the
-host `AGENTS.md` (creating the file if absent, appending if present) and
-renders the resident block: the `.kg/` read-isolation hard rule, pointers to
-kg-observe / kg-compile, and an index of active knowledge entries.
+Files under `docs/` are normal project collaboration artifacts. Humans and
+agents may write complete ADRs, RFCs, MVP plans, architecture documents, and
+standards there directly. Observation and compilation do not gate drafting.
 
-The read-isolation rule is the system's main defense: `.kg/` holds
-**uncompiled, unverified claims** — a working agent reading them mid-task
-injects unreviewed knowledge past the entire compile → tier → publish
-pipeline. Writes go only through kg-observe; reads happen only in kg-compile
-sessions. The `.cursorignore` entry is a secondary, best-effort defense only
-(ignore semantics differ per platform — never rely on it alone).
+Registered documents use `protocol/project-document.schema.yaml`. Only
+documents marked `accepted` after a direct human ruling become kg-compile
+inputs. Ordinary Markdown remains valid and is ignored by Compile.
+
+## Read isolation
+
+The managed block tells work agents never to read `.kg/`. It contains
+uncompiled claims and pipeline state. Writes go through kg-observe; reads
+happen only in kg-compile sessions. `.cursorignore` is a secondary defense.
+
+Project documents live under `docs/`, remain visible to work agents, and are
+the normal collaboration surface.
 
 ## Platform discovery
 
-- **Cursor**: skills are discoverable under `.agents/skills/`. Default is a
-  relative symlink to the plugin checkout; pass `--copy` to vendor
-  self-contained copies (each copied skill embeds `scripts/lib/` and
-  `protocol/`) when the host repo cannot reference the plugin directory.
-- **Codex**: no wiring needed — the AGENTS.md managed block is injected every
-  session and its pointer lines lead to the skill files.
-- **Claude Code**: reads `CLAUDE.md` (not `AGENTS.md`) and discovers skills
-  under `.claude/skills/`. When the host has a `.claude/` dir or a
-  `CLAUDE.md`, the installer symlinks `.claude/skills/kg-*` to the canonical
-  `.agents/skills/` copies (symlinks planted by `npx skills add` are
-  recognized and left alone) and ensures `CLAUDE.md` carries the officially
-  recommended `@AGENTS.md` import so the managed block reaches Claude
-  sessions. Hosts without Claude markers are left untouched.
-- A new platform = a new discovery path only; no logic changes.
+- Cursor discovers `.agents/skills/`.
+- Codex follows pointers in the AGENTS managed block.
+- Claude Code uses `.claude/skills/` and imports AGENTS.md through CLAUDE.md
+  when the host already shows Claude markers.
+
+The installer wires all four skills: kg-init, kg-observe, kg-compile, and
+kg-scan. Symlink, copy, and registry layouts remain self-contained.
 
 ## After installing
 
-Tell the human (in their language) where things landed and what happens
-next: agents record observations at task end and on corrections
-(kg-observe); when the pending count reaches the threshold, a compile
-session (kg-compile) turns them into knowledge entries and re-renders the
-AGENTS.md index. All state is git-tracked — commit the installed files.
+Tell the human what was created and which existing files were preserved.
+
+- Greenfield: begin normal work and use kg-observe for reusable task signals.
+- Brownfield: run kg-scan to draft architecture, API, glossary, and document
+  inventory files from the existing code.
+- Compile: run kg-compile when observations are due or accepted project
+  documents need publication.

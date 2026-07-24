@@ -19,7 +19,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const SKILL_NAMES = ["kg-init", "kg-observe", "kg-compile"];
+const SKILL_NAMES = ["kg-init", "kg-observe", "kg-compile", "kg-scan"];
 const SOURCES = [
   { src: path.join(ROOT, "scripts", "lib"), destRel: path.join("scripts", "lib") },
   { src: path.join(ROOT, "protocol"), destRel: "protocol" },

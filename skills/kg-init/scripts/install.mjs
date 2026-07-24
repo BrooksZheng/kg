@@ -4,7 +4,8 @@
 //
 // Usage:
 //   node skills/kg-init/scripts/install.mjs [host-root] [--copy] \
-//     [--threshold N] [--budget N]
+//     [--threshold N] [--budget N] [--docs-profile PROFILE] \
+//     [--project-stage STAGE]
 //
 //   host-root    defaults to $KG_ROOT or cwd
 //   --copy       copy skills into .agents/skills/ instead of symlinking
@@ -12,6 +13,8 @@
 //                e.g. vendoring kg into a repo that ships without it)
 //   --threshold  observation_threshold for a fresh config (default 5)
 //   --budget     agents_block_budget_lines for a fresh config (default 30)
+//   --docs-profile  none | lean | standard (default none for compatibility)
+//   --project-stage greenfield | brownfield (default greenfield)
 //
 // What it does:
 //   1. .kg/ tree: config.yaml (fresh installs only), observations/,
@@ -39,16 +42,28 @@ function flagValue(name, fallback) {
   if (!Number.isInteger(v) || v <= 0) host.fail(`${name} needs a positive integer`);
   return v;
 }
+function enumFlag(name, fallback, allowed) {
+  const i = args.indexOf(name);
+  if (i < 0) return fallback;
+  const value = args[i + 1];
+  if (!allowed.includes(value)) host.fail(`${name} must be one of: ${allowed.join(" | ")}`);
+  return value;
+}
 const threshold = flagValue("--threshold", host.CONFIG_DEFAULTS.observation_threshold);
 const budget = flagValue("--budget", host.CONFIG_DEFAULTS.agents_block_budget_lines);
-const positional = args.filter((a, i) => !a.startsWith("--") && args[i - 1] !== "--threshold" && args[i - 1] !== "--budget");
+const docsProfile = enumFlag("--docs-profile", "none", ["none", "lean", "standard"]);
+const projectStage = enumFlag("--project-stage", "greenfield", ["greenfield", "brownfield"]);
+const valueFlags = new Set(["--threshold", "--budget", "--docs-profile", "--project-stage"]);
+const positional = args.filter((a, i) => !a.startsWith("--") && !valueFlags.has(args[i - 1]));
 const hostRoot = path.resolve(positional[0] ?? process.env.KG_ROOT ?? process.cwd());
 
 if (!fs.existsSync(hostRoot)) host.fail(`host root does not exist: ${hostRoot}`);
 
 const SCRIPTS_DIR = path.dirname(fileURLToPath(import.meta.url));
+const SKILL_ROOT = path.resolve(SCRIPTS_DIR, "..");
 const PLUGIN_ROOT = path.resolve(SCRIPTS_DIR, "..", "..", "..");
-const SKILL_NAMES = ["kg-init", "kg-observe", "kg-compile"];
+const DOC_TEMPLATES_DIR = path.join(SKILL_ROOT, "assets", "project-docs");
+const SKILL_NAMES = ["kg-init", "kg-observe", "kg-compile", "kg-scan"];
 const paths = host.kgPaths(hostRoot);
 const log = (msg) => console.log(`kg: ${msg}`);
 
@@ -76,7 +91,54 @@ if (fs.existsSync(paths.config)) {
   log(`wrote .kg/config.yaml (threshold ${threshold}, AGENTS budget ${budget})`);
 }
 
-// --- 2. AGENTS.md anchors + render --------------------------------------------
+// --- 2. direct-authoring project documents -------------------------------------
+
+const DOCUMENT_PROFILES = {
+  none: [],
+  lean: [
+    "docs/README.md",
+    "docs/architecture/overview.md",
+    "docs/decisions/README.md",
+    "docs/decisions/0000-template.md",
+    "docs/glossary.md",
+  ],
+  standard: [
+    "docs/README.md",
+    "docs/architecture/overview.md",
+    "docs/decisions/README.md",
+    "docs/decisions/0000-template.md",
+    "docs/glossary.md",
+    "docs/rfcs/README.md",
+    "docs/rfcs/0000-template.md",
+    "docs/standards/README.md",
+    "docs/development.md",
+  ],
+};
+
+if (docsProfile !== "none") {
+  if (!fs.existsSync(DOC_TEMPLATES_DIR)) host.fail(`project document templates missing: ${DOC_TEMPLATES_DIR}`);
+  const replacements = {
+    "{{PROJECT_NAME}}": path.basename(hostRoot),
+    "{{PROJECT_STAGE}}": projectStage,
+    "{{CREATED_DATE}}": new Date().toISOString().slice(0, 10),
+  };
+  for (const rel of DOCUMENT_PROFILES[docsProfile]) {
+    const src = path.join(DOC_TEMPLATES_DIR, rel);
+    const dest = path.join(hostRoot, rel);
+    if (!fs.existsSync(src)) host.fail(`project document template missing: ${src}`);
+    if (fs.existsSync(dest)) {
+      log(`${rel} exists; left untouched`);
+      continue;
+    }
+    let content = fs.readFileSync(src, "utf8");
+    for (const [from, to] of Object.entries(replacements)) content = content.replaceAll(from, to);
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.writeFileSync(dest, content);
+    log(`created ${rel} (${docsProfile} document profile)`);
+  }
+}
+
+// --- 3. AGENTS.md anchors + render --------------------------------------------
 
 const { BEGIN, END } = agentsBlock;
 let agentsText = fs.existsSync(paths.agentsMd) ? fs.readFileSync(paths.agentsMd, "utf8") : null;
@@ -94,7 +156,7 @@ if (agentsText === null) {
 }
 agentsBlock.applyBlock(hostRoot);
 
-// --- 3. platform ignore (secondary defense) ------------------------------------
+// --- 4. platform ignore (secondary defense) ------------------------------------
 
 const cursorignore = path.join(hostRoot, ".cursorignore");
 const ignoreLine = ".kg/";
@@ -110,7 +172,7 @@ if (existing.split(/\r?\n/).some((l) => l.trim() === ignoreLine)) {
   log("added .kg/ to .cursorignore (best-effort secondary defense)");
 }
 
-// --- 4. platform discovery wiring -----------------------------------------------
+// --- 5. platform discovery wiring -----------------------------------------------
 
 const agentsSkillsDir = path.join(hostRoot, ".agents", "skills");
 fs.mkdirSync(agentsSkillsDir, { recursive: true });
@@ -173,7 +235,7 @@ for (const name of SKILL_NAMES) {
     } catch {
       if (fs.existsSync(dest)) host.fail(`.agents/skills/${name} exists and is not a symlink — remove it or use --copy`);
     }
-    const target = path.relative(agentsSkillsDir, src);
+    const target = path.relative(canonical(agentsSkillsDir), canonical(src));
     if (current === target) {
       log(`symlink .agents/skills/${name} already correct`);
     } else {
@@ -184,7 +246,7 @@ for (const name of SKILL_NAMES) {
   }
 }
 
-// --- 5. Claude Code wiring (only when the host shows Claude markers) ------------
+// --- 6. Claude Code wiring (only when the host shows Claude markers) ------------
 // Claude Code discovers skills under .claude/skills/ and reads CLAUDE.md, not
 // AGENTS.md. Wire both: symlink each skill from .claude/skills/ to the
 // canonical .agents/skills/ copy, and bridge the managed block via the
@@ -207,7 +269,7 @@ if (fs.existsSync(claudeDir) || fs.existsSync(claudeMd)) {
       }
       host.fail(`.claude/skills/${name} exists but does not resolve to .agents/skills/${name} — remove it, then re-run`);
     }
-    const target = path.relative(claudeSkillsDir, canonicalSkill);
+    const target = path.relative(canonical(claudeSkillsDir), canonical(canonicalSkill));
     fs.symlinkSync(target, dest);
     log(`symlinked .claude/skills/${name} -> ${target}`);
   }
@@ -226,4 +288,11 @@ if (fs.existsSync(claudeDir) || fs.existsSync(claudeMd)) {
 }
 
 log(`install complete at ${hostRoot}`);
-log("next: work normally; record observations via kg-observe; compile when the threshold reminder fires.");
+if (docsProfile !== "none") {
+  log("project documents are ready under docs/; draft complete ADRs and RFCs there directly.");
+}
+if (projectStage === "brownfield") {
+  log("next: run the kg-scan skill to bootstrap architecture, API, glossary, and document inventory drafts from existing code.");
+} else {
+  log("next: work normally; record observations via kg-observe; compile when the threshold reminder fires.");
+}

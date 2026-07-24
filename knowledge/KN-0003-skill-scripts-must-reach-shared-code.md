@@ -12,11 +12,12 @@ evidence:
   - { type: diff, ref: "install.mjs --copy embeds scripts/lib and protocol inside each vendored skill dir" }
   - { type: diff, ref: "commit c009c4c: vendored copies committed; skills CLI local-source install verified end-to-end in /tmp/host-npx" }
   - { type: quote, ref: "vercel-labs/skills README: skill discovery walks skills/<name>/SKILL.md and installs the skill dir only" }
+  - { type: test, ref: "2026-07-24: node scripts/sync-vendored.mjs --check and node scripts/test-rfc004.mjs passed with all four skills" }
 authority: formal_decision
 confidence: 0.9
 lifecycle: active
 supersedes: null
-last_verified: 2026-07-13
+last_verified: 2026-07-24
 regret: null
 ---
 

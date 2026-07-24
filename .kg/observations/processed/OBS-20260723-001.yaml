@@ -1,0 +1,15 @@
+id: OBS-20260723-001
+at: 2026-07-23T16:40:13Z
+source: human_correction
+claim: "KG must allow humans and agents to directly draft and iterate complete ADR, RFC, and MVP design documents; the observation pipeline may learn from those artifacts but must not gate their creation."
+context:
+  task: kg-observer-document-authoring-boundary
+  paths:
+    - "skills/kg-observe/**"
+    - "skills/kg-init/**"
+    - "skills/kg-compile/**"
+    - "docs/**"
+    - "protocol/**"
+evidence:
+  - { type: quote, ref: "human: 在实际协作中，正常流程应该是我先跟它写完整篇文档，我看完了，大家再来回对抗讨论，最终形成一些 ADR。" }
+urgency: fast_track

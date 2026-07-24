@@ -4,7 +4,7 @@
 // source of truth: this module interprets their `fields` specs; it does not
 // hardcode field lists.
 //
-// Run `node scripts/lib/protocol.mjs` for a self-check that all five protocol
+// Run `node scripts/lib/protocol.mjs` for a self-check that all six protocol
 // files parse and are internally coherent.
 
 import fs from "node:fs";
@@ -22,6 +22,7 @@ export function loadProtocolFile(name) {
 
 export const loadObservationSchema = () => loadProtocolFile("observation.schema.yaml");
 export const loadKnowledgeSchema = () => loadProtocolFile("knowledge.schema.yaml");
+export const loadProjectDocumentSchema = () => loadProtocolFile("project-document.schema.yaml");
 export const loadLifecycle = () => loadProtocolFile("lifecycle.yaml");
 export const loadAuthority = () => loadProtocolFile("authority.yaml");
 export const loadRouting = () => loadProtocolFile("routing.yaml");
@@ -190,6 +191,7 @@ if (isMain()) {
   const files = [
     "observation.schema.yaml",
     "knowledge.schema.yaml",
+    "project-document.schema.yaml",
     "lifecycle.yaml",
     "authority.yaml",
     "routing.yaml",

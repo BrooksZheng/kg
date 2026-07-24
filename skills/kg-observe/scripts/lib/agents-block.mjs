@@ -35,7 +35,11 @@ export function renderBlockLines(hostRoot) {
     "- HARD RULE: never read `.kg/` during a work task — it holds uncompiled claims and pipeline state. Writes go only through the kg-observe skill; reads happen only inside kg-compile sessions.",
     `- Record observations (task end, or IMMEDIATELY on human correction): \`${skillsPath}/kg-observe/SKILL.md\`.`,
     `- Compile pending observations into knowledge: \`${skillsPath}/kg-compile/SKILL.md\`.`,
+    `- Bootstrap an existing codebase into evidence-backed document drafts: \`${skillsPath}/kg-scan/SKILL.md\`.`,
   ];
+  if (fs.existsSync(path.join(hostRoot, "docs", "README.md"))) {
+    lines.push("- Draft and revise complete ADRs, RFCs, and technical plans directly under `docs/`; follow `docs/README.md`. KG does not gate document authoring.");
+  }
   if (active.length) {
     lines.push("", "Active project knowledge (read the entry before working in its scope):", "");
     // Defuse HTML comment sequences in claim text so a malicious or unlucky

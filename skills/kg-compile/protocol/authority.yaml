@@ -25,7 +25,7 @@ descriptions:
   verified_runtime_behavior: "Directly observed and reproduced runtime behavior."
   machine_constraint: "Encoded in a test / type / lint / CI gate."
   current_code_and_schema: "What the current code and schemas actually say."
-  formal_decision: "A recorded decision (RFC, ADR, confirmed spec)."
+  formal_decision: "An accepted registered RFC, ADR, or confirmed project document."
   project_knowledge: "A compiled active kg knowledge entry."
   past_task_conclusion: "A conclusion from an earlier task, not re-verified."
   agent_inference: "Agent reasoning without direct evidence."

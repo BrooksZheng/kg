@@ -1,0 +1,13 @@
+id: OBS-20260723-002
+at: 2026-07-23T17:16:33Z
+source: test_failure
+claim: "kg-init must compute relative skill symlink targets from canonicalized source and parent paths so path aliases such as /var and /private/var cannot produce broken links."
+context:
+  task: "RFC-004 installation regression coverage"
+  paths:
+    - skills/kg-init/scripts/install.mjs
+    - scripts/test-rfc004.mjs
+evidence:
+  - { type: test, ref: "node scripts/test-rfc004.mjs failed with ENOENT at symlink-host/.agents/skills/kg-scan before canonicalization" }
+  - { type: test, ref: "node scripts/test-rfc004.mjs passed after canonical source and parent paths were used" }
+urgency: batch

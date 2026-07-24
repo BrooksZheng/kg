@@ -7,11 +7,12 @@ scope:
 evidence:
   - { type: observation, ref: OBS-20260712-010 }
   - { type: diff, ref: "trial branch cursor/kg-trial-72da cc519e6bd7 - relocated from root checkout layout to .agents/skills vendored layout" }
+  - { type: quote, ref: "docs/rfc-004-authoring-plane-and-brownfield-bootstrap.md §五 permits an optional docs profile in the host root" }
 authority: user_explicit_constraint
 confidence: 0.95
 lifecycle: active
 supersedes: null
-last_verified: 2026-07-12
+last_verified: 2026-07-24
 regret: null
 ---
 
@@ -22,10 +23,11 @@ Two layouts exist and must never be conflated:
 - **Plugin source repo** (development): `skills/`, `protocol/`, `scripts/lib/`
   at the repo root. This is where kg itself is built.
 - **Installed host repo** (consumption): everything lives under
-  `.agents/skills/kg-*/` as self-contained vendored copies (each skill embeds
-  `scripts/lib/` and `protocol/`), produced by `kg-init --copy`. The host
-  root gains only `.kg/`, `knowledge/`, the AGENTS.md managed block, and the
-  `.cursorignore` line — never the plugin's own source directories.
+`.agents/skills/kg-*/` as self-contained vendored copies (each skill embeds
+`scripts/lib/` and `protocol/`), produced by `kg-init --copy`. The host
+root gains `.kg/`, `knowledge/`, the AGENTS.md managed block, the
+`.cursorignore` line, and optional direct-authoring files under `docs/`.
+It never gains the plugin's own source directories.
 
 "Installing kg" into a host by cloning/vendoring the plugin checkout at the
 host root is wrong: it clutters the host with source-repo internals and

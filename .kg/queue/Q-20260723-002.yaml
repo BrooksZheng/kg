@@ -1,0 +1,13 @@
+id: Q-20260723-002
+at: 2026-07-23T17:18:32Z
+kind: promotion
+category: project_contract
+claim: "Activate KN-0015: kg-init Setup chooses project stage and document profile, preserves existing documents, and hands brownfield discovery to kg-scan."
+evidence:
+  - { type: quote, ref: "docs/rfc-004-authoring-plane-and-brownfield-bootstrap.md §五; human ruling: 都按你的推荐做一个版本吧" }
+options: ["accept (promote KN-0015 to active)", reject]
+recommendation: "accept; this is an accepted RFC-004 contract and its install modes passed black-box coverage"
+entry: KN-0015
+source_observations: []
+resolution: accepted
+resolution_note: "human ruling 2026-07-24: 都按你的推荐做一个版本吧"

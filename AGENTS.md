@@ -4,6 +4,8 @@ kg (Project Knowledge Growth) — managed block, rendered from `knowledge/`. Do 
 - HARD RULE: never read `.kg/` during a work task — it holds uncompiled claims and pipeline state. Writes go only through the kg-observe skill; reads happen only inside kg-compile sessions.
 - Record observations (task end, or IMMEDIATELY on human correction): `.agents/skills/kg-observe/SKILL.md`.
 - Compile pending observations into knowledge: `.agents/skills/kg-compile/SKILL.md`.
+- Bootstrap an existing codebase into evidence-backed document drafts: `.agents/skills/kg-scan/SKILL.md`.
+- Draft and revise complete ADRs, RFCs, and technical plans directly under `docs/`; follow `docs/README.md`. KG does not gate document authoring.
 
 Active project knowledge (read the entry before working in its scope):
 
@@ -20,4 +22,9 @@ Active project knowledge (read the entry before working in its scope):
 - KN-0011 [project_knowledge] Karpathy's llm-wiki (gist, 2026) is the closest prior art to kg's compiler mental model; kg differs on input stream (work-process signals vs external documents), consumption (publish-as-injection vs query), record unit (atomic claim with evidence/authority vs topic page), trust model (governed untrusted compiler vs trusted librarian), and knowledge endpoint (prose graduates into machine constraints vs stays prose). → `knowledge/KN-0011-karpathy-s-llm-wiki-gist-2026.md`
 - KN-0012 [project_knowledge] kg rendered surfaces and knowledge entries should prefer pointer-form constraints (file paths, commands, entry links) over descriptive prose: pointer constraints fail loudly like a 404 when they rot, prose constraints rot silently — design for rot. → `knowledge/KN-0012-kg-rendered-surfaces-and-knowledge-entries.md`
 - KN-0013 [project_knowledge] The always-loaded AGENTS.md managed block must stay a compact pointer index with detail lazy-loaded from knowledge/ entries, because model instruction compliance degrades as the always-on instruction count grows — this is the external rationale behind the render-layer line budget and its do-not-raise-the-budget rule. → `knowledge/KN-0013-the-always-loaded-agents-md-managed.md`
+- KN-0014 [project_contract] KG must allow humans and agents to directly draft and iterate complete ADR, RFC, and MVP design documents; the observation pipeline may learn from those artifacts but must not gate their creation. → `knowledge/KN-0014-kg-must-allow-humans-and-agents.md`
+- KN-0015 [project_contract] kg-init Setup resolves project stage (greenfield or brownfield) and document profile (none, lean, or standard), creates only missing template files, and routes brownfield hosts to a separate kg-scan session. → `knowledge/KN-0015-kg-init-setup-resolves-project-stage.md`
+- KN-0016 [project_contract] kg-scan is the brownfield bootstrap adapter: it is static-only by default, excludes .kg, secrets, and symlinks, executes no host code without explicit authorization, and produces drafts or patch proposals without silent overwrite. → `knowledge/KN-0016-kg-scan-is-the-brownfield-bootstrap.md`
+- KN-0017 [project_contract] kg-compile consumes only registered project documents with status accepted; ordinary Markdown and draft, proposed, rejected, or superseded registered documents remain outside compilation. → `knowledge/KN-0017-kg-compile-consumes-only-registered-project.md`
+- KN-0018 [project_knowledge] kg-init must compute relative skill symlink targets from canonicalized source and parent paths so filesystem aliases such as /var and /private/var cannot create broken links. → `knowledge/KN-0018-kg-init-must-compute-relative-skill.md`
 <!-- kg:end -->

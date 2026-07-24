@@ -8,11 +8,12 @@ evidence:
   - { type: observation, ref: OBS-20260713-006 }
   - { type: quote, ref: "human: 那肯定是后者 — choosing section-level precision when asked what should happen if one section of an aggregated thick doc proves wrong" }
   - { type: quote, ref: "docs/rfc-002-agents-md-compiled-artifact.md R1 (confirmed 2026-07-13)" }
+  - { type: quote, ref: "docs/rfc-004-authoring-plane-and-brownfield-bootstrap.md §四.4 and §八 (accepted 2026-07-24)" }
 authority: formal_decision
 confidence: 0.9
 lifecycle: active
 supersedes: null
-last_verified: 2026-07-13
+last_verified: 2026-07-24
 regret: null
 ---
 
@@ -37,3 +38,10 @@ Storage-layer aggregation (combining related KN entries into thick topic
 documents) was explicitly rejected in the RFC-002 interview: the decisive
 test was "when one section of a thick doc proves wrong, you only want to
 touch that section" — atomic entries satisfy this natively.
+
+## Complete source documents
+
+The one-claim rule governs `knowledge/*.md`. Accepted ADRs, RFCs, and
+technical plans remain complete narrative sources for context, options,
+discussion history, and rationale. Compile extracts atomic entries that
+point back to the relevant source section instead of copying its narrative.

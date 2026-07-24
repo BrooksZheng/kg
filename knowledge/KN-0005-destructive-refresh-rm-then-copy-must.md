@@ -8,11 +8,12 @@ evidence:
   - { type: observation, ref: OBS-20260712-006 }
   - { type: observation, ref: OBS-20260712-008 }
   - { type: log, ref: "/tmp/kg-copy-test2 and /tmp/kg-rp-alias drills: vendored and alias re-runs skip instead of deleting the source" }
+  - { type: test, ref: "2026-07-24: node scripts/test-rfc004.mjs reran the installer from a self-contained copied host without deleting its source" }
 authority: verified_runtime_behavior
 confidence: 0.95
 lifecycle: active
 supersedes: null
-last_verified: 2026-07-13
+last_verified: 2026-07-24
 regret: null
 ---
 

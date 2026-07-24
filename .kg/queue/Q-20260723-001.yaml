@@ -1,0 +1,16 @@
+id: Q-20260723-001
+at: 2026-07-23T16:41:25Z
+kind: promotion
+category: project_contract
+claim: "Activate KN-0014: KG preserves direct drafting and iteration of complete ADR, RFC, and MVP design documents; observation and compilation may learn from them but cannot gate their creation."
+evidence:
+  - { type: quote, ref: "OBS-20260723-001 / human: 在实际协作中，正常流程应该是我先跟它写完整篇文档，我看完了，大家再来回对抗讨论，最终形成一些 ADR。" }
+options:
+  - "accept (promote KN-0014 to active)"
+  - reject
+  - "narrow the contract to docs/** only"
+recommendation: "accept; the correction removes a collaboration blocker and clarifies that KN-0009 atomicity governs ledger entries rather than full project documents"
+entry: KN-0014
+source_observations: [OBS-20260723-001]
+resolution: accepted
+resolution_note: "human ruling 2026-07-24: 都按你的推荐做一个版本吧"

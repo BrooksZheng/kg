@@ -1,5 +1,7 @@
 # kg protocol — Observation Schema (RFC-001 §5.1)
-# The single intake format for the collection side. Observations are written
+# The single intake format for continuous-learning collection. Complete project
+# documents use the opt-in project-document schema and may be authored directly.
+# Observations are written
 # ONLY via the kg-observe skill, one file per observation, into
 # .kg/observations/<id>.yaml (append-only inbox; kg-compile moves processed
 # files into .kg/observations/processed/).

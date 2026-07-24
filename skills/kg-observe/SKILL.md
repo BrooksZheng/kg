@@ -52,6 +52,19 @@ one blob for the whole conversation.
   human just made them — that second confirmation is by design (git audit
   trail, and a guard against the agent misreading the conversation).
 
+## Project document boundary
+
+Observation is the intake format for continuous learning signals. It is not a
+required precursor for complete project documents.
+
+Humans and agents may directly draft and revise ADRs, RFCs, MVP technical
+plans, architecture documents, glossaries, and standards under `docs/`.
+Observer may later capture a reusable lesson from that work. Accepted
+registered documents also enter kg-compile directly.
+
+Do not decompose a document request into observations before writing the
+document. Do not record every paragraph or scan finding as an observation.
+
 ## `no_change` is a legal and common outcome
 
 If the review honestly finds nothing reusable, record **nothing** — do not

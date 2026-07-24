@@ -1,0 +1,13 @@
+id: Q-20260723-003
+at: 2026-07-23T17:18:32Z
+kind: promotion
+category: project_contract
+claim: "Activate KN-0016: kg-scan remains static, secret-safe, .kg-isolated, and draft-only by default, with no silent document overwrite."
+evidence:
+  - { type: quote, ref: "docs/rfc-004-authoring-plane-and-brownfield-bootstrap.md §六 and §七; human ruling: 都按你的推荐做一个版本吧" }
+options: ["accept (promote KN-0016 to active)", reject]
+recommendation: "accept; the boundary was explicitly approved and the scanner safety cases passed black-box coverage"
+entry: KN-0016
+source_observations: []
+resolution: accepted
+resolution_note: "human ruling 2026-07-24: 都按你的推荐做一个版本吧"

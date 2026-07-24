@@ -1,0 +1,13 @@
+id: Q-20260723-004
+at: 2026-07-23T17:18:32Z
+kind: promotion
+category: project_contract
+claim: "Activate KN-0017: only accepted registered project documents enter Compile; all other Markdown remains outside the compiler input set."
+evidence:
+  - { type: quote, ref: "docs/rfc-004-authoring-plane-and-brownfield-bootstrap.md §四 and §八; human ruling: 都按你的推荐做一个版本吧" }
+options: ["accept (promote KN-0017 to active)", reject]
+recommendation: "accept; this is the approved opt-in gate that keeps direct authoring independent from compilation"
+entry: KN-0017
+source_observations: []
+resolution: accepted
+resolution_note: "human ruling 2026-07-24: 都按你的推荐做一个版本吧"

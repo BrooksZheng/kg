@@ -1,6 +1,6 @@
 ---
 name: kg-compile
-description: Run a knowledge compile session — turn pending .kg/observations/ into published knowledge. Trigger when the observation threshold reminder fires, when a fast_track observation exists (human correction — compile that single item immediately), when a human asks for a compile/knowledge session, or periodically as a dedicated batch session. This is the ONLY context in which reading .kg/ is allowed.
+description: Run a knowledge compile session that turns pending .kg/observations/ and accepted registered project documents into published atomic knowledge. Trigger when the observation threshold reminder fires, a fast_track correction exists, a human accepts an ADR/RFC/project document and asks to publish it, a human asks for a compile or knowledge session, or a periodic dedicated batch is due. This is the ONLY context in which reading .kg/ is allowed.
 ---
 
 # kg-compile — the compiler-agent role
@@ -31,6 +31,14 @@ with `node <script>.mjs` from anywhere inside the host repo.
 - Validate the inbox: `node .../kg-observe/scripts/validate-observations.mjs`.
   Malformed observations are excluded from compilation; list them in the
   report for repair.
+- Validate registered project documents:
+  `node .../kg-compile/scripts/validate-project-documents.mjs`. Ordinary
+  Markdown is ignored. Draft, proposed, rejected, and superseded registered
+  documents remain valid project artifacts but are not compile inputs.
+- List accepted sources with
+  `node .../validate-project-documents.mjs --list-accepted` and read every
+  listed document. These files live under `docs/`, outside `.kg/`, and remain
+  directly editable through their normal review lifecycle.
 - Read every pending observation in `.kg/observations/` AND every existing
   entry in `knowledge/` (all lifecycle states — dedupe needs the full set).
   If platform ignore rules (e.g. the `.cursorignore` line kg-init writes)
@@ -38,7 +46,23 @@ with `node <script>.mjs` from anywhere inside the host repo.
   skill scripts instead — the isolation rule targets work tasks, and this
   session is the sanctioned exception.
 
-### 2. Judge each observation
+### 2. Judge each source
+
+For an accepted project document:
+
+- Extract one or more atomic claims. A complete ADR or RFC can produce several
+  entries while remaining the narrative source.
+- Cite the exact document path and section in each entry's evidence. Keep
+  design narrative, alternatives, and discussion history in the source
+  document.
+- Use `formal_decision` authority. Use `user_explicit_constraint` only when
+  the accepted document or recorded ruling contains the human's explicit
+  binding words.
+- If every relevant claim is already represented by entries that cite the
+  unchanged document, record `no_change` for that source.
+- Never compile draft or proposed documents.
+- Never rewrite an accepted source as part of compilation. Propose a normal
+  document patch when source content needs correction.
 
 Map every observation to the verdict or exactly one category
 (`protocol/routing.yaml`):
@@ -51,10 +75,10 @@ Map every observation to the verdict or exactly one category
 - `needs_human_decision` — conflicting evidence or a major unknown; queue
   item only.
 
-**Dedupe** against existing entries first: if an observation restates a known
-claim, prefer `update` (refresh `last_verified`, extend evidence/scope of the
-existing entry) over `add`. Multiple pending observations about one claim
-compile into ONE entry citing all of them.
+**Dedupe** every extracted claim against existing entries first. If a source
+restates a known claim, prefer `update` (refresh `last_verified`, extend
+evidence/scope of the existing entry) over `add`. Multiple observations or
+documents about one claim compile into ONE entry citing all relevant sources.
 
 **Updates**: hand-editing an entry's evidence, scope, `last_verified`, claim
 wording, or body — never `lifecycle:` — IS the sanctioned update mechanism;
@@ -117,10 +141,10 @@ constraints (propose the constraint, then retire the prose once it lands).
 
 1. Compute metrics: `node .../report-metrics.mjs` (embed its block verbatim).
 2. Write `.kg/reports/REPORT-<YYYYMMDD>-<n>.md` in the user's language:
-   observations processed and their verdict/category mapping, entries
-   added/updated, the subtraction answer, the four metrics, malformed
-   observations needing repair, and the **ruling checklist** — every pending
-   `.kg/queue/` item with its recommendation. The checklist is the ASYNC
+   accepted documents and observations processed, their claim/category
+   mapping, entries added/updated, the subtraction answer, the four metrics,
+   malformed sources needing repair, and the **ruling checklist** — every
+   pending `.kg/queue/` item with its recommendation. The checklist is the ASYNC
    path; when a human is present, run the ruling interview (§6) instead of
    ending on a checklist dump.
 3. Re-render the AGENTS.md managed block: `node .../render-agents.mjs`. If it
@@ -168,6 +192,10 @@ exactly how regret gets recorded.
 
 - Never edit files in `.kg/observations/` — the inbox is append-only; you
   only move processed files via `archive-observations.mjs`.
+- Never treat ordinary, draft, or proposed project documents as accepted
+  authority.
+- Never require an observation before a human or agent can draft a complete
+  ADR, RFC, MVP plan, or technical document under `docs/`.
 - Never hand-edit the AGENTS.md managed block; edit entries and re-render.
 - Never bypass `transition-entry.mjs` by editing `lifecycle:` by hand.
 - Conflicts always reach the queue: authority ranks, humans rule.
