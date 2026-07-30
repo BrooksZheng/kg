@@ -76,6 +76,8 @@ const record = {
   supersedes: frontmatter.supersedes ?? null,
   last_verified: frontmatter.last_verified ?? new Date().toISOString().slice(0, 10),
   regret: null,
+  source_obs_ids: frontmatter.source_obs_ids ?? [],
+  carrier_refs: frontmatter.carrier_refs ?? [],
 };
 
 const errors = protocol.validateRecord(record, knowledgeSchema);
@@ -103,5 +105,5 @@ console.log(`kg: created ${id} (${derivedLifecycle}) -> ${path.relative(process.
 if (derivedLifecycle === "candidate") {
   console.log(`kg: category \`${category}\` is human_review — file a queue item now (add-queue-item.mjs) and do NOT activate without a human ruling.`);
 } else {
-  console.log("kg: entry is active — re-render the AGENTS.md managed block (render-agents.mjs) before ending the session.");
+  console.log("kg: entry is active; validate knowledge and continue the compile report.");
 }

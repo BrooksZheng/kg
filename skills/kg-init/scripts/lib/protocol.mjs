@@ -4,7 +4,7 @@
 // source of truth: this module interprets their `fields` specs; it does not
 // hardcode field lists.
 //
-// Run `node scripts/lib/protocol.mjs` for a self-check that all six protocol
+// Run `node scripts/lib/protocol.mjs` for a self-check that all nine protocol
 // files parse and are internally coherent.
 
 import fs from "node:fs";
@@ -23,6 +23,9 @@ export function loadProtocolFile(name) {
 export const loadObservationSchema = () => loadProtocolFile("observation.schema.yaml");
 export const loadKnowledgeSchema = () => loadProtocolFile("knowledge.schema.yaml");
 export const loadProjectDocumentSchema = () => loadProtocolFile("project-document.schema.yaml");
+export const loadHarnessSchema = () => loadProtocolFile("harness.schema.yaml");
+export const loadTaskSpecSchema = () => loadProtocolFile("task-spec.schema.yaml");
+export const loadDocumentTaxonomy = () => loadProtocolFile("document-taxonomy.yaml");
 export const loadLifecycle = () => loadProtocolFile("lifecycle.yaml");
 export const loadAuthority = () => loadProtocolFile("authority.yaml");
 export const loadRouting = () => loadProtocolFile("routing.yaml");
@@ -192,6 +195,9 @@ if (isMain()) {
     "observation.schema.yaml",
     "knowledge.schema.yaml",
     "project-document.schema.yaml",
+    "harness.schema.yaml",
+    "task-spec.schema.yaml",
+    "document-taxonomy.yaml",
     "lifecycle.yaml",
     "authority.yaml",
     "routing.yaml",
@@ -226,6 +232,109 @@ if (isMain()) {
     const levels = String(kn.fields.authority.values).split("|");
     for (const l of levels) {
       if (!auth.ranking.includes(l)) problems.push(`authority: knowledge authority \`${l}\` missing from ranking`);
+    }
+  }
+  const harness = docs["harness.schema.yaml"];
+  if (routing && harness) {
+    if (
+      routing.version !== 2 ||
+      routing.stages?.observation_to_knowledge !== "observation_to_knowledge" ||
+      routing.stages?.knowledge_to_harness !== "knowledge_to_harness"
+    ) {
+      problems.push("routing: both v2 compile stages are required");
+    }
+    const routedCarriers = Object.keys(routing.harness_carriers ?? {});
+    const allowedCarriers = String(harness.fields?.type?.values ?? "").split("|");
+    for (const carrier of routedCarriers) {
+      if (!allowedCarriers.includes(carrier)) {
+        problems.push(`harness: routed carrier \`${carrier}\` missing from harness type enum`);
+      }
+    }
+    for (const role of ["route_target", "dedupe_baseline", "conflict_baseline"]) {
+      if (!routing.compile_document_roles?.[role]) {
+        problems.push(`routing: compile document role \`${role}\` missing`);
+      }
+    }
+    const requiredHarnessFields = [
+      "artifact_id",
+      "type",
+      "path",
+      "ownership",
+      "status",
+      "source_kn_ids",
+      "source_refs",
+      "content_hash",
+      "generator_version",
+      "last_verified",
+      "update_policy",
+    ];
+    for (const field of requiredHarnessFields) {
+      if (!harness.fields?.[field]?.required) problems.push(`harness: required field \`${field}\` missing`);
+    }
+    if (harness.fields?.ownership?.values !== "managed|co_managed|human") {
+      problems.push("harness: ownership enum must be managed|co_managed|human");
+    }
+    for (const field of ["source_obs_ids", "carrier_refs"]) {
+      if (kn.fields?.[field]?.type !== "string_list" || kn.fields?.[field]?.required !== false) {
+        problems.push(`knowledge: optional v2 trace field \`${field}\` missing`);
+      }
+    }
+  }
+  const taxonomy = docs["document-taxonomy.yaml"];
+  const projectDocument = docs["project-document.schema.yaml"];
+  if (taxonomy && projectDocument) {
+    if (projectDocument.version !== 1) problems.push("project-document: version must remain 1");
+    const allowedTypes = String(projectDocument.fields?.doc_type?.values ?? "").split("|");
+    for (const docType of [...(taxonomy.core_types ?? []), taxonomy.spec_type]) {
+      if (!allowedTypes.includes(docType)) {
+        problems.push(`taxonomy: document type \`${docType}\` missing from project-document enum`);
+      }
+      const record = taxonomy.documents?.[docType];
+      for (const key of [
+        "path",
+        "template_path",
+        "diataxis_quadrant",
+        "arc42_sections",
+        "detection_rule",
+        "lazy_create_when",
+      ]) {
+        if (!record?.[key]) problems.push(`taxonomy: ${docType}.${key} missing`);
+      }
+    }
+    if (taxonomy.tutorials?.diataxis_quadrant !== "excluded" || !taxonomy.tutorials?.exclusion_rationale) {
+      problems.push("taxonomy: tutorials exclusion and rationale are required");
+    }
+  }
+  const taskSpec = docs["task-spec.schema.yaml"];
+  if (taskSpec) {
+    if (taskSpec.document_kind !== "kg.task_spec") {
+      problems.push("task-spec: document_kind must be `kg.task_spec`");
+    }
+    const expectedSections = [
+      "Context",
+      "Requirements",
+      "Constraints",
+      "References",
+      "Out of Scope",
+      "Acceptance Criteria",
+      "Open Questions",
+      "Session History",
+    ];
+    for (const section of expectedSections) {
+      if (!taskSpec.required_sections?.includes(section)) {
+        problems.push(`task-spec: required section \`${section}\` missing`);
+      }
+    }
+    if (
+      taskSpec.constraint_source_path_pattern !==
+      "^(docs/.+\\.md|knowledge/KN-[^/]+\\.md|AGENTS\\.md)#L[1-9][0-9]*$"
+    ) {
+      problems.push("task-spec: stable document anchor pattern is invalid");
+    }
+    if (!String(taskSpec.acceptance_format ?? "").includes("GIVEN") ||
+        !String(taskSpec.acceptance_format ?? "").includes("WHEN") ||
+        !String(taskSpec.acceptance_format ?? "").includes("THEN")) {
+      problems.push("task-spec: acceptance format must require GIVEN, WHEN, and THEN");
     }
   }
   if (problems.length) {

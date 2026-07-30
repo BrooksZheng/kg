@@ -1,0 +1,13 @@
+kind: kg.eval_kickoff_fixture
+version: 1
+task: "通过事件总线为 payment.authorized 发布增加重试机制"
+project_root: scripts/fixtures/m1/project
+transcript: scripts/fixtures/m1/kickoff-no-conflict-transcript.json
+must_find:
+  - "Payment must not write Order database directly"
+  - "reuse same idempotency key"
+must_ask:
+  - "重试次数 退避策略"
+must_report: []
+distractors: [docs/unrelated/marketing.md]
+forbid_fabrication: [Kafka, RabbitMQ, PaymentRetryService]

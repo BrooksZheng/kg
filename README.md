@@ -3,8 +3,9 @@
 A platform-agnostic agent plugin, shipped as a skill collection, that turns
 accepted project documents and the raw signals of agent work (human
 corrections, task outcomes, test failures, review feedback) into compiled,
-evidence-backed project knowledge, then publishes it into the carriers agents
-natively consume (`AGENTS.md`, reference docs, skills, executable constraints).
+evidence-backed project knowledge, then routes it toward carriers agents
+natively consume, including Markdown documents, skill proposals, and script
+proposals.
 
 > Local-first · Git-native · Evidence-driven · Agent-agnostic
 
@@ -41,14 +42,13 @@ kg treats this as a **compilation problem, not a memory problem**:
   detects collisions, ranks authority, and routes each claim — with
   `no_change` as a legal, honest verdict (no fabricating lessons to look
   productive).
-- **Publishing = injection into native carriers.** Compiled knowledge lands
-  where agents already look — the `AGENTS.md` managed block, reference docs
-  under `knowledge/`, skill drafts, test/lint proposals — so there is no
-  retrieval runtime, no database, no vector store to operate.
+- **Publishing targets native carriers.** The v2 protocol separates
+  observation-to-knowledge compilation from knowledge-to-harness routing.
+  M1 defines Markdown document, skill proposal, and script proposal carriers
+  without adding a retrieval runtime, database, or vector store.
 - **Knowledge must also shrink.** A lifecycle state machine plus a mandatory
   subtraction duty (every compile round answers "what did we merge / demote /
   retire") and a regret log keep the corpus small enough to stay credible.
-  The managed block has a hard line budget — bloat is an alarm, not a norm.
 - **Humans rule where it matters.** Low-risk categories auto-activate;
   contracts and machine constraints stop at candidate until a human ruling,
   recorded git-native in a queue — no PR ceremony, no separate service.
@@ -77,11 +77,14 @@ skills/
   kg-observe/   SKILL.md + scripts/   record observations (light, in-task)
   kg-compile/   SKILL.md + scripts/   compile observations into knowledge (heavy, dedicated session)
   kg-scan/      SKILL.md + scripts/ + references/   bootstrap brownfield docs
-protocol/       the six fixed interfaces: observation, project-document &
-                knowledge schemas, lifecycle, authority, routing
+  kg-kickoff/   SKILL.md + scripts/ + references/   M1 retrieval and grill spike
+  kg-spec/      SKILL.md + scripts/   M1 zero-interview task-spec spike
+protocol/       nine interfaces: observation, knowledge, project-document,
+                harness and task-spec schemas, taxonomy, lifecycle, authority,
+                and two-stage routing
 scripts/lib/    shared Node stdlib modules (KYAML parser, validator, host helpers,
-                AGENTS block renderer) — the SOURCE OF TRUTH; skill scripts reach
-                it via each skill's scripts/_lib.mjs resolver
+                and protocol loaders) — the SOURCE OF TRUTH; skill scripts
+                reach it via each skill's scripts/_lib.mjs resolver
 skills/*/scripts/lib/, skills/*/protocol/
                 committed vendored copies of scripts/lib/ and protocol/ that make
                 every skill dir self-contained (registry installers copy only the
@@ -102,7 +105,7 @@ kg's skill dirs are self-contained, so the standard
 [skills CLI](https://github.com/vercel-labs/skills) works out of the box:
 
 ```bash
-# 1. from the host repo root, install the four skills into .agents/skills/
+# 1. from the host repo root, install the available skills into .agents/skills/
 npx skills add brookszheng/kg
 
 # 2. complete wiring and select a project-document baseline
@@ -112,9 +115,10 @@ node .agents/skills/kg-init/scripts/install.mjs \
 ```
 
 Step 2 is required: the skills CLI only delivers the skill files; the
-`.kg/` pipeline tree, the direct-authoring `docs/` baseline, and the
-`AGENTS.md` managed block are planted by kg-init. Existing documents are
-never overwritten. Commit everything it created.
+`.kg/` pipeline tree, the direct-authoring `docs/` baseline, and platform
+wiring are created by kg-init. It ensures `AGENTS.md` exists and leaves its
+content human-authored. Existing documents are never overwritten. Commit
+everything it created.
 
 `npx skills add owner/repo` installs from the repo's **default branch**.
 To test a not-yet-merged branch, install from a local checkout instead
@@ -139,10 +143,9 @@ node skills/kg-init/scripts/install.mjs /path/to/host [--copy] \
 
 ### Agent platform coverage
 
-- **Cursor** — discovers skills under `.agents/skills/`; the managed block
-  lives in `AGENTS.md`, which Cursor reads natively.
-- **Codex** — reads `AGENTS.md` natively; the block's pointer lines lead to
-  the skill files. No extra wiring.
+- **Cursor** — discovers skills under `.agents/skills/` and reads project
+  instructions from `AGENTS.md`.
+- **Codex** — reads the human-authored `AGENTS.md` natively. No extra wiring.
 - **Claude Code** — reads `CLAUDE.md` (not `AGENTS.md`) and discovers skills
   under `.claude/skills/`. When the host shows Claude markers (a `.claude/`
   dir or a `CLAUDE.md`), kg-init symlinks `.claude/skills/kg-*` to the
@@ -161,9 +164,9 @@ node skills/kg-init/scripts/install.mjs /path/to/host [--copy] \
   ```
 
   Updates replace only the skill dirs. Host state under `.kg/`, `knowledge/`,
-  `docs/`, the `AGENTS.md` managed block, and `.cursorignore` is never touched
-  by the skills CLI. Re-running kg-init never overwrites an existing config or
-  project document.
+  `docs/`, `AGENTS.md`, and `.cursorignore` is never touched by the skills
+  CLI. Re-running kg-init never overwrites an existing config, project
+  document, or project instructions.
 
 - **Symlink install (Option B default)** — `git pull` the plugin checkout;
   hosts pick it up through the symlinks, nothing else to do.
@@ -226,8 +229,8 @@ printf '%s\n' \
 ```
 
 Working agents must never read `.kg/` during tasks — writes go through
-kg-observe only; reads happen only in kg-compile sessions (the managed block
-in the host `AGENTS.md` carries this rule).
+kg-observe only; reads happen only in kg-compile sessions. Host project
+instructions carry this rule.
 
 ## KYAML — the machine-parsed YAML subset
 

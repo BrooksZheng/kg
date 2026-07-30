@@ -1,10 +1,9 @@
-// Install kg into a host repository. Idempotent: re-running never duplicates
-// the anchor block, never overwrites an existing config, and refreshes
-// discovery wiring in place.
+// Install kg into a host repository. Idempotent: re-running preserves an
+// existing config, project documents, and platform discovery wiring.
 //
 // Usage:
 //   node skills/kg-init/scripts/install.mjs [host-root] [--copy] \
-//     [--threshold N] [--budget N] [--docs-profile PROFILE] \
+//     [--threshold N] [--docs-profile PROFILE] \
 //     [--project-stage STAGE]
 //
 //   host-root    defaults to $KG_ROOT or cwd
@@ -12,26 +11,21 @@
 //                (use when the host cannot reference the plugin checkout,
 //                e.g. vendoring kg into a repo that ships without it)
 //   --threshold  observation_threshold for a fresh config (default 5)
-//   --budget     agents_block_budget_lines for a fresh config (default 30)
 //   --docs-profile  none | lean | standard (default none for compatibility)
 //   --project-stage greenfield | brownfield (default greenfield)
 //
 // What it does:
 //   1. .kg/ tree: config.yaml (fresh installs only), observations/,
 //      observations/processed/, queue/, reports/ — plus knowledge/.
-//   2. AGENTS.md managed block: plants <!-- kg:begin/end --> anchors (creates
-//      the file if absent, appends if present — content outside the anchors
-//      is never touched) and renders the resident block.
-//   3. Platform ignore (best-effort secondary defense): adds `.kg/` to
-//      .cursorignore. The PRIMARY defense is the hard rule inside the block.
-//   4. Platform discovery: Cursor finds skills under .agents/skills/ —
-//      symlink (default) or copy each kg skill there. Codex needs no wiring:
-//      it reaches the skills through the AGENTS.md block pointers.
+//   2. AGENTS.md: ensures the host has a project instruction file without
+//      adding generated content.
+//   3. Platform ignore: adds `.kg/` to .cursorignore.
+//   4. Platform discovery: wires kg skills under .agents/skills/.
 
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { kyaml, host, agentsBlock } from "./_lib.mjs";
+import { kyaml, host } from "./_lib.mjs";
 
 const args = process.argv.slice(2);
 const copyMode = args.includes("--copy");
@@ -50,10 +44,9 @@ function enumFlag(name, fallback, allowed) {
   return value;
 }
 const threshold = flagValue("--threshold", host.CONFIG_DEFAULTS.observation_threshold);
-const budget = flagValue("--budget", host.CONFIG_DEFAULTS.agents_block_budget_lines);
 const docsProfile = enumFlag("--docs-profile", "none", ["none", "lean", "standard"]);
 const projectStage = enumFlag("--project-stage", "greenfield", ["greenfield", "brownfield"]);
-const valueFlags = new Set(["--threshold", "--budget", "--docs-profile", "--project-stage"]);
+const valueFlags = new Set(["--threshold", "--docs-profile", "--project-stage"]);
 const positional = args.filter((a, i) => !a.startsWith("--") && !valueFlags.has(args[i - 1]));
 const hostRoot = path.resolve(positional[0] ?? process.env.KG_ROOT ?? process.cwd());
 
@@ -63,7 +56,7 @@ const SCRIPTS_DIR = path.dirname(fileURLToPath(import.meta.url));
 const SKILL_ROOT = path.resolve(SCRIPTS_DIR, "..");
 const PLUGIN_ROOT = path.resolve(SCRIPTS_DIR, "..", "..", "..");
 const DOC_TEMPLATES_DIR = path.join(SKILL_ROOT, "assets", "project-docs");
-const SKILL_NAMES = ["kg-init", "kg-observe", "kg-compile", "kg-scan"];
+const SKILL_NAMES = ["kg-init", "kg-observe", "kg-compile", "kg-scan", "kg-kickoff", "kg-spec"];
 const paths = host.kgPaths(hostRoot);
 const log = (msg) => console.log(`kg: ${msg}`);
 
@@ -81,14 +74,13 @@ if (fs.existsSync(paths.config)) {
 } else {
   const config = {
     observation_threshold: threshold,
-    agents_block_budget_lines: budget,
     skills_path: ".agents/skills",
   };
   fs.writeFileSync(
     paths.config,
     "# kg pipeline configuration (KYAML). Edit freely; kg-init never overwrites.\n" + kyaml.stringify(config),
   );
-  log(`wrote .kg/config.yaml (threshold ${threshold}, AGENTS budget ${budget})`);
+  log(`wrote .kg/config.yaml (threshold ${threshold})`);
 }
 
 // --- 2. direct-authoring project documents -------------------------------------
@@ -138,23 +130,14 @@ if (docsProfile !== "none") {
   }
 }
 
-// --- 3. AGENTS.md anchors + render --------------------------------------------
+// --- 3. AGENTS.md presence ---------------------------------------------------
 
-const { BEGIN, END } = agentsBlock;
-let agentsText = fs.existsSync(paths.agentsMd) ? fs.readFileSync(paths.agentsMd, "utf8") : null;
-if (agentsText === null) {
-  fs.writeFileSync(paths.agentsMd, `${BEGIN}\n${END}\n`);
-  log("created AGENTS.md with kg anchors");
-} else if (agentsText.includes(BEGIN) && agentsText.includes(END)) {
-  log("AGENTS.md anchors already present");
-} else if (agentsText.includes(BEGIN) || agentsText.includes(END)) {
-  host.fail("AGENTS.md has one anchor but not the other — repair it by hand, then re-run");
+if (fs.existsSync(paths.agentsMd)) {
+  log("AGENTS.md exists; left untouched");
 } else {
-  const sep = agentsText.endsWith("\n") ? "\n" : "\n\n";
-  fs.writeFileSync(paths.agentsMd, `${agentsText}${sep}${BEGIN}\n${END}\n`);
-  log("appended kg anchors to existing AGENTS.md (existing content untouched)");
+  fs.closeSync(fs.openSync(paths.agentsMd, "a"));
+  log("created empty AGENTS.md; project instructions remain human-authored");
 }
-agentsBlock.applyBlock(hostRoot);
 
 // --- 4. platform ignore (secondary defense) ------------------------------------
 
@@ -167,7 +150,7 @@ if (existing.split(/\r?\n/).some((l) => l.trim() === ignoreLine)) {
   const sep = existing === "" || existing.endsWith("\n") ? "" : "\n";
   fs.writeFileSync(
     cursorignore,
-    existing + sep + "# kg: keep uncompiled pipeline state out of agent context (secondary defense;\n# the primary defense is the hard rule in the AGENTS.md kg block)\n.kg/\n",
+    existing + sep + "# kg: keep uncompiled pipeline state out of normal work context\n.kg/\n",
   );
   log("added .kg/ to .cursorignore (best-effort secondary defense)");
 }
@@ -249,7 +232,7 @@ for (const name of SKILL_NAMES) {
 // --- 6. Claude Code wiring (only when the host shows Claude markers) ------------
 // Claude Code discovers skills under .claude/skills/ and reads CLAUDE.md, not
 // AGENTS.md. Wire both: symlink each skill from .claude/skills/ to the
-// canonical .agents/skills/ copy, and bridge the managed block via the
+// canonical .agents/skills/ copy, and bridge project instructions through the
 // officially recommended `@AGENTS.md` import in CLAUDE.md.
 
 const claudeDir = path.join(hostRoot, ".claude");

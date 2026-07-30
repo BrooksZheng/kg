@@ -109,10 +109,9 @@ live entry is contested, transition it to `conflicted`.
   `kind: promotion` queue item via `add-queue-item.mjs`. Never activate these
   yourself. For `executable_constraint`, put the concrete test/lint/CI
   proposal in the entry body.
-- **Always human-review**, whatever the category: any change to the AGENTS.md
-  managed block beyond re-rendering the index, and any proposal for a new
-  skill (e.g. a mature procedure graduating to a skill) — `kind: proposal`
-  queue item.
+- **Always human-review**, whatever the category: any proposal for a new
+  skill or script, and any change to a human-owned document. File a
+  `kind: proposal` queue item.
 - **Queue only** (`needs_human_decision`): `add-queue-item.mjs`; no entry.
 
 Lifecycle changes (promote after a human accepts, demote, retire, merge,
@@ -137,7 +136,7 @@ entries that proved wrong (demote with `--regret`), deprecated entries past
 their usefulness (retire to archived), prose entries that became machine
 constraints (propose the constraint, then retire the prose once it lands).
 
-### 5. Report, render, archive
+### 5. Report and archive
 
 1. Compute metrics: `node .../report-metrics.mjs` (embed its block verbatim).
 2. Write `.kg/reports/REPORT-<YYYYMMDD>-<n>.md` in the user's language:
@@ -147,14 +146,11 @@ constraints (propose the constraint, then retire the prose once it lands).
    pending `.kg/queue/` item with its recommendation. The checklist is the ASYNC
    path; when a human is present, run the ruling interview (§6) instead of
    ending on a checklist dump.
-3. Re-render the AGENTS.md managed block: `node .../render-agents.mjs`. If it
-   fails the line budget, that is the context-bloat alarm — go back to step 4
-   and subtract more; do not raise the budget.
-4. Archive processed observations:
+3. Archive processed observations:
    `node .../archive-observations.mjs <OBS-id>...` (or `--all` if every
    pending observation was handled). Malformed/deferred ones stay in the
    inbox.
-5. Clear the round log: `node .../report-metrics.mjs --clear-round`.
+4. Clear the round log: `node .../report-metrics.mjs --clear-round`.
 
 ### 6. Ruling interview (when a human is present)
 
@@ -172,8 +168,8 @@ telling the human to go read `.kg/queue/`:
   "Defer" — or no answer — is always legal: the item stays pending; never
   re-ask or broaden a deferred item in the same session.
 - Execute each ruling immediately: set `resolution`, record the human's
-  exact words in `resolution_note`, run `transition-entry.mjs`, re-render,
-  re-validate, and show the outcome before moving to the next item.
+  exact words in `resolution_note`, run `transition-entry.mjs`, re-validate,
+  and show the outcome before moving to the next item.
 - Unattended sessions: skip the interview — the report's ruling checklist
   and the queue files are the async path. A human can rule later in ANY
   session: an agent asked to "process the kg queue" (「处理裁决队列」)
@@ -196,7 +192,6 @@ exactly how regret gets recorded.
   authority.
 - Never require an observation before a human or agent can draft a complete
   ADR, RFC, MVP plan, or technical document under `docs/`.
-- Never hand-edit the AGENTS.md managed block; edit entries and re-render.
 - Never bypass `transition-entry.mjs` by editing `lifecycle:` by hand.
 - Conflicts always reach the queue: authority ranks, humans rule.
 - In a ruling interview, evidence is quoted verbatim, never paraphrased;

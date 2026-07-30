@@ -66,15 +66,17 @@ detection, authority comparison, routing, lifecycle changes, and reporting.
 `knowledge/*.md` stores one governed claim per entry. Each entry carries
 evidence, authority, confidence, lifecycle, scope, and regret metadata.
 
-### Render Adapter
+### Harness routing
 
-`scripts/lib/agents-block.mjs` renders a bounded pointer index into the managed
-AGENTS.md block. The render adapter is replaceable as Agent platforms evolve.
+The v2 protocol separates observation-to-knowledge compilation from
+knowledge-to-harness routing. M1 defines Markdown document, skill proposal,
+and script proposal carrier identities. Carrier write behavior arrives in a
+later milestone.
 
 ### Protocol and shared library
 
-`protocol/` holds six machine interfaces. `scripts/lib/` implements the KYAML
-parser, validation, host path logic, and managed-block rendering.
+`protocol/` holds nine machine interfaces. `scripts/lib/` implements the
+KYAML parser, validation, protocol loading, and host path logic.
 
 ### Distribution
 
@@ -86,7 +88,7 @@ installation. Symlink installation resolves the root source directly.
 
 ```text
 docs accepted sources ─┐
-                      ├→ kg-compile → knowledge ledger → AGENTS and carriers
+                      ├→ kg-compile → knowledge ledger → harness carriers
 observations ──────────┘
 
 existing code → kg-scan → draft docs → human review → accepted sources

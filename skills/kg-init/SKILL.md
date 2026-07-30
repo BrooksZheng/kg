@@ -6,8 +6,9 @@ disable-model-invocation: true
 
 # kg-init
 
-Installing kg mutates the host repository's `AGENTS.md`, ignore files, skill
-wiring, and optional document baseline. Require an explicit human request.
+Installing kg ensures an `AGENTS.md` file exists, updates ignore files and
+skill wiring, and can add an optional document baseline. Require an explicit
+human request.
 
 ## Setup interview
 
@@ -28,7 +29,7 @@ Semantic scanning stays outside the deterministic installer.
 
 ```bash
 node <plugin>/skills/kg-init/scripts/install.mjs [host-root] [--copy] \
-  [--threshold N] [--budget N] \
+  [--threshold N] \
   [--docs-profile none|lean|standard] \
   [--project-stage greenfield|brownfield]
 ```
@@ -45,9 +46,8 @@ node .agents/skills/kg-init/scripts/install.mjs \
 call defaults to `--docs-profile none` for upgrade compatibility. The Setup
 interview should pass the selected profile explicitly.
 
-The installer is idempotent. It never duplicates the managed block, overwrites
-`.kg/config.yaml`, replaces an existing project document, or changes
-`AGENTS.md` content outside the anchors.
+The installer is idempotent. It never overwrites `.kg/config.yaml`, replaces
+an existing project document, or changes an existing `AGENTS.md`.
 
 ## Installed layout
 
@@ -67,7 +67,7 @@ docs/                      direct-authoring project documents when selected
   glossary.md
   standards/               standard profile
   development.md           standard profile
-AGENTS.md                  kg managed block
+AGENTS.md                  human-authored project instructions
 .cursorignore
 .agents/skills/kg-*
 .claude/skills/kg-*        Claude-marker hosts only
@@ -86,7 +86,7 @@ inputs. Ordinary Markdown remains valid and is ignored by Compile.
 
 ## Read isolation
 
-The managed block tells work agents never to read `.kg/`. It contains
+Project instructions must tell work agents never to read `.kg/`. It contains
 uncompiled claims and pipeline state. Writes go through kg-observe; reads
 happen only in kg-compile sessions. `.cursorignore` is a secondary defense.
 
@@ -96,12 +96,13 @@ the normal collaboration surface.
 ## Platform discovery
 
 - Cursor discovers `.agents/skills/`.
-- Codex follows pointers in the AGENTS managed block.
+- Codex reads the host's human-authored `AGENTS.md`.
 - Claude Code uses `.claude/skills/` and imports AGENTS.md through CLAUDE.md
   when the host already shows Claude markers.
 
-The installer wires all four skills: kg-init, kg-observe, kg-compile, and
-kg-scan. Symlink, copy, and registry layouts remain self-contained.
+The installer wires six M1 skills: kg-init, kg-observe, kg-compile, kg-scan,
+kg-kickoff, and kg-spec. Symlink, copy, and registry layouts remain
+self-contained.
 
 ## After installing
 

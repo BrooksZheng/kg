@@ -1,0 +1,13 @@
+id: OBS-20260730-003
+at: 2026-07-30T10:21:29Z
+source: test_failure
+claim: "Agent-facing synthesis must use JSON because KYAML also rejects block-style mappings inside lists, in addition to bare scalars containing `#`."
+context:
+  task: "kg-v2-refactor R6 JSON synthesis interface"
+  paths:
+    - skills/kg-spec/scripts/produce-spec.mjs
+    - scripts/lib/kyaml.mjs
+    - .mission/kg-v2-refactor/tools/kg-eval-runner.py
+evidence:
+  - { type: test, ref: "2026-07-30 archived C10 replay: scripts/lib/kyaml.mjs line 96 rejected the original constraints list with `multi-line list items are not supported` after `#` values were quoted" }
+urgency: batch

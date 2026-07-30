@@ -115,6 +115,3 @@ const action =
 host.appendRoundAction(paths, { action, entry: frontmatter.id, from, to: toState });
 
 console.log(`kg: ${frontmatter.id}: ${from} -> ${toState}${regret ? " (regret recorded)" : ""}${supersededBy ? ` (superseded by ${supersededBy})` : ""}`);
-if (["active", "deprecated", "archived", "rejected", "conflicted"].includes(toState)) {
-  console.log("kg: re-render the AGENTS.md managed block (render-agents.mjs) before ending the session.");
-}

@@ -1,0 +1,13 @@
+id: OBS-20260730-005
+at: 2026-07-30T15:23:50Z
+source: task_outcome
+claim: "kg-kickoff treats must_report: [] as a negative oracle for explicitly non-conflicting tasks: no conflict product passes, while a machine product containing any conflict must fail."
+context:
+  task: kg-kickoff-r8-conflict-detection
+  paths:
+    - "skills/kg-kickoff/**"
+    - scripts/eval-kickoff.mjs
+    - "scripts/fixtures/m1/kickoff-no-conflict*"
+evidence:
+  - { type: test, ref: ".mission/kg-v2-refactor/build-log-1-repair-4.md sections 2.2 to 2.4" }
+urgency: batch
