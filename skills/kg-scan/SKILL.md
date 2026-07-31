@@ -123,3 +123,28 @@ continues to capture reusable signals discovered during later work. Record a
 scan observation only when the scan process itself teaches a reusable
 project-specific lesson; do not duplicate every API or glossary finding into
 the observation inbox.
+
+## Deterministic staleness health check
+
+M2 health checks inspect harness sidecar `source_refs` for path liveness only.
+They do not validate line numbers, execute host code, run an agent, or enter
+`.kg/`.
+
+```bash
+node <kg-scan>/scripts/health-check.mjs \
+  --root <project-root> \
+  --now <ISO-timestamp>
+```
+
+Use a gate when stale sources must fail automation:
+
+```bash
+node <kg-scan>/scripts/health-check.mjs \
+  --root <project-root> \
+  --gates \
+  --max-staleness 0
+```
+
+The command always emits a strict `kg.staleness_report`. Ordinary report mode
+returns success when findings exist. Gate mode returns a nonzero status when
+`staleness_count` exceeds the configured maximum.

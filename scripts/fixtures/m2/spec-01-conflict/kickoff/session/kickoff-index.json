@@ -1,0 +1,109 @@
+{
+  "kind": "kg.kickoff_context_index",
+  "version": 1,
+  "project_root": "/private/tmp/c9-r24r/g1/workspace/project",
+  "task": "为 Payment 到 Order 的写入增加重试",
+  "entries": [
+    {
+      "path": "AGENTS.md",
+      "source": "project_instructions",
+      "title": "AGENTS.md",
+      "status": "unregistered",
+      "authority": "project_instruction",
+      "summary": "# Project Instructions",
+      "bytes": 155,
+      "original_bytes": 155,
+      "truncated": false
+    },
+    {
+      "path": "docs/README.md",
+      "source": "project_document",
+      "title": "README.md",
+      "status": "unregistered",
+      "authority": "reference_only",
+      "summary": "# Project Documents",
+      "bytes": 137,
+      "original_bytes": 137,
+      "truncated": false
+    },
+    {
+      "path": "docs/glossary.md",
+      "source": "project_document",
+      "title": "glossary.md",
+      "status": "unregistered",
+      "authority": "reference_only",
+      "summary": "# Glossary",
+      "bytes": 148,
+      "original_bytes": 148,
+      "truncated": false
+    },
+    {
+      "path": "docs/architecture/overview.md",
+      "source": "project_document",
+      "title": "Payment and Order overview",
+      "status": "draft",
+      "authority": "reference_only",
+      "doc_type": "architecture",
+      "bytes": 232,
+      "original_bytes": 232,
+      "truncated": false
+    },
+    {
+      "path": "docs/decisions/0001-payment-order-event-bus.md",
+      "source": "project_document",
+      "title": "Payment to Order event boundary",
+      "status": "accepted",
+      "authority": "formal_decision",
+      "doc_type": "decision",
+      "bytes": 461,
+      "original_bytes": 461,
+      "truncated": false
+    },
+    {
+      "path": "docs/standards/api.md",
+      "source": "project_document",
+      "title": "Internal API standard",
+      "status": "draft",
+      "authority": "reference_only",
+      "doc_type": "standard",
+      "bytes": 202,
+      "original_bytes": 202,
+      "truncated": false
+    },
+    {
+      "path": "docs/traps/payment-direct-write.md",
+      "source": "project_document",
+      "title": "Payment direct write trap",
+      "status": "accepted",
+      "authority": "formal_decision",
+      "doc_type": "trap",
+      "bytes": 376,
+      "original_bytes": 376,
+      "truncated": false
+    },
+    {
+      "path": "knowledge/KN-0001-payment-boundary.md",
+      "source": "knowledge",
+      "title": "Payment communicates with Order through the accepted event boundary.",
+      "status": "active",
+      "authority": "formal_decision",
+      "claim": "Payment communicates with Order through the accepted event boundary.",
+      "scope": {
+        "paths": [
+          "services/payment/**",
+          "services/order/**"
+        ]
+      },
+      "bytes": 463,
+      "original_bytes": 463,
+      "truncated": false
+    }
+  ],
+  "harness": [],
+  "budget": {
+    "limit_bytes": 65536,
+    "consumed_bytes": 2174,
+    "remaining_bytes": 63362,
+    "truncated": false
+  }
+}

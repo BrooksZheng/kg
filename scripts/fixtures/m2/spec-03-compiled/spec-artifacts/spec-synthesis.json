@@ -1,0 +1,64 @@
+{
+  "kind": "kg.spec_synthesis",
+  "version": 2,
+  "task": {
+    "title": "Update compile-managed runbook blocks through canonical paths"
+  },
+  "context": [
+    "The compiled kickoff selected the active KN and its managed runbook carrier.",
+    "The request can be read as replacing human-authored text outside the managed block."
+  ],
+  "requirements": [
+    "Resolve the canonical runbook target before applying an update.",
+    "Replace only the HAR-COMPILE-NOTES managed block."
+  ],
+  "constraints": [
+    {
+      "constraint": "The accepted compile document keeps the runbook as the route target.",
+      "source_path": "docs/accepted-compile-contract.md#L14",
+      "source_status": "accepted",
+      "authority": "formal_decision"
+    },
+    {
+      "constraint": "Human text outside the managed block must be preserved.",
+      "source_path": "knowledge/KN-0002-compile-managed-runbooks-must-preserve-human.md#L3",
+      "source_status": "active",
+      "authority": "verified_runtime_behavior"
+    },
+    {
+      "constraint": "The managed document contains byte-preserved human text around its carrier.",
+      "source_path": "docs/runbooks/compile-notes.md#L3",
+      "source_status": "unregistered",
+      "authority": "reference_only"
+    }
+  ],
+  "references": [
+    "harness/artifacts/HAR-COMPILE-NOTES.yaml",
+    "docs/runbooks/compile-notes.md"
+  ],
+  "out_of_scope": [
+    {
+      "statement": "Replacing the complete runbook including text outside the managed block.",
+      "conflict_source_path": "knowledge/KN-0002-compile-managed-runbooks-must-preserve-human.md"
+    }
+  ],
+  "acceptance_criteria": [
+    "GIVEN a path alias WHEN compile resolves the carrier THEN it updates the canonical runbook target.",
+    "GIVEN human text outside the markers WHEN compile updates the carrier THEN those bytes remain unchanged."
+  ],
+  "open_questions": [
+    "The broader multi-runbook rollout remains outside this task."
+  ],
+  "session_history": [
+    {
+      "session_id": "35414798-fee2-468f-8ecb-4468fa18a3fd",
+      "turn_session_id": "064eb7fe-ed62-44be-97c1-20139eace603",
+      "product_kinds": [
+        "kg.kickoff_context_index",
+        "kg.kickoff_context",
+        "kg.kickoff_turn",
+        "kg.kickoff_conflicts"
+      ]
+    }
+  ]
+}

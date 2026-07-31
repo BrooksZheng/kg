@@ -1,0 +1,62 @@
+{
+  "kind": "kg.spec_synthesis",
+  "version": 2,
+  "task": {
+    "title": "Retry Payment event publication without direct Order writes"
+  },
+  "context": [
+    "Payment publishes payment.authorized through the accepted event boundary.",
+    "The kickoff found that an unqualified write retry can violate the direct-write constraint."
+  ],
+  "requirements": [
+    "Retry publication after a transient event-bus failure.",
+    "Reuse the original idempotency key on every retry."
+  ],
+  "constraints": [
+    {
+      "constraint": "Payment must not write the Order database directly.",
+      "source_path": "docs/decisions/0001-payment-order-event-bus.md#L15",
+      "source_status": "accepted",
+      "authority": "formal_decision"
+    },
+    {
+      "constraint": "The retry path must preserve event deduplication.",
+      "source_path": "docs/traps/payment-direct-write.md#L14",
+      "source_status": "accepted",
+      "authority": "formal_decision"
+    }
+  ],
+  "references": [
+    "services/payment/**",
+    "services/order/**"
+  ],
+  "out_of_scope": [
+    {
+      "statement": "Direct Payment writes to the Order database.",
+      "conflict_source_path": "docs/decisions/0001-payment-order-event-bus.md"
+    },
+    {
+      "statement": "Retry behavior that bypasses event deduplication.",
+      "conflict_source_path": "docs/traps/payment-direct-write.md"
+    }
+  ],
+  "acceptance_criteria": [
+    "GIVEN a transient publish failure WHEN Payment retries THEN the original idempotency key is reused.",
+    "GIVEN duplicate delivery WHEN Order consumes the event THEN the state transition is applied once."
+  ],
+  "open_questions": [
+    "Retry count and backoff remain implementation choices."
+  ],
+  "session_history": [
+    {
+      "session_id": "a2a74916-3957-40ac-8a90-77f0b797e484",
+      "turn_session_id": "4bd4a71c-c999-4fd7-bc42-52dee786419a",
+      "product_kinds": [
+        "kg.kickoff_context_index",
+        "kg.kickoff_context",
+        "kg.kickoff_turn",
+        "kg.kickoff_conflicts"
+      ]
+    }
+  ]
+}

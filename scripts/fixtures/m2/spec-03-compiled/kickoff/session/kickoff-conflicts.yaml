@@ -1,0 +1,4 @@
+kind: kg.kickoff_conflicts
+version: 1
+conflicts:
+  - { summary: "需求文本「更新整个 runbook」可字面解读为替换 runbook 文件的全部内容（非仅托管块），该解读会违反 KN-0002 的已接受约束「Compile-managed runbooks must preserve human text outside their managed block」", source_path: knowledge/KN-0002-compile-managed-runbooks-must-preserve-human.md, line: 3 }

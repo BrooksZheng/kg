@@ -1,0 +1,10 @@
+id: OBS-20260731-013
+at: 2026-07-31T09:11:46Z
+source: task_outcome
+claim: "User-interaction detection in eval-spec must classify normalized tool names with word boundaries and must never scan free-form tool command text."
+context:
+  task: "R2.5 D50 eval-spec repair"
+  paths: [scripts/eval-spec.mjs, scripts/test-v2.mjs]
+evidence:
+  - { type: test, ref: "Part 6 spec-task-path-is-not-a-question passes while request_user_input and AskUserQuestion tool events fail." }
+urgency: batch

@@ -1,5 +1,5 @@
 // Black-box deterministic runner for the seven M2 walking-skeleton parts.
-// R2.4 implements Part 1 through Part 5. Later registered parts report pending.
+// R2.5 closes M2 with all seven walking-skeleton parts implemented.
 
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -20,8 +20,8 @@ const PARTS = [
   { number: 3, name: "observe_json_preserves_v1_contract", status: "implemented", run: runPart3 },
   { number: 4, name: "compile_links_observation_kn_and_managed_block", status: "implemented", run: runPart4 },
   { number: 5, name: "kickoff_indexes_compiled_kn_and_carrier", status: "implemented", run: runPart5 },
-  { number: 6, name: "spec_archives_compiled_context_transcript", status: "pending" },
-  { number: 7, name: "scan_reports_one_missing_source_ref", status: "pending" },
+  { number: 6, name: "spec_archives_compiled_context_transcript", status: "implemented", run: runPart6 },
+  { number: 7, name: "scan_reports_one_missing_source_ref", status: "implemented", run: runPart7 },
 ];
 
 const DOCS_INVENTORY = path.join(ROOT, "skills", "kg-docs", "scripts", "inventory.mjs");
@@ -40,8 +40,13 @@ const COMPILE_CONTEXT = path.join(ROOT, "skills", "kg-compile", "scripts", "comp
 const COMPILE_APPLY = path.join(ROOT, "skills", "kg-compile", "scripts", "apply-compile-plan.mjs");
 const EVAL_COMPILE = path.join(ROOT, "scripts", "eval-compile.mjs");
 const EVAL_KICKOFF = path.join(ROOT, "scripts", "eval-kickoff.mjs");
+const EVAL_SPEC = path.join(ROOT, "scripts", "eval-spec.mjs");
 const GATHER_KICKOFF_CONTEXT = path.join(ROOT, "skills", "kg-kickoff", "scripts", "gather-context.mjs");
 const RECORD_KICKOFF_TURN = path.join(ROOT, "skills", "kg-kickoff", "scripts", "record-turn.mjs");
+const SPEC_PRODUCE = path.join(ROOT, "skills", "kg-spec", "scripts", "produce-spec.mjs");
+const STALENESS_CHECK = path.join(ROOT, "skills", "kg-scan", "scripts", "check-staleness.mjs");
+const HEALTH_CHECK = path.join(ROOT, "skills", "kg-scan", "scripts", "health-check.mjs");
+const INIT_INSTALL = path.join(ROOT, "skills", "kg-init", "scripts", "install.mjs");
 const MOCK_BOOTSTRAP_RUNNER = path.join(ROOT, "scripts", "fixtures", "m2", "mock-bootstrap-runner.mjs");
 const MOCK_COMPILE_RUNNER = path.join(ROOT, "scripts", "fixtures", "m2", "mock-compile-runner.mjs");
 const MOCK_KICKOFF_RUNNER = path.join(ROOT, "scripts", "fixtures", "m2", "mock-kickoff-runner.mjs");
@@ -55,6 +60,11 @@ const KICKOFF_FIXTURES = [
   path.join(ROOT, "scripts", "fixtures", "m2", "kickoff-03.fixture.yaml"),
 ];
 const KICKOFF_COMPILED_PROJECT = path.join(ROOT, "scripts", "fixtures", "m2", "kickoff-03-project");
+const SPEC_FIXTURES = [
+  path.join(ROOT, "scripts", "fixtures", "m2", "spec-01-conflict", "fixture.yaml"),
+  path.join(ROOT, "scripts", "fixtures", "m2", "spec-02-no-conflict", "fixture.yaml"),
+  path.join(ROOT, "scripts", "fixtures", "m2", "spec-03-compiled", "fixture.yaml"),
+];
 const KG_SKILLS = ["kg-init", "kg-observe", "kg-compile", "kg-scan", "kg-kickoff", "kg-spec", "kg-docs"];
 
 class CaseFailure extends Error {
@@ -2346,6 +2356,961 @@ function runPart5(context) {
       lateConflict.result.pass === true,
       "conflict recorder running after turn recorder invalidated kickoff",
     );
+  });
+}
+
+function fixturePath(value) {
+  return path.isAbsolute(value) ? value : path.resolve(ROOT, value);
+}
+
+function setupSpecArchiveCase(context, name, fixtureIndex = 2) {
+  const record = readKyaml(SPEC_FIXTURES[fixtureIndex]);
+  const caseRoot = path.join(context.root, name);
+  const project = path.join(caseRoot, "project");
+  const artifacts = path.join(caseRoot, "artifacts");
+  fs.cpSync(fixturePath(record.project_root), project, { recursive: true });
+  fs.mkdirSync(artifacts, { recursive: true });
+  const packet = path.join(artifacts, "spec-packet.json");
+  runNode(
+    context,
+    SPEC_PRODUCE,
+    [
+      "--prepare",
+      "--project-root",
+      project,
+      "--transcript",
+      fixturePath(record.kickoff_response),
+      "--kickoff-artifacts",
+      fixturePath(record.kickoff_artifacts_root),
+      "--output",
+      packet,
+    ],
+    { cwd: project },
+  );
+  return {
+    record,
+    caseRoot,
+    project,
+    artifacts,
+    packet,
+    synthesis: fixturePath(record.spec_artifacts_root + "/spec-synthesis.json"),
+  };
+}
+
+function archiveSpec(context, setup, synthesis = setup.synthesis, options = {}) {
+  const run = runNode(
+    context,
+    SPEC_PRODUCE,
+    [
+      "--archive",
+      "--project-root",
+      setup.project,
+      "--packet",
+      setup.packet,
+      "--synthesis",
+      synthesis,
+      "--now",
+      "2026-07-31T08:00:00Z",
+    ],
+    { cwd: setup.project, expectFailure: options.expectFailure },
+  );
+  return options.expectFailure ? run : JSON.parse(run.stdout);
+}
+
+function writeFixtureFile(file, value) {
+  fs.writeFileSync(file, kyaml.stringify(value));
+}
+
+function runMutatedSpecFixture(context, name, mutate, options = {}) {
+  const base = readKyaml(SPEC_FIXTURES[options.fixtureIndex ?? 0]);
+  const caseRoot = path.join(context.root, name);
+  const specArtifacts = path.join(caseRoot, "spec-artifacts");
+  const responseFile = path.join(specArtifacts, "runner-response.json");
+  let projectRoot = fixturePath(base.project_root);
+  fs.mkdirSync(caseRoot, { recursive: true });
+  if (options.copyProject === true) {
+    projectRoot = path.join(caseRoot, "project");
+    fs.cpSync(fixturePath(base.project_root), projectRoot, { recursive: true });
+  }
+  fs.cpSync(fixturePath(base.spec_artifacts_root), specArtifacts, { recursive: true });
+  const response = readJson(responseFile);
+  mutate({ response, specArtifacts, caseRoot, fixture: base, projectRoot });
+  writeJson(responseFile, response);
+  const fixture = {
+    ...base,
+    project_root: projectRoot,
+    kickoff_response: fixturePath(base.kickoff_response),
+    kickoff_artifacts_root: fixturePath(base.kickoff_artifacts_root),
+    spec_response: responseFile,
+    spec_artifacts_root: specArtifacts,
+  };
+  if (options.kickoffResponse) fixture.kickoff_response = options.kickoffResponse;
+  const fixtureFile = path.join(caseRoot, "fixture.yaml");
+  writeFixtureFile(fixtureFile, fixture);
+  return runNode(context, EVAL_SPEC, ["--check-fixture", fixtureFile], {
+    cwd: ROOT,
+    expectFailure: options.expectFailure === true,
+  });
+}
+
+function runPart6(context) {
+  testCase(context, "spec_archives_compiled_context_transcript", () => {
+    const setup = setupSpecArchiveCase(context, "archive-positive");
+    const specsDir = path.join(setup.project, "docs", "specs");
+    ensure(context, !fs.existsSync(specsDir), "archive fixture started with docs/specs");
+    const first = archiveSpec(context, setup);
+    ensure(context, first.task_id === "TASK-20260731-001", "first same-day task id is not 001");
+    ensure(context, first.created_at === "2026-07-31T08:00:00.000Z", "archive did not use the fixed clock");
+    ensure(context, first.status === "draft", "archive did not assign draft status");
+    const firstFile = path.join(setup.project, ...first.path.split("/"));
+    const firstHash = fileHash(firstFile);
+    runNode(context, SPEC_PRODUCE, ["--check", firstFile, "--project-root", setup.project], {
+      cwd: setup.project,
+    });
+    const second = archiveSpec(context, setup);
+    ensure(context, second.task_id === "TASK-20260731-002", "second same-day task id is not 002");
+    ensure(context, fileHash(firstFile) === firstHash, "second archive overwrote the first archive");
+    const secondFile = path.join(setup.project, ...second.path.split("/"));
+    const secondText = fs.readFileSync(secondFile, "utf8");
+    const secondFrontmatter = protocol.splitFrontmatter(secondText).frontmatter;
+    ensure(context, secondFrontmatter.status === "draft", "archived task status is not draft");
+    ensure(
+      context,
+      secondText.includes("knowledge/KN-0002-compile-managed-runbooks-must-preserve-human.md#L3"),
+      "compiled active KN constraint is missing",
+    );
+    ensure(
+      context,
+      secondText.includes("docs/runbooks/compile-notes.md#L3"),
+      "compiled managed document constraint is missing",
+    );
+    ensure(
+      context,
+      secondText.includes(setup.record.expected_kickoff_session_id) &&
+        secondText.includes(setup.record.expected_turn_session_id),
+      "Session History does not bind the kickoff sessions",
+    );
+    for (const section of setup.record.required_sections.split("|")) {
+      ensure(context, countHeading(secondText, section) === 1, `archive section ${section} is not unique`);
+    }
+  });
+
+  testCase(context, "archive_rejects_script_owned_agent_fields", () => {
+    const variants = [
+      ["task-id", (raw) => { raw.task.task_id = "TASK-20260731-777"; }],
+      ["created-at", (raw) => { raw.created_at = "2026-07-31T00:00:00Z"; }],
+      ["absolute-output", (raw) => { raw.output = "/tmp/agent-selected.md"; }],
+      ["sequence", (raw) => { raw.sequence = 9; }],
+    ];
+    for (const [name, mutate] of variants) {
+      const setup = setupSpecArchiveCase(context, `owned-${name}`);
+      const synthesis = path.join(setup.artifacts, `${name}.json`);
+      const raw = readJson(setup.synthesis);
+      mutate(raw);
+      writeJson(synthesis, raw);
+      archiveSpec(context, setup, synthesis, { expectFailure: true });
+      ensure(
+        context,
+        !fs.existsSync(path.join(setup.project, "docs", "specs")) ||
+          fs.readdirSync(path.join(setup.project, "docs", "specs")).length === 0,
+        `${name} rejection wrote an archive`,
+      );
+    }
+    const nonJson = setupSpecArchiveCase(context, "owned-non-json");
+    const yamlSynthesis = path.join(nonJson.artifacts, "synthesis.yaml");
+    fs.writeFileSync(yamlSynthesis, "kind: kg.spec_synthesis\nversion: 2\n");
+    archiveSpec(context, nonJson, yamlSynthesis, { expectFailure: true });
+  });
+
+  testCase(context, "archive_rejects_unstable_source_anchors", () => {
+    const variants = [
+      ["implementation", "scripts/eval-spec.mjs#L1"],
+      ["missing", "docs/missing-constraint.md#L1"],
+      ["out-of-range", "docs/accepted-compile-contract.md#L999"],
+      ["kg-case", ".KG/uncompiled.md#L1"],
+      ["escape", "docs/../accepted-compile-contract.md#L1"],
+    ];
+    for (const [name, sourcePath] of variants) {
+      const setup = setupSpecArchiveCase(context, `anchor-${name}`);
+      const synthesis = path.join(setup.artifacts, `${name}.json`);
+      const raw = readJson(setup.synthesis);
+      raw.constraints[0].source_path = sourcePath;
+      writeJson(synthesis, raw);
+      archiveSpec(context, setup, synthesis, { expectFailure: true });
+    }
+
+    const symlink = setupSpecArchiveCase(context, "anchor-symlink");
+    fs.symlinkSync(
+      path.join(symlink.project, "docs", "accepted-compile-contract.md"),
+      path.join(symlink.project, "docs", "linked-contract.md"),
+    );
+    const linkedSynthesis = path.join(symlink.artifacts, "symlink.json");
+    const linkedRaw = readJson(symlink.synthesis);
+    linkedRaw.constraints[0].source_path = "docs/linked-contract.md#L14";
+    writeJson(linkedSynthesis, linkedRaw);
+    archiveSpec(context, symlink, linkedSynthesis, { expectFailure: true });
+  });
+
+  testCase(context, "archive_rejects_conflict_omission_and_metadata_lies", () => {
+    const conflict = setupSpecArchiveCase(context, "conflict-omitted", 0);
+    const conflictSynthesis = path.join(conflict.artifacts, "conflict-omitted.json");
+    const conflictRaw = readJson(conflict.synthesis);
+    conflictRaw.out_of_scope = [
+      {
+        statement: "A generic scope item without conflict linkage.",
+        conflict_source_path: null,
+      },
+    ];
+    writeJson(conflictSynthesis, conflictRaw);
+    archiveSpec(context, conflict, conflictSynthesis, { expectFailure: true });
+
+    const metadata = setupSpecArchiveCase(context, "metadata-lie");
+    const metadataSynthesis = path.join(metadata.artifacts, "metadata-lie.json");
+    const metadataRaw = readJson(metadata.synthesis);
+    metadataRaw.constraints[0].source_status = "draft";
+    writeJson(metadataSynthesis, metadataRaw);
+    archiveSpec(context, metadata, metadataSynthesis, { expectFailure: true });
+  });
+
+  testCase(context, "existing_archive_targets_are_never_overwritten", () => {
+    const setup = setupSpecArchiveCase(context, "existing-target");
+    const specs = path.join(setup.project, "docs", "specs");
+    fs.mkdirSync(specs, { recursive: true });
+    const sentinel = path.join(specs, "TASK-20260731-001.md");
+    fs.writeFileSync(sentinel, "sentinel archive\n");
+    const sentinelHash = fileHash(sentinel);
+    const result = archiveSpec(context, setup);
+    ensure(context, result.task_id === "TASK-20260731-002", "archive did not allocate around an existing target");
+    ensure(context, fileHash(sentinel) === sentinelHash, "archive overwrote an existing target");
+
+    const exhausted = setupSpecArchiveCase(context, "existing-target-exhausted");
+    const exhaustedSpecs = path.join(exhausted.project, "docs", "specs");
+    fs.mkdirSync(exhaustedSpecs, { recursive: true });
+    const last = path.join(exhaustedSpecs, "TASK-20260731-999.md");
+    fs.writeFileSync(last, "last sentinel\n");
+    const lastHash = fileHash(last);
+    archiveSpec(context, exhausted, exhausted.synthesis, { expectFailure: true });
+    ensure(context, fileHash(last) === lastHash, "exhausted id rejection changed an existing archive");
+  });
+
+  testCase(context, "spec_evaluator_rejects_questions_denials_and_unsafe_products", () => {
+    runMutatedSpecFixture(context, "spec-task-path-is-not-a-question", ({ response }) => {
+      response.tool_events.push({
+        name: "Read",
+        command: "Read protocol/task-spec.schema.yaml and docs/specs/TASK-20260731-001.md",
+        at_step: 3,
+        ok: true,
+      });
+    });
+    runMutatedSpecFixture(
+      context,
+      "spec-question-mark",
+      ({ response }) => {
+        response.transcript[1].content = "Should I ask the user?";
+      },
+      { expectFailure: true },
+    );
+    runMutatedSpecFixture(
+      context,
+      "spec-request-user-input",
+      ({ response }) => {
+        response.transcript[1].tool_calls = [{ name: "request_user_input" }];
+      },
+      { expectFailure: true },
+    );
+    runMutatedSpecFixture(
+      context,
+      "spec-request-user-input-event",
+      ({ response }) => {
+        response.tool_events.push({
+          name: "request_user_input",
+          command: "request_user_input",
+          at_step: 3,
+          ok: true,
+        });
+      },
+      { expectFailure: true },
+    );
+    runMutatedSpecFixture(
+      context,
+      "spec-ask-user-question-event",
+      ({ response }) => {
+        response.tool_events.push({
+          name: "AskUserQuestion",
+          command: "Ask whether the synthesis should continue",
+          at_step: 3,
+          ok: true,
+        });
+      },
+      { expectFailure: true },
+    );
+    runMutatedSpecFixture(
+      context,
+      "spec-permission-denial",
+      ({ response }) => {
+        response.permission_denials = [{ tool: "Write", at_step: 2, detail: "denied" }];
+      },
+      { expectFailure: true },
+    );
+    runMutatedSpecFixture(
+      context,
+      "spec-product-escape",
+      ({ response, caseRoot }) => {
+        const outside = path.join(caseRoot, "outside.json");
+        fs.copyFileSync(
+          path.join(caseRoot, "spec-artifacts", "spec-synthesis.json"),
+          outside,
+        );
+        response.products[0].path = "../outside.json";
+      },
+      { expectFailure: true },
+    );
+    runMutatedSpecFixture(
+      context,
+      "spec-product-symlink",
+      ({ specArtifacts, caseRoot }) => {
+        const synthesis = path.join(specArtifacts, "spec-synthesis.json");
+        const target = path.join(caseRoot, "real-synthesis.json");
+        fs.copyFileSync(synthesis, target);
+        fs.rmSync(synthesis);
+        fs.symlinkSync(target, synthesis);
+      },
+      { expectFailure: true },
+    );
+  });
+
+  testCase(context, "spec_evaluator_accepts_citation_evidence_chain_and_requires_packet_event", () => {
+    runMutatedSpecFixture(context, "spec-duplicate-citation-lines", ({ response }) => {
+      response.citations.push({
+        path: response.citations[0].path,
+        line: 19,
+      });
+    });
+
+    const extraCitation = runMutatedSpecFixture(context, "spec-extra-citation-source", ({ response }) => {
+      response.citations.push({
+        path: "AGENTS.md",
+        line: 1,
+      });
+    });
+    ensure(
+      context,
+      extraCitation.stderr.includes("spec citations include additional sources: AGENTS.md"),
+      "citation superset passed without an audit warning",
+    );
+
+    runMutatedSpecFixture(
+      context,
+      "spec-missing-finding-citation",
+      ({ response }) => {
+        response.citations = response.citations.slice(1);
+      },
+      { expectFailure: true },
+    );
+
+    runMutatedSpecFixture(context, "spec-packet-tool-event-only", ({ response }) => {
+      response.file_reads = [];
+    });
+
+    runMutatedSpecFixture(
+      context,
+      "spec-missing-packet-tool-event",
+      ({ response }) => {
+        response.file_reads = [];
+        response.tool_events = response.tool_events.filter(
+          (event) => !event.command.includes("spec-packet.json"),
+        );
+      },
+      { expectFailure: true },
+    );
+  });
+
+  testCase(context, "spec_evaluator_rejects_session_owned_archive", () => {
+    const archived = runMutatedSpecFixture(
+      context,
+      "spec-session-archive",
+      ({ projectRoot }) => {
+        const specs = path.join(projectRoot, "docs", "specs");
+        fs.mkdirSync(specs, { recursive: true });
+        fs.writeFileSync(path.join(specs, "TASK-20260731-001.md"), "session archive\n");
+      },
+      { copyProject: true, expectFailure: true },
+    );
+    ensure(
+      context,
+      archived.stderr.includes("session ran archive; the evaluator owns the archive step"),
+      "session-owned archive rejection did not explain evaluator ownership",
+    );
+  });
+
+  testCase(context, "spec_evaluator_preserves_d38_d39_d48_semantics", () => {
+    runMutatedSpecFixture(context, "spec-failed-tool-warning", ({ response }) => {
+      response.tool_events.push({
+        name: "Read",
+        command: "Read missing optional note",
+        at_step: 3,
+        ok: false,
+      });
+    });
+
+    const base = readKyaml(SPEC_FIXTURES[0]);
+    const lateCase = path.join(context.root, "spec-late-conflict");
+    fs.mkdirSync(lateCase, { recursive: true });
+    const lateResponseFile = path.join(lateCase, "kickoff-response.json");
+    const lateResponse = readJson(fixturePath(base.kickoff_response));
+    const turnEvent = lateResponse.tool_events.find(
+      (event) => event.ok && event.command.includes("record-turn.mjs"),
+    );
+    const conflictEvent = lateResponse.tool_events.find(
+      (event) => event.ok && event.command.includes("record-conflicts.mjs"),
+    );
+    conflictEvent.at_step = turnEvent.at_step + 1;
+    writeJson(lateResponseFile, lateResponse);
+    runMutatedSpecFixture(
+      context,
+      "spec-late-conflict-fixture",
+      () => {},
+      { kickoffResponse: lateResponseFile },
+    );
+
+    const wrongResponseFile = path.join(lateCase, "wrong-order-response.json");
+    const wrongResponse = readJson(fixturePath(base.kickoff_response));
+    const deepEvent = wrongResponse.tool_events.find(
+      (event) => event.ok && event.command.includes("gather-context.mjs") && event.command.includes("--phase deep"),
+    );
+    deepEvent.at_step = 1;
+    writeJson(wrongResponseFile, wrongResponse);
+    runMutatedSpecFixture(
+      context,
+      "spec-wrong-kickoff-order",
+      () => {},
+      { kickoffResponse: wrongResponseFile, expectFailure: true },
+    );
+  });
+
+  testCase(context, "all_six_m2_fixtures_pass_current_evaluators", () => {
+    for (const fixture of KICKOFF_FIXTURES) {
+      runNode(context, EVAL_KICKOFF, ["--check-fixture", fixture], { cwd: ROOT });
+    }
+    for (const fixture of SPEC_FIXTURES) {
+      runNode(context, EVAL_SPEC, ["--check-fixture", fixture], { cwd: ROOT });
+    }
+  });
+}
+
+function readStalenessReport(run) {
+  return JSON.parse(run.stdout);
+}
+
+function assertStalenessShape(context, report) {
+  ensure(
+    context,
+    JSON.stringify(Object.keys(report)) ===
+      JSON.stringify(["kind", "version", "scanned_at", "artifacts_scanned", "findings", "staleness_count"]),
+    "staleness report fields or canonical order differ from D15",
+  );
+  ensure(context, report.kind === "kg.staleness_report" && report.version === 1, "staleness report kind/version invalid");
+  ensure(context, report.scanned_at === "2026-07-31T09:00:00.000Z", "staleness report clock mismatch");
+  ensure(context, report.staleness_count === report.findings.length, "staleness count differs from findings");
+  for (const finding of report.findings) {
+    ensure(
+      context,
+      JSON.stringify(Object.keys(finding)) ===
+        JSON.stringify(["detection_mode", "artifact_id", "source_ref", "issue", "severity"]),
+      "staleness finding fields or canonical order differ from D15",
+    );
+  }
+}
+
+function runHealth(context, project, options = {}) {
+  return runNode(
+    context,
+    options.entrypoint ?? HEALTH_CHECK,
+    [
+      "--root",
+      project,
+      "--now",
+      "2026-07-31T09:00:00Z",
+      ...(options.gates ? ["--gates", "--max-staleness", String(options.maxStaleness ?? 0)] : []),
+    ],
+    { cwd: project, expectFailure: options.expectFailure === true },
+  );
+}
+
+function setupStalenessProject(context, name) {
+  const caseRoot = path.join(context.root, name);
+  const project = path.join(caseRoot, "project");
+  fs.cpSync(KICKOFF_COMPILED_PROJECT, project, { recursive: true });
+  return { caseRoot, project };
+}
+
+function writeSidecarSourceRef(project, sourceRef) {
+  const file = path.join(project, "harness", "artifacts", "HAR-COMPILE-NOTES.yaml");
+  const record = readKyaml(file);
+  record.source_refs = [sourceRef];
+  fs.writeFileSync(file, harness.renderHarnessSidecar(record));
+}
+
+function runSevenStepChain(context) {
+  const caseRoot = path.join(context.root, "seven-step-chain");
+  const project = path.join(caseRoot, "project");
+  const artifacts = path.join(caseRoot, "artifacts");
+  fs.mkdirSync(project, { recursive: true });
+  fs.mkdirSync(artifacts, { recursive: true });
+  fs.cpSync(path.join(BOOTSTRAP_FIXTURE, "host"), project, { recursive: true });
+  fs.cpSync(
+    path.join(COMPILE_FIXTURE, "host", "docs", "accepted-compile-contract.md"),
+    path.join(project, "docs", "accepted-compile-contract.md"),
+    { recursive: true },
+  );
+  fs.cpSync(
+    path.join(COMPILE_FIXTURE, "host", "docs", "runbooks"),
+    path.join(project, "docs", "runbooks"),
+    { recursive: true },
+  );
+  fs.cpSync(
+    path.join(COMPILE_FIXTURE, "host", "harness"),
+    path.join(project, "harness"),
+    { recursive: true },
+  );
+  writeSidecarSourceRef(project, "docs/architecture/overview.md#L1");
+
+  runNode(
+    context,
+    INIT_INSTALL,
+    [project, "--copy", "--threshold", "2", "--docs-profile", "none", "--project-stage", "brownfield"],
+    { cwd: project, env: { KG_ROOT: project } },
+  );
+  const installed = (skill, script) =>
+    path.join(project, ".agents", "skills", skill, "scripts", script);
+  ensure(context, fs.existsSync(installed("kg-docs", "inventory.mjs")), "init did not install kg-docs");
+  ensure(context, fs.existsSync(installed("kg-scan", "health-check.mjs")), "init did not install staleness health check");
+
+  const inventory = path.join(artifacts, "inventory.json");
+  runNode(
+    context,
+    installed("kg-docs", "inventory.mjs"),
+    ["--root", project, "--output", inventory, "--now", "2026-07-31T06:00:00Z"],
+    { cwd: project },
+  );
+  const bootstrapPlan = path.join(artifacts, "bootstrap-plan.json");
+  fs.copyFileSync(path.join(ROOT, "scripts", "fixtures", "m2", "bootstrap", "plan.valid.json"), bootstrapPlan);
+  runNode(
+    context,
+    installed("kg-docs", "bootstrap.mjs"),
+    ["--project-root", project, "--inventory", inventory, "--plan", bootstrapPlan],
+    { cwd: project },
+  );
+  const architecture = path.join(project, "docs", "architecture", "overview.md");
+  const architectureText = fs.readFileSync(architecture, "utf8");
+  const architectureHash = fileHash(architecture);
+
+  const observationDraft = path.join(artifacts, "observation.json");
+  const observedStatement = readJson(bootstrapPlan).observed_facts[0].statement;
+  ensure(context, architectureText.includes(observedStatement), "bootstrap output omitted the planned observed fact");
+  writeJson(observationDraft, {
+    source: "task_outcome",
+    claim: `The bootstrapped architecture records: ${observedStatement}`,
+    context: {
+      task: "m2-seven-step-chain",
+      paths: ["docs/architecture/overview.md"],
+    },
+    evidence: [
+      {
+        type: "test",
+        ref: `docs/architecture/overview.md#sha256=${architectureHash}`,
+      },
+    ],
+  });
+  runNode(
+    context,
+    installed("kg-observe", "add-observation.mjs"),
+    [observationDraft, "--now", "2026-07-31T06:10:00Z"],
+    { cwd: project, env: { KG_ROOT: project } },
+  );
+  const observationFile = path.join(project, ".kg", "observations", "OBS-20260731-001.yaml");
+  const observation = readKyaml(observationFile);
+  ensure(context, observation.evidence[0].ref.includes(architectureHash), "observe did not consume bootstrap bytes");
+
+  const compilePlan = path.join(artifacts, "compile-plan.json");
+  writeJson(compilePlan, {
+    kind: "kg.compile_plan",
+    version: 1,
+    items: [
+      {
+        observation_id: observation.id,
+        result_type: "publish_kn_and_carrier",
+        knowledge: {
+          claim: observation.claim,
+          category: "project_knowledge",
+          scope: {
+            paths: ["docs/architecture/**", "docs/runbooks/**"],
+          },
+          authority: "verified_runtime_behavior",
+          confidence: 1,
+          body: "## Constraint\n\nThe managed runbook records the bootstrapped architecture fact.",
+        },
+        carrier: {
+          artifact_id: "HAR-COMPILE-NOTES",
+          content: `Compiled from ${observation.id}: ${observation.claim}`,
+        },
+      },
+    ],
+  });
+  const compileContext = path.join(artifacts, "compile-context.json");
+  runNode(
+    context,
+    installed("kg-compile", "compile.mjs"),
+    ["--root", project, "--output", compileContext, "--now", "2026-07-31T06:20:00Z"],
+    { cwd: project, env: { KG_ROOT: project } },
+  );
+  runNode(
+    context,
+    installed("kg-compile", "apply-compile-plan.mjs"),
+    [
+      "--root",
+      project,
+      "--context",
+      compileContext,
+      "--plan",
+      compilePlan,
+      "--now",
+      "2026-07-31T06:20:00Z",
+    ],
+    { cwd: project, env: { KG_ROOT: project } },
+  );
+  const generatedKnName = fs.readdirSync(path.join(project, "knowledge")).find((name) => name.startsWith("KN-0001-"));
+  const generatedKnPath = `knowledge/${generatedKnName}`;
+  const generatedKn = readKnowledge(path.join(project, ...generatedKnPath.split("/"))).frontmatter;
+  ensure(context, generatedKn.claim === observation.claim, "compile KN did not consume the observation claim");
+  ensure(context, generatedKn.source_obs_ids.includes(observation.id), "compile KN lost the observation reverse link");
+
+  const kickoffDir = path.join(artifacts, "kickoff");
+  fs.mkdirSync(kickoffDir);
+  const indexFile = path.join(kickoffDir, "kickoff-index.json");
+  const contextFile = path.join(kickoffDir, "kickoff-context.json");
+  const turnInput = path.join(kickoffDir, "kickoff-turn-input.json");
+  const turnTranscript = path.join(kickoffDir, "kickoff-turn-transcript.json");
+  const turnFile = path.join(kickoffDir, "kickoff-turn.yaml");
+  const kickoffTask = "Preserve the bootstrapped architecture fact in the managed compile runbook";
+  const gatherScript = installed("kg-kickoff", "gather-context.mjs");
+  runNode(
+    context,
+    gatherScript,
+    ["--root", project, "--task", kickoffTask, "--phase", "index", "--output", indexFile],
+    { cwd: project },
+  );
+  const index = readJson(indexFile);
+  const findingPaths = [
+    generatedKnPath,
+    "docs/runbooks/compile-notes.md",
+    "docs/architecture/overview.md",
+  ];
+  for (const sourcePath of findingPaths) {
+    ensure(context, index.entries.some((entry) => entry.path === sourcePath), `kickoff index omitted ${sourcePath}`);
+  }
+  runNode(
+    context,
+    gatherScript,
+    [
+      "--root",
+      project,
+      "--phase",
+      "deep",
+      "--index",
+      indexFile,
+      ...findingPaths.flatMap((sourcePath) => ["--include", sourcePath]),
+      "--output",
+      contextFile,
+    ],
+    { cwd: project },
+  );
+  const question = "Should the task update only the managed runbook block?";
+  const transcript = {
+    transcript: [
+      { role: "user", content: kickoffTask },
+      { role: "assistant", content: `I recommend the managed block because it preserves human text. ${question}` },
+    ],
+  };
+  writeJson(turnTranscript, transcript);
+  const findings = findingPaths.map((sourcePath) => {
+    const entry = index.entries.find((item) => item.path === sourcePath);
+    return {
+      source_path: sourcePath,
+      line: sourcePath === "docs/runbooks/compile-notes.md" ? 3 : sourcePath === generatedKnPath ? 3 : 1,
+      status: entry.status,
+      authority: entry.authority,
+    };
+  });
+  writeJson(turnInput, {
+    findings,
+    question: {
+      question_text: question,
+      assistant_message_index: 1,
+    },
+  });
+  runNode(
+    context,
+    installed("kg-kickoff", "record-turn.mjs"),
+    [
+      "--project-root",
+      project,
+      "--index",
+      indexFile,
+      "--input",
+      turnInput,
+      "--transcript",
+      turnTranscript,
+      "--output",
+      turnFile,
+      "--now",
+      "2026-07-31T06:30:00Z",
+    ],
+    { cwd: project },
+  );
+  const turn = readKyaml(turnFile);
+  ensure(
+    context,
+    turn.findings.some((finding) => finding.source_path === generatedKnPath) &&
+      turn.findings.some((finding) => finding.source_path === "docs/runbooks/compile-notes.md"),
+    "kickoff turn did not consume the compiled KN and carrier",
+  );
+
+  const kickoffResponse = path.join(kickoffDir, "runner-response.json");
+  const kickoffSessionId = "m2-seven-step-kickoff";
+  writeJson(kickoffResponse, {
+    session_id: kickoffSessionId,
+    transcript: transcript.transcript,
+    file_reads: findingPaths.map((sourcePath) => ({ path: sourcePath, at_step: 2 })),
+    citations: findings.map((finding) => ({ path: finding.source_path, line: finding.line })),
+    products: [
+      { kind: "kg.kickoff_context_index", path: "kickoff-index.json" },
+      { kind: "kg.kickoff_context", path: "kickoff-context.json" },
+      { kind: "kg.kickoff_turn", path: "kickoff-turn.yaml" },
+    ],
+    tool_events: [
+      {
+        name: "Bash",
+        command: "node gather-context.mjs --phase index --output kickoff-index.json",
+        at_step: 1,
+        ok: true,
+      },
+      {
+        name: "Bash",
+        command: `node gather-context.mjs --phase deep ${findingPaths.map((item) => `--include ${item}`).join(" ")} --output kickoff-context.json`,
+        at_step: 2,
+        ok: true,
+      },
+      {
+        name: "Bash",
+        command: "node record-turn.mjs --index kickoff-index.json --output kickoff-turn.yaml",
+        at_step: 3,
+        ok: true,
+      },
+    ],
+    permission_denials: [],
+  });
+
+  const specPacket = path.join(artifacts, "spec-packet.json");
+  runNode(
+    context,
+    installed("kg-spec", "produce-spec.mjs"),
+    [
+      "--prepare",
+      "--project-root",
+      project,
+      "--transcript",
+      kickoffResponse,
+      "--kickoff-artifacts",
+      kickoffDir,
+      "--output",
+      specPacket,
+    ],
+    { cwd: project },
+  );
+  const specSynthesis = path.join(artifacts, "spec-synthesis.json");
+  writeJson(specSynthesis, {
+    kind: "kg.spec_synthesis",
+    version: 2,
+    task: {
+      title: "Preserve bootstrap facts in the compile-managed runbook",
+    },
+    context: [
+      observation.claim,
+      `The kickoff selected ${turn.findings.length} structured sources.`,
+    ],
+    requirements: [
+      "Update the managed compile runbook block from the compiled knowledge entry.",
+    ],
+    constraints: turn.findings.map((finding) => ({
+      constraint: `Preserve the constraint recorded by ${finding.source_path}.`,
+      source_path: `${finding.source_path}#L${finding.line}`,
+      source_status: finding.status,
+      authority: finding.authority,
+    })),
+    references: [
+      "harness/artifacts/HAR-COMPILE-NOTES.yaml",
+    ],
+    out_of_scope: [
+      {
+        statement: "Changing text outside the managed runbook block.",
+        conflict_source_path: null,
+      },
+    ],
+    acceptance_criteria: [
+      "GIVEN the compiled knowledge entry WHEN the spec is archived THEN the managed runbook constraint remains cited.",
+    ],
+    open_questions: [],
+    session_history: [
+      {
+        session_id: kickoffSessionId,
+        turn_session_id: turn.session_id,
+        product_kinds: [
+          "kg.kickoff_context_index",
+          "kg.kickoff_context",
+          "kg.kickoff_turn",
+        ],
+      },
+    ],
+  });
+  const archived = runNode(
+    context,
+    installed("kg-spec", "produce-spec.mjs"),
+    [
+      "--archive",
+      "--project-root",
+      project,
+      "--packet",
+      specPacket,
+      "--synthesis",
+      specSynthesis,
+      "--now",
+      "2026-07-31T06:40:00Z",
+    ],
+    { cwd: project },
+  );
+  const archiveResult = JSON.parse(archived.stdout);
+  const archivedSpec = path.join(project, ...archiveResult.path.split("/"));
+  ensure(context, fs.existsSync(archivedSpec), "spec archive did not consume the kickoff packet");
+  const archivedText = fs.readFileSync(archivedSpec, "utf8");
+  ensure(
+    context,
+    archivedText.includes(kickoffSessionId) && archivedText.includes(generatedKnPath),
+    "archived spec lost kickoff or compile provenance",
+  );
+
+  const health = runNode(
+    context,
+    installed("kg-scan", "health-check.mjs"),
+    [
+      "--root",
+      project,
+      "--now",
+      "2026-07-31T06:50:00Z",
+      "--gates",
+      "--max-staleness",
+      "0",
+    ],
+    { cwd: project },
+  );
+  const report = JSON.parse(health.stdout);
+  ensure(context, report.artifacts_scanned === 1 && report.staleness_count === 0, "seven-step staleness gate failed");
+  ensure(context, fileHash(architecture) === architectureHash, "seven-step chain changed the bootstrap source bytes");
+}
+
+function runPart7(context) {
+  testCase(context, "scan_reports_one_missing_source_ref", () => {
+    const setup = setupStalenessProject(context, "staleness-positive");
+    const unreadable = path.join(setup.project, ".kg", "observations");
+    fs.mkdirSync(unreadable, { recursive: true });
+    fs.writeFileSync(path.join(unreadable, "invalid.yaml"), "invalid and intentionally unread\n");
+    fs.writeFileSync(
+      path.join(setup.project, "should-not-run.mjs"),
+      "import fs from 'node:fs'; fs.writeFileSync('host-code-ran', 'bad');\n",
+    );
+    const healthy = readStalenessReport(runHealth(context, setup.project));
+    assertStalenessShape(context, healthy);
+    ensure(context, healthy.artifacts_scanned === 1, "healthy fixture did not scan one artifact");
+    ensure(context, healthy.staleness_count === 0, "healthy fixture was falsely reported stale");
+    ensure(context, !fs.existsSync(path.join(setup.project, "host-code-ran")), "staleness scan executed host code");
+
+    const source = path.join(setup.project, "docs", "accepted-compile-contract.md");
+    const moved = path.join(setup.project, "docs", "accepted-compile-contract.moved.md");
+    fs.renameSync(source, moved);
+    const staleRun = runHealth(context, setup.project);
+    const stale = readStalenessReport(staleRun);
+    assertStalenessShape(context, stale);
+    ensure(context, stale.staleness_count === 1, "corrupted source did not yield count 1");
+    ensure(
+      context,
+      JSON.stringify(stale.findings[0]) ===
+        JSON.stringify({
+          detection_mode: "deterministic",
+          artifact_id: "HAR-COMPILE-NOTES",
+          source_ref: "docs/accepted-compile-contract.md#L15",
+          issue: "missing_source",
+          severity: "high",
+        }),
+      "missing-source finding differs from D15",
+    );
+    const gate = runHealth(context, setup.project, { gates: true, expectFailure: true });
+    ensure(context, gate.status !== 0, "staleness gate returned zero above the threshold");
+    ensure(context, readStalenessReport(gate).staleness_count === 1, "gate output lost the finding");
+    fs.renameSync(moved, source);
+    const restored = readStalenessReport(runHealth(context, setup.project));
+    ensure(context, restored.staleness_count === 0, "restored source remained stale, suggesting cached state");
+    const direct = readStalenessReport(
+      runHealth(context, setup.project, { entrypoint: STALENESS_CHECK }),
+    );
+    ensure(context, JSON.stringify(direct) === JSON.stringify(restored), "health-check alias differs from check-staleness");
+  });
+
+  testCase(context, "scan_rejects_invalid_sidecar_without_trusted_result", () => {
+    const setup = setupStalenessProject(context, "staleness-invalid-sidecar");
+    const sidecar = path.join(setup.project, "harness", "artifacts", "HAR-COMPILE-NOTES.yaml");
+    fs.writeFileSync(sidecar, fs.readFileSync(sidecar, "utf8").replace("artifact_id: HAR-COMPILE-NOTES\n", ""));
+    const rejected = runHealth(context, setup.project, { expectFailure: true });
+    ensure(context, rejected.stdout.trim() === "", "invalid sidecar emitted a trusted health report");
+  });
+
+  testCase(context, "scan_rejects_kg_escape_and_symlink_source_refs", () => {
+    for (const [name, sourceRef, setupHost] of [
+      [
+        "kg-case",
+        ".KG/hidden.md#L1",
+        (project) => {
+          fs.mkdirSync(path.join(project, ".KG"));
+          fs.writeFileSync(path.join(project, ".KG", "hidden.md"), "hidden\n");
+        },
+      ],
+      [
+        "escape",
+        "../outside.md#L1",
+        (project) => {
+          fs.writeFileSync(path.join(path.dirname(project), "outside.md"), "outside\n");
+        },
+      ],
+      [
+        "symlink",
+        "docs/source-alias.md#L1",
+        (project) => {
+          fs.symlinkSync(
+            path.join(project, "docs", "accepted-compile-contract.md"),
+            path.join(project, "docs", "source-alias.md"),
+          );
+        },
+      ],
+    ]) {
+      const setup = setupStalenessProject(context, `staleness-${name}`);
+      setupHost(setup.project);
+      writeSidecarSourceRef(setup.project, sourceRef);
+      const rejected = runHealth(context, setup.project, { expectFailure: true });
+      ensure(context, rejected.stdout.trim() === "", `${name} source ref emitted a trusted report`);
+    }
+  });
+
+  testCase(context, "seven_step_pipeline_consumes_real_outputs", () => {
+    runSevenStepChain(context);
   });
 }
 

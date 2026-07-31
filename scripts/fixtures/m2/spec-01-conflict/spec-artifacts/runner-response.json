@@ -1,0 +1,46 @@
+{
+  "session_id": "m2-spec-fixture-01",
+  "transcript": [
+    {
+      "role": "user",
+      "content": "Synthesize the supplied kickoff packet without interviewing the user."
+    },
+    {
+      "role": "assistant",
+      "content": "The synthesis JSON is complete and preserves the structured conflict links.",
+      "tool_calls": []
+    }
+  ],
+  "file_reads": [],
+  "citations": [
+    {
+      "path": "docs/decisions/0001-payment-order-event-bus.md",
+      "line": 15
+    },
+    {
+      "path": "docs/traps/payment-direct-write.md",
+      "line": 14
+    }
+  ],
+  "products": [
+    {
+      "kind": "kg.spec_synthesis",
+      "path": "spec-synthesis.json"
+    }
+  ],
+  "tool_events": [
+    {
+      "name": "Read",
+      "command": "Read spec-packet.json",
+      "at_step": 1,
+      "ok": true
+    },
+    {
+      "name": "Write",
+      "command": "Write spec-synthesis.json",
+      "at_step": 2,
+      "ok": true
+    }
+  ],
+  "permission_denials": []
+}

@@ -1,0 +1,5 @@
+kind: kg.kickoff_conflicts
+version: 1
+conflicts:
+  - { summary: "任务中「写入」可字面解读为 Payment 直接写入 Order 数据库，违反决策 0001「Payment must not write the Order database directly」", source_path: docs/decisions/0001-payment-order-event-bus.md, line: 15 }
+  - { summary: "直接写入重试会绕过事件去重导致重复状态转换，违反陷阱文档的安全路径", source_path: docs/traps/payment-direct-write.md, line: 14 }

@@ -1,0 +1,64 @@
+{
+  "kind": "kg.kickoff_context",
+  "version": 1,
+  "project_root": "/private/tmp/c9-r24r/g1/workspace/project",
+  "index_path": "/tmp/c9-r24r/g1/session/kickoff-index.json",
+  "documents": [
+    {
+      "path": "docs/decisions/0001-payment-order-event-bus.md",
+      "source": "project_document",
+      "status": "accepted",
+      "authority": "formal_decision",
+      "content": "---\nkind: kg.project_document\ntitle: \"Payment to Order event boundary\"\ndoc_type: decision\nstatus: accepted\nowners: [payments, orders]\naccepted_at: 2026-07-28\nsupersedes: null\n---\n\n# Payment to Order event boundary\n\n## Decision\n\nPayment emits `payment.authorized`; Order consumes the event. Payment must not write the Order database directly.\n\n## Retry constraint\n\nPublication retries must reuse the same idempotency key so Order can discard duplicate delivery.\n",
+      "bytes": 461,
+      "original_bytes": 461,
+      "truncated": false
+    },
+    {
+      "path": "docs/traps/payment-direct-write.md",
+      "source": "project_document",
+      "status": "accepted",
+      "authority": "formal_decision",
+      "content": "---\nkind: kg.project_document\ntitle: \"Payment direct write trap\"\ndoc_type: trap\nstatus: accepted\naccepted_at: 2026-07-29\nsupersedes: null\n---\n\n# Payment direct write trap\n\n## Failure mode\n\nRetrying a direct Order database write bypasses event deduplication and can produce duplicate state transitions.\n\n## Safe path\n\nRetry event publication with the original idempotency key.\n",
+      "bytes": 376,
+      "original_bytes": 376,
+      "truncated": false
+    },
+    {
+      "path": "knowledge/KN-0001-payment-boundary.md",
+      "source": "knowledge",
+      "status": "active",
+      "authority": "formal_decision",
+      "content": "---\nid: KN-0001\nclaim: \"Payment communicates with Order through the accepted event boundary.\"\ncategory: project_contract\nscope:\n  paths: [services/payment/**, services/order/**]\nevidence:\n  - { type: quote, ref: \"docs/decisions/0001-payment-order-event-bus.md Decision\" }\nauthority: formal_decision\nconfidence: 0.95\nlifecycle: active\nsupersedes: null\nlast_verified: 2026-07-29\nregret: null\n---\n\n# Payment boundary\n\nUse the accepted decision as the stable source.\n",
+      "bytes": 463,
+      "original_bytes": 463,
+      "truncated": false
+    },
+    {
+      "path": "docs/architecture/overview.md",
+      "source": "project_document",
+      "status": "draft",
+      "authority": "reference_only",
+      "content": "---\nkind: kg.project_document\ntitle: \"Payment and Order overview\"\ndoc_type: architecture\nstatus: draft\nsupersedes: null\n---\n\n# Payment and Order overview\n\nPayment and Order are separate services. The event boundary is under review.\n",
+      "bytes": 232,
+      "original_bytes": 232,
+      "truncated": false
+    },
+    {
+      "path": "docs/standards/api.md",
+      "source": "project_document",
+      "status": "draft",
+      "authority": "reference_only",
+      "content": "---\nkind: kg.project_document\ntitle: \"Internal API standard\"\ndoc_type: standard\nstatus: draft\nsupersedes: null\n---\n\n# Internal API standard\n\nInternal event payloads should include a request identifier.\n",
+      "bytes": 202,
+      "original_bytes": 202,
+      "truncated": false
+    }
+  ],
+  "budget": {
+    "limit_bytes": 131072,
+    "consumed_bytes": 1734,
+    "remaining_bytes": 129338,
+    "truncated": false
+  }
+}

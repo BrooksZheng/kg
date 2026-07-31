@@ -1,0 +1,18 @@
+kind: kg.eval_spec_fixture
+version: 2
+project_root: scripts/fixtures/m2/spec-01-conflict/project
+kickoff_response: scripts/fixtures/m2/spec-01-conflict/kickoff/runner-stdout.txt
+kickoff_artifacts_root: scripts/fixtures/m2/spec-01-conflict/kickoff/session
+spec_response: scripts/fixtures/m2/spec-01-conflict/spec-artifacts/runner-response.json
+spec_artifacts_root: scripts/fixtures/m2/spec-01-conflict/spec-artifacts
+expected_sources:
+  - docs/decisions/0001-payment-order-event-bus.md
+  - docs/traps/payment-direct-write.md
+expected_conflict_sources:
+  - docs/decisions/0001-payment-order-event-bus.md
+  - docs/traps/payment-direct-write.md
+expected_kickoff_session_id: a2a74916-3957-40ac-8a90-77f0b797e484
+expected_turn_session_id: 4bd4a71c-c999-4fd7-bc42-52dee786419a
+required_sections: "Context|Requirements|Constraints|References|Out of Scope|Acceptance Criteria|Open Questions|Session History"
+c1_zero_interview_score: 4
+forbid_user_questions: true

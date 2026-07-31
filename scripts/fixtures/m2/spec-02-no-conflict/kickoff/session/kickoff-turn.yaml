@@ -1,0 +1,11 @@
+kind: kg.kickoff_turn
+version: 1
+recorded_at: 2026-07-31T07:41:12.814Z
+session_id: f5f684f4-3125-4223-bc64-2e2c92033344
+findings:
+  - { source_path: docs/decisions/0001-payment-order-event-bus.md, line: 19, status: accepted, authority: formal_decision }
+  - { source_path: docs/traps/payment-direct-write.md, line: 18, status: accepted, authority: formal_decision }
+  - { source_path: knowledge/KN-0001-payment-boundary.md, line: 3, status: active, authority: formal_decision }
+question:
+  question_text: "你希望把重试逻辑放在支付服务的发布层（应用层复用原始幂等键），还是放在事件总线基础设施层？我推荐放在支付服务的发布层。理由：AGENTS.md 要求重试行为保持确定性，docs/decisions/0001-payment-order-event-bus.md 的 Retry constraint 要求发布重试必须复用相同幂等键，在发布层实现可以对原始键的传递做最直接的控制。"
+  assistant_message_index: 1

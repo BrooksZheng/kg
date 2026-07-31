@@ -1,0 +1,11 @@
+kind: kg.kickoff_turn
+version: 1
+recorded_at: 2026-07-31T07:59:40.576Z
+session_id: 064eb7fe-ed62-44be-97c1-20139eace603
+findings:
+  - { source_path: docs/accepted-compile-contract.md, line: 14, status: accepted, authority: formal_decision }
+  - { source_path: knowledge/KN-0002-compile-managed-runbooks-must-preserve-human.md, line: 3, status: active, authority: verified_runtime_behavior }
+  - { source_path: docs/runbooks/compile-notes.md, line: 3, status: unregistered, authority: reference_only }
+question:
+  question_text: "你希望 compile 更新所有 runbook 文件中的托管块，还是替换每个 runbook 文件的全部内容？我推荐前者（仅更新托管块）。理由：KN-0002 约束要求 compile 托管的 runbook 必须保留托管块之外的人类文本，compile-notes.md 中 human preface 与 human epilogue 均标注「compile must preserve byte for byte」，替换整个文件内容将违反此已接受约束。"
+  assistant_message_index: 1

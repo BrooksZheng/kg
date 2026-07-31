@@ -1,0 +1,17 @@
+kind: kg.eval_spec_fixture
+version: 2
+project_root: scripts/fixtures/m2/spec-02-no-conflict/project
+kickoff_response: scripts/fixtures/m2/spec-02-no-conflict/kickoff/runner-stdout.txt
+kickoff_artifacts_root: scripts/fixtures/m2/spec-02-no-conflict/kickoff/session
+spec_response: scripts/fixtures/m2/spec-02-no-conflict/spec-artifacts/runner-response.json
+spec_artifacts_root: scripts/fixtures/m2/spec-02-no-conflict/spec-artifacts
+expected_sources:
+  - docs/decisions/0001-payment-order-event-bus.md
+  - docs/traps/payment-direct-write.md
+  - knowledge/KN-0001-payment-boundary.md
+expected_conflict_sources: []
+expected_kickoff_session_id: ae6fecfb-06ea-40c2-babf-28df7c2f2644
+expected_turn_session_id: f5f684f4-3125-4223-bc64-2e2c92033344
+required_sections: "Context|Requirements|Constraints|References|Out of Scope|Acceptance Criteria|Open Questions|Session History"
+c1_zero_interview_score: 4
+forbid_user_questions: true

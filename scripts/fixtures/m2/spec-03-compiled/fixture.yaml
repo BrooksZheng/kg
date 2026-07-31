@@ -1,0 +1,18 @@
+kind: kg.eval_spec_fixture
+version: 2
+project_root: scripts/fixtures/m2/spec-03-compiled/project
+kickoff_response: scripts/fixtures/m2/spec-03-compiled/kickoff/runner-stdout.txt
+kickoff_artifacts_root: scripts/fixtures/m2/spec-03-compiled/kickoff/session
+spec_response: scripts/fixtures/m2/spec-03-compiled/spec-artifacts/runner-response.json
+spec_artifacts_root: scripts/fixtures/m2/spec-03-compiled/spec-artifacts
+expected_sources:
+  - docs/accepted-compile-contract.md
+  - knowledge/KN-0002-compile-managed-runbooks-must-preserve-human.md
+  - docs/runbooks/compile-notes.md
+expected_conflict_sources:
+  - knowledge/KN-0002-compile-managed-runbooks-must-preserve-human.md
+expected_kickoff_session_id: 35414798-fee2-468f-8ecb-4468fa18a3fd
+expected_turn_session_id: 064eb7fe-ed62-44be-97c1-20139eace603
+required_sections: "Context|Requirements|Constraints|References|Out of Scope|Acceptance Criteria|Open Questions|Session History"
+c1_zero_interview_score: 4
+forbid_user_questions: true

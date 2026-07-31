@@ -1,0 +1,10 @@
+kind: kg.kickoff_turn
+version: 1
+recorded_at: 2026-07-31T07:35:15.269Z
+session_id: 4bd4a71c-c999-4fd7-bc42-52dee786419a
+findings:
+  - { source_path: docs/decisions/0001-payment-order-event-bus.md, line: 15, status: accepted, authority: formal_decision }
+  - { source_path: docs/traps/payment-direct-write.md, line: 14, status: accepted, authority: formal_decision }
+question:
+  question_text: "你希望为事件发布增加重试（遵循事件边界），还是为直接数据库写入增加重试？我推荐事件发布重试。理由：已接受决策 0001 第 15 行明确规定 Payment 不得直接写入 Order 数据库，陷阱文档第 14 行指出直接写入重试会绕过事件去重导致重复状态转换，安全路径为事件发布重试并复用原始幂等键（第 18 行）。"
+  assistant_message_index: 1
