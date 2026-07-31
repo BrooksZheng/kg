@@ -91,6 +91,12 @@ records files created for the evaluator.
 `at_step` is the transcript or provider step, and `ok` reports tool success.
 `permission_denials` records every provider permission rejection.
 
+When an evaluator asks the agent to submit a plan file, the corresponding
+successful `tool_events` entry must describe a file-writing action such as
+`Write` or an equivalent provider tool. Shell tool names such as `Bash`,
+`Shell`, or equivalent command executors do not prove plan submission, even
+when `command` contains the plan filename.
+
 Both 1.1 response fields are optional for backward compatibility. A missing
 field is interpreted as an empty array. A non-empty `permission_denials`
 array makes the session invalid. An evaluator that requires proof of a tool

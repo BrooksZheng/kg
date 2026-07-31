@@ -89,10 +89,15 @@ node skills/kg-compile/scripts/validate-knowledge.mjs
 node skills/kg-compile/scripts/transition-entry.mjs ...
 node skills/kg-compile/scripts/archive-observations.mjs \
   --observation <OBS-id> --compiled-to-kn <KN-id>
+node skills/kg-compile/scripts/archive-observations.mjs \
+  --observation <OBS-id> --verdict <routing-verdict>
 node skills/kg-compile/scripts/report-metrics.mjs [--clear-round]
 ```
 
-The workflow and legal sequencing live in `skills/kg-compile/SKILL.md`.
+Exactly one archive result is required. KN-producing routes use
+`--compiled-to-kn`; legal no-KN outcomes from `protocol/routing.yaml` use
+`--verdict`. The workflow and legal sequencing live in
+`skills/kg-compile/SKILL.md`.
 
 ## Shared module exports
 

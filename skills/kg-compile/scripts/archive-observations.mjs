@@ -1,11 +1,13 @@
-// Create a canonical processed observation with its compile-owned KN
-// writeback, then remove the untouched pending original.
+// Create a canonical processed observation, optionally with its compile-owned
+// KN writeback, then remove the untouched pending original.
 //
 // Usage:
 //   node archive-observations.mjs --observation OBS-... --compiled-to-kn KN-...
+//   node archive-observations.mjs --observation OBS-... --verdict <routing-verdict>
 //
-// All predictable errors are checked before mutation. The referenced
-// knowledge entry must exist and pass the knowledge schema.
+// Exactly one archive result is required. All predictable errors are checked
+// before mutation. A referenced knowledge entry must exist and pass the
+// knowledge schema. No-KN verdicts are loaded from protocol/routing.yaml.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -15,22 +17,33 @@ function parseArgs(argv) {
   const out = {};
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
-    if (!["--observation", "--compiled-to-kn"].includes(arg)) host.fail(`unknown option: ${arg}`);
+    if (!["--observation", "--compiled-to-kn", "--verdict"].includes(arg)) host.fail(`unknown option: ${arg}`);
     const value = argv[index + 1];
     if (!value || value.startsWith("--")) host.fail(`${arg} needs a value`);
-    const key = arg === "--observation" ? "observation" : "compiledToKn";
+    const key =
+      arg === "--observation" ? "observation"
+      : arg === "--compiled-to-kn" ? "compiledToKn"
+      : "verdict";
     if (out[key]) host.fail(`${arg} may be supplied only once`);
     out[key] = value;
     index += 1;
   }
-  if (!out.observation || !out.compiledToKn) {
-    host.fail("usage: archive-observations.mjs --observation OBS-... --compiled-to-kn KN-...");
+  if (!out.observation) {
+    host.fail(
+      "usage: archive-observations.mjs --observation OBS-... (--compiled-to-kn KN-... | --verdict <routing-verdict>)",
+    );
+  }
+  if (out.compiledToKn && out.verdict) {
+    host.fail("--compiled-to-kn and --verdict are mutually exclusive");
+  }
+  if (!out.compiledToKn && !out.verdict) {
+    host.fail("exactly one of --compiled-to-kn or --verdict is required");
   }
   return out;
 }
 
-function canonicalObservation(record) {
-  return {
+function canonicalObservation(record, compiledToKn) {
+  const canonical = {
     id: record.id,
     at: record.at,
     source: record.source,
@@ -38,8 +51,28 @@ function canonicalObservation(record) {
     context: record.context,
     evidence: record.evidence,
     urgency: record.urgency,
-    compiled_to_kn: record.compiled_to_kn,
   };
+  if (compiledToKn !== undefined) canonical.compiled_to_kn = compiledToKn;
+  return canonical;
+}
+
+function loadNoKnowledgeVerdicts() {
+  let routing;
+  try {
+    routing = protocol.loadRouting();
+  } catch (error) {
+    host.fail(`routing protocol could not be loaded: ${error.message}`);
+  }
+  if (!Array.isArray(routing.verdicts) || !routing.verdicts.every((value) => typeof value === "string" && value)) {
+    host.fail("protocol/routing.yaml verdicts must be a list of non-empty strings");
+  }
+  if (routing.categories === null || typeof routing.categories !== "object" || Array.isArray(routing.categories)) {
+    host.fail("protocol/routing.yaml categories must be a mapping");
+  }
+  const humanCategories = Object.entries(routing.categories)
+    .filter(([, route]) => route?.autonomy === "human")
+    .map(([category]) => category);
+  return new Set([...routing.verdicts, ...humanCategories]);
 }
 
 function findKnowledgeEntry(knowledgeDir, id) {
@@ -70,7 +103,15 @@ function findKnowledgeEntry(knowledgeDir, id) {
 
 const args = parseArgs(process.argv.slice(2));
 if (!/^OBS-[0-9]{8}-[0-9]{3}$/.test(args.observation)) host.fail(`invalid observation id: ${args.observation}`);
-if (!/^KN-[0-9]{4}$/.test(args.compiledToKn)) host.fail(`invalid compiled_to_kn: ${args.compiledToKn}`);
+if (args.compiledToKn && !/^KN-[0-9]{4}$/.test(args.compiledToKn)) {
+  host.fail(`invalid compiled_to_kn: ${args.compiledToKn}`);
+}
+if (args.verdict) {
+  const allowedVerdicts = loadNoKnowledgeVerdicts();
+  if (!allowedVerdicts.has(args.verdict)) {
+    host.fail(`invalid no-knowledge verdict: ${args.verdict} (allowed: ${[...allowedVerdicts].join(" | ")})`);
+  }
+}
 
 let hostRoot;
 try {
@@ -85,8 +126,7 @@ if (!fs.existsSync(source) || !fs.statSync(source).isFile()) {
   host.fail(`observation not found in inbox: ${args.observation}`);
 }
 if (fs.existsSync(destination)) host.fail(`already archived: ${path.basename(destination)}`);
-
-findKnowledgeEntry(paths.knowledge, args.compiledToKn);
+if (args.compiledToKn) findKnowledgeEntry(paths.knowledge, args.compiledToKn);
 
 let observation;
 try {
@@ -101,7 +141,7 @@ if (observation.compiled_to_kn !== undefined && observation.compiled_to_kn !== n
 }
 if (inputErrors.length) host.fail(`observation is invalid: ${inputErrors.join("; ")}`);
 
-const processed = canonicalObservation({ ...observation, compiled_to_kn: args.compiledToKn });
+const processed = canonicalObservation(observation, args.compiledToKn);
 const outputErrors = protocol.validateRecord(processed, protocol.loadObservationSchema());
 if (outputErrors.length) host.fail(`processed observation would be invalid: ${outputErrors.join("; ")}`);
 
@@ -118,4 +158,8 @@ try {
   if (destinationCreated) fs.rmSync(destination, { force: true });
   throw error;
 }
-console.log(`kg: archived ${args.observation} with compiled_to_kn ${args.compiledToKn}`);
+console.log(
+  args.compiledToKn
+    ? `kg: archived ${args.observation} with compiled_to_kn ${args.compiledToKn}`
+    : `kg: archived ${args.observation} with verdict ${args.verdict}`,
+);

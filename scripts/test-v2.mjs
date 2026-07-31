@@ -334,6 +334,25 @@ function runPart2(context) {
       missingToolResult.failures.tools.some((failure) => failure.includes("inventory.mjs tool event missing")),
       "missing inventory tool event failure was not reported",
     );
+
+    const shellPlanArtifacts = path.join(context.root, "gb-evaluator-shell-plan");
+    runNode(
+      context,
+      EVAL_BOOTSTRAP,
+      ["--fixture", fixture, "--artifacts", shellPlanArtifacts],
+      {
+        cwd: ROOT,
+        env: { KG_EVAL_RUNNER: MOCK_BOOTSTRAP_RUNNER, KG_FAKE_SHELL_PLAN: "1" },
+        expectFailure: true,
+      },
+    );
+    const shellPlanResult = readJson(path.join(shellPlanArtifacts, "result.json"));
+    ensure(context, shellPlanResult.pass === false, "Bash plan event did not invalidate G-B");
+    ensure(
+      context,
+      shellPlanResult.failures.tools.some((failure) => failure.includes("JSON plan submission tool event missing")),
+      "Bash plan event was accepted as plan submission",
+    );
   });
 }
 
@@ -376,6 +395,22 @@ function assertCanonicalObservation(context, text, { compiled = false } = {}) {
     previous = index;
   }
   if (!compiled) ensure(context, !text.includes("compiled_to_kn:"), "pending observation contains compiled_to_kn");
+}
+
+function canonicalV1ObservationText() {
+  return [
+    "id: OBS-20260730-001",
+    "at: 2026-07-30T12:00:00Z",
+    "source: task_outcome",
+    'claim: "A v1 observation remains valid after the schema extension."',
+    "context:",
+    "  task: v1-preservation",
+    '  paths: ["src/**"]',
+    "evidence:",
+    '  - { type: test, ref: "legacy observation validator fixture" }',
+    "urgency: batch",
+    "",
+  ].join("\n");
 }
 
 function runPart3(context) {
@@ -453,6 +488,31 @@ function runPart3(context) {
     });
     ensure(context, third.stdout.includes("OBS-20260731-003"), "ID uniqueness did not span inbox and processed");
     ensure(context, fileHash(secondFile) === secondHash, "append-only writer modified an existing observation");
+  });
+
+  testCase(context, "archive_accepts_no_kn_routing_verdicts", () => {
+    for (const verdict of ["no_change", "needs_human_decision"]) {
+      const setup = setupObservationHost(context, `archive-verdict-${verdict}`);
+      const pending = path.join(setup.project, ".kg", "observations", "OBS-20260730-001.yaml");
+      const processed = path.join(setup.project, ".kg", "observations", "processed", "OBS-20260730-001.yaml");
+      fs.copyFileSync(path.join(OBSERVE_FIXTURE, "v1-observation.yaml"), pending);
+      const archived = runNode(
+        context,
+        OBSERVE_ARCHIVE,
+        ["--observation", "OBS-20260730-001", "--verdict", verdict],
+        { cwd: setup.project, env: observationEnv(setup.project) },
+      );
+      ensure(context, archived.stdout.includes(`with verdict ${verdict}`), `${verdict} archive result was not reported`);
+      ensure(context, !fs.existsSync(pending), `${verdict} archive left the pending observation`);
+      ensure(context, fs.existsSync(processed), `${verdict} archive did not create the processed observation`);
+      const processedText = fs.readFileSync(processed, "utf8");
+      ensure(context, processedText === canonicalV1ObservationText(), `${verdict} processed observation is not canonical`);
+      assertCanonicalObservation(context, processedText);
+      runNode(context, OBSERVE_VALIDATE, [processed], {
+        cwd: setup.project,
+        env: observationEnv(setup.project),
+      });
+    }
   });
 
   testCase(context, "reject_unknown_id_at_and_compiled_to_kn", () => {
@@ -542,6 +602,45 @@ function runPart3(context) {
       { cwd: invalid.project, env: observationEnv(invalid.project), expectFailure: true },
     );
     ensure(context, fileHash(invalidPending) === invalidHash, "invalid knowledge archive changed pending source");
+  });
+
+  testCase(context, "archive_rejects_invalid_result_selection_and_preserves_pending", () => {
+    for (const [variant, args, expectedError] of [
+      [
+        "both-results",
+        ["--observation", "OBS-20260730-001", "--compiled-to-kn", "KN-0001", "--verdict", "no_change"],
+        "mutually exclusive",
+      ],
+      [
+        "missing-result",
+        ["--observation", "OBS-20260730-001"],
+        "exactly one of --compiled-to-kn or --verdict is required",
+      ],
+      [
+        "unknown-verdict",
+        ["--observation", "OBS-20260730-001", "--verdict", "not_in_routing"],
+        "invalid no-knowledge verdict",
+      ],
+      [
+        "kn-category-as-verdict",
+        ["--observation", "OBS-20260730-001", "--verdict", "project_knowledge"],
+        "invalid no-knowledge verdict",
+      ],
+    ]) {
+      const setup = setupObservationHost(context, `archive-mode-${variant}`);
+      const pending = path.join(setup.project, ".kg", "observations", "OBS-20260730-001.yaml");
+      const processed = path.join(setup.project, ".kg", "observations", "processed", "OBS-20260730-001.yaml");
+      fs.copyFileSync(path.join(OBSERVE_FIXTURE, "v1-observation.yaml"), pending);
+      const before = fileHash(pending);
+      const rejected = runNode(context, OBSERVE_ARCHIVE, args, {
+        cwd: setup.project,
+        env: observationEnv(setup.project),
+        expectFailure: true,
+      });
+      ensure(context, rejected.stderr.includes(expectedError), `${variant} failure reason was not reported`);
+      ensure(context, fs.existsSync(pending) && fileHash(pending) === before, `${variant} changed pending source`);
+      ensure(context, !fs.existsSync(processed), `${variant} created processed output`);
+    }
   });
 
   testCase(context, "archive_rejects_existing_processed_target", () => {

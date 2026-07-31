@@ -4,6 +4,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import * as host from "./host.mjs";
 
 const STABLE_DOCUMENT_PATH_RE = /^(docs\/.+\.md|knowledge\/KN-[^/]+\.md|AGENTS\.md)$/;
 const STABLE_DOCUMENT_ANCHOR_RE = /^(docs\/.+\.md|knowledge\/KN-[^/]+\.md|AGENTS\.md)#L([1-9][0-9]*)$/;
@@ -57,10 +58,9 @@ export function validateStableDocumentReference({ sourcePath, line, projectRoot 
     reject("not_stable_document", { sourcePath });
   }
 
-  const root = fs.realpathSync(projectRoot);
+  const root = host.canonicalPath(projectRoot);
   const full = path.resolve(root, ...normalized.split("/"));
-  const relative = path.relative(root, full);
-  if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+  if (host.isOutside(root, full)) {
     reject("outside_project", { sourcePath });
   }
   ensureNoSymlink(root, normalized);

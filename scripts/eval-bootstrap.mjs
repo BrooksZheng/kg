@@ -167,6 +167,18 @@ function resolveArtifactProduct(product, artifactRoot, label) {
   return declared;
 }
 
+function isShellToolName(name) {
+  const normalized = String(name ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_");
+  const shellTokens = new Set(["bash", "sh", "zsh", "fish", "shell", "powershell", "pwsh", "terminal", "cmd", "exec"]);
+  return normalized
+    .split("_")
+    .filter(Boolean)
+    .some((token) => shellTokens.has(token));
+}
+
 function toolChainAudit(response, inventoryFile, planFile) {
   const events = response.tool_events ?? [];
   const inventoryIndex = events.findIndex(
@@ -189,6 +201,7 @@ function toolChainAudit(response, inventoryFile, planFile) {
       event?.ok === true &&
       index > inventoryIndex &&
       (bootstrapIndex < 0 || index < bootstrapIndex) &&
+      !isShellToolName(event.name) &&
       event.command.includes(path.basename(planFile)),
   );
   const failures = [];

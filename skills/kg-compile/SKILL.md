@@ -148,9 +148,12 @@ constraints (propose the constraint, then retire the prose once it lands).
    ending on a checklist dump.
 3. Archive processed observations:
    run `node .../archive-observations.mjs --observation <OBS-id>
-   --compiled-to-kn <KN-id>` once for each compiled observation. The script
-   validates the target KN, writes `compiled_to_kn` into the canonical
-   processed copy, and then removes the untouched pending original.
+   --compiled-to-kn <KN-id>` for an observation that produced a KN. For
+   `no_change` or `needs_human_decision`, run the same command with
+   `--verdict <routing-verdict>` in place of `--compiled-to-kn`. The script
+   loads legal no-KN verdicts from `protocol/routing.yaml`, writes a canonical
+   processed copy without `compiled_to_kn`, and then removes the untouched
+   pending original. Exactly one result option is required.
    Malformed or deferred observations stay in the inbox.
 4. Clear the round log: `node .../report-metrics.mjs --clear-round`.
 

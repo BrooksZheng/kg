@@ -8,6 +8,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { parse } from "./lib/kyaml.mjs";
 import * as documentAnchor from "./lib/document-anchor.mjs";
+import * as host from "./lib/host.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const FIXTURE_FIELDS = [
@@ -99,7 +100,7 @@ function loadFixture(file) {
   }
   const projectRoot = resolveDeclared(fixture.project_root);
   if (!fs.existsSync(projectRoot) || !fs.statSync(projectRoot).isDirectory()) fail(`夹具项目不存在：${projectRoot}`);
-  const realProjectRoot = fs.realpathSync(projectRoot);
+  const realProjectRoot = host.canonicalPath(projectRoot);
   validateTokenExpectations(fixture, realProjectRoot);
   const transcriptFile = resolveDeclared(fixture.transcript);
   if (!fs.existsSync(transcriptFile)) fail(`夹具 transcript 不存在：${transcriptFile}`);
@@ -185,27 +186,6 @@ function resolveProjectFile(projectRoot, rel) {
   return { full, normalized };
 }
 
-function canonicalizeWithMissingTail(target) {
-  let current = path.resolve(target);
-  const missing = [];
-  while (true) {
-    try {
-      return path.resolve(fs.realpathSync(current), ...missing);
-    } catch (error) {
-      if (!["ENOENT", "ENOTDIR", "ELOOP"].includes(error?.code)) throw error;
-      const parent = path.dirname(current);
-      if (parent === current) throw error;
-      missing.unshift(path.basename(current));
-      current = parent;
-    }
-  }
-}
-
-function isOutside(root, target) {
-  const relative = path.relative(root, target);
-  return relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative);
-}
-
 function symbolicLinksOnPath(target) {
   const absolute = path.resolve(target);
   const filesystemRoot = path.parse(absolute).root;
@@ -231,12 +211,12 @@ function resolveProductFile(productPath, productRoot) {
     throw new Error("kg.kickoff_conflicts 产物路径为空");
   }
   const declaredRoot = path.resolve(productRoot);
-  const root = canonicalizeWithMissingTail(declaredRoot);
+  const root = host.canonicalPath(declaredRoot);
   const declaredFile = path.isAbsolute(productPath)
     ? path.resolve(productPath)
     : path.resolve(declaredRoot, ...productPath.replaceAll("\\", "/").split("/"));
-  const file = canonicalizeWithMissingTail(declaredFile);
-  if (isOutside(root, file)) {
+  const file = host.canonicalPath(declaredFile);
+  if (host.isOutside(root, file)) {
     throw new Error("kg.kickoff_conflicts 产物超出允许的产物根目录");
   }
   if (

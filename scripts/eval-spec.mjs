@@ -8,6 +8,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { parse } from "./lib/kyaml.mjs";
+import * as host from "./lib/host.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PRODUCE = path.join(ROOT, "skills", "kg-spec", "scripts", "produce-spec.mjs");
@@ -69,7 +70,7 @@ function loadFixture(value) {
   for (const [label, target] of Object.entries(paths)) {
     if (!fs.existsSync(target)) fail(`spec fixture 的 ${label} 不存在：${target}`);
   }
-  return { fixture, file, ...paths, projectRoot: fs.realpathSync(paths.projectRoot) };
+  return { fixture, file, ...paths, projectRoot: host.canonicalPath(paths.projectRoot) };
 }
 
 function runNode(args) {
@@ -204,37 +205,16 @@ function writeJson(file, value) {
   fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`);
 }
 
-function canonicalizeWithMissingTail(target) {
-  let current = path.resolve(target);
-  const missing = [];
-  while (true) {
-    try {
-      return path.resolve(fs.realpathSync(current), ...missing);
-    } catch (error) {
-      if (!["ENOENT", "ENOTDIR", "ELOOP"].includes(error?.code)) throw error;
-      const parent = path.dirname(current);
-      if (parent === current) throw error;
-      missing.unshift(path.basename(current));
-      current = parent;
-    }
-  }
-}
-
-function isOutside(root, target) {
-  const relative = path.relative(root, target);
-  return relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative);
-}
-
 function resolveProduct(artifacts, response) {
   const product = response.products.find((item) => item?.kind === "kg.spec_synthesis");
   if (!product || typeof product.path !== "string") throw new Error("runner 未返回 kg.spec_synthesis 产物");
   const declaredRoot = path.resolve(artifacts);
-  const root = canonicalizeWithMissingTail(declaredRoot);
+  const root = host.canonicalPath(declaredRoot);
   const declaredFile = path.isAbsolute(product.path)
     ? path.resolve(product.path)
     : path.resolve(declaredRoot, product.path);
-  const file = canonicalizeWithMissingTail(declaredFile);
-  if (isOutside(root, file)) {
+  const file = host.canonicalPath(declaredFile);
+  if (host.isOutside(root, file)) {
     throw new Error("runner synthesis 产物超出 artifacts_dir");
   }
   if (

@@ -109,7 +109,7 @@ const response = {
   ],
   tool_events: [
     { name: "Bash", command: command(inventoryScript, inventoryArgs), at_step: 1, ok: true },
-    { name: "Write", command: plan, at_step: 3, ok: true },
+    { name: process.env.KG_FAKE_SHELL_PLAN === "1" ? "Bash" : "Write", command: plan, at_step: 3, ok: true },
     { name: "Bash", command: command(bootstrapScript, bootstrapArgs), at_step: 4, ok: true },
   ].filter((event) => !(process.env.KG_FAKE_MISSING_TOOL === "1" && event.command.includes("inventory.mjs"))),
   permission_denials: process.env.KG_FAKE_DENIAL === "1"
