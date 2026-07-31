@@ -9,3 +9,4 @@ evidence:
   - { type: test, ref: "R9 regressions: an absolute /tmp product under /tmp/kg-m1-eval7/kickoff passed after canonicalization, while true escape, symlink escape, internal symlink, .KG, and missing-file cases retained their required failures" }
   - { type: log, ref: ".mission/kg-v2-refactor/build-log-1-repair-5.md sections 1-3; same canonical-identity defect family as knowledge/KN-0005-destructive-refresh-rm-then-copy-must.md and knowledge/KN-0018-kg-init-must-compute-relative-skill.md" }
 urgency: batch
+compiled_to_kn: KN-0022

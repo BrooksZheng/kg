@@ -12,3 +12,4 @@ evidence:
   - { type: diff, ref: "scripts/lib/repository.mjs and skills/kg-docs/scripts/bootstrap.mjs" }
   - { type: test, ref: "node scripts/test-v2.mjs --part 2 case reject_source_drift_after_inventory" }
 urgency: batch
+compiled_to_kn: KN-0023

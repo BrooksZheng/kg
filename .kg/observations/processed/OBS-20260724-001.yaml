@@ -9,3 +9,4 @@ evidence:
   - { type: log, ref: "npx skills add brookszheng/kg --list: Skipped kg-init/SKILL.md — Nested mappings are not allowed in compact mappings at line 2, column 14; Found 3 skills" }
   - { type: diff, ref: "skills/kg-init/SKILL.md: quote description containing MANUAL INVOCATION ONLY:" }
 urgency: batch
+compiled_to_kn: KN-0019

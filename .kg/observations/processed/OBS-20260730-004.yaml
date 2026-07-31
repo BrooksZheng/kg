@@ -12,3 +12,4 @@ evidence:
   - { type: diff, ref: "scripts/eval-kickoff.mjs auditMustReport validates the bounded product and source_path coverage" }
   - { type: test, ref: "build-log-1-repair-3 section 2.8 replays session 785e34a2 wording with a valid product" }
 urgency: batch
+compiled_to_kn: KN-0029

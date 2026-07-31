@@ -12,3 +12,4 @@ evidence:
   - { type: test, ref: "node scripts/test-v2.mjs --part 5: record_turn_rejects_agent_envelope_fields_and_validates_semantics and structured_negative_cases_fail_the_target_criteria passed" }
   - { type: diff, ref: "skills/kg-kickoff/scripts/record-turn.mjs requires --index and validates finding membership independently of scripts/eval-kickoff.mjs auditIndex" }
 urgency: batch
+compiled_to_kn: KN-0026

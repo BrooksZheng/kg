@@ -11,3 +11,4 @@ context:
 evidence:
   - { type: test, ref: "R4 regression: gather-context rejected .KG/observations/x.yaml with exit 1" }
 urgency: batch
+compiled_to_kn: KN-0021

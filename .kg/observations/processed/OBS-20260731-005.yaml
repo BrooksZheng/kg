@@ -11,3 +11,4 @@ context:
 evidence:
   - { type: test, ref: "scripts/test-v2.mjs: transaction_manifest_resumes_after_mutation_interruptions" }
 urgency: batch
+compiled_to_kn: KN-0024

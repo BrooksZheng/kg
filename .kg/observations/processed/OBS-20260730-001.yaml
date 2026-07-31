@@ -12,3 +12,4 @@ context:
 evidence:
   - { type: diff, ref: "M1 security review added raw segment checks before path.posix.normalize in context gathering, spec anchors, and evaluators." }
 urgency: batch
+compiled_to_kn: KN-0020

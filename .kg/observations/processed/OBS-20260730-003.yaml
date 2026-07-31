@@ -11,3 +11,4 @@ context:
 evidence:
   - { type: test, ref: "2026-07-30 archived C10 replay: scripts/lib/kyaml.mjs line 96 rejected the original constraints list with `multi-line list items are not supported` after `#` values were quoted" }
 urgency: batch
+compiled_to_kn: KN-0028

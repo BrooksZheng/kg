@@ -8,3 +8,4 @@ context:
 evidence:
   - { type: test, ref: "Part 6 rejects a session-created TASK archive with the evaluator ownership message." }
 urgency: batch
+compiled_to_kn: KN-0027

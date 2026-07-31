@@ -11,3 +11,4 @@ evidence:
   - { type: test, ref: "test-v2 Part 1 migration_v1_minimal_preserves_assets mixed-state resume" }
   - { type: diff, ref: "R2.2 migrate-v1 staged skill replacement and plan-bound recovery" }
 urgency: batch
+compiled_to_kn: KN-0024

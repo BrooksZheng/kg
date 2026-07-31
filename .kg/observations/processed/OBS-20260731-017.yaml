@@ -1,0 +1,13 @@
+id: OBS-20260731-017
+at: 2026-07-31T10:14:11Z
+source: task_outcome
+claim: "At baseline 1d5c246, kg-init migration detection derives only v1, v2, or unknown from .kg/config.yaml and does not implement the M3 five-scenario host classification contract."
+context:
+  task: kg-v2-refactor-m3-contract
+  paths:
+    - skills/kg-init/scripts/detect-migration.mjs
+    - skills/kg-init/scripts/migration-lib.mjs
+    - scripts/test-v2.mjs
+evidence:
+  - { type: diff, ref: "baseline 1d5c246: migration-lib.mjs detectMigration reads .kg/config.yaml and emits v1, v2, or unknown; Part 1 only asserts healthy v1 and post-migration v2 detection" }
+urgency: batch

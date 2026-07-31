@@ -10,3 +10,4 @@ context:
 evidence:
   - { type: test, ref: "scripts/test-v2.mjs: validator_self_check_is_host_isolated" }
 urgency: batch
+compiled_to_kn: KN-0025
