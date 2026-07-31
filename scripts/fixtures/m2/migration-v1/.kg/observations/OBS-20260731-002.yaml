@@ -1,0 +1,10 @@
+id: OBS-20260731-002
+at: 2026-07-31T00:00:00Z
+source: task_outcome
+claim: "The pending observation must survive migration unchanged."
+context:
+  task: migration-fixture
+  paths: ["src/**"]
+evidence:
+  - { type: test, ref: "migration fixture pending observation" }
+urgency: batch

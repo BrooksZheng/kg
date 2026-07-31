@@ -1,17 +1,18 @@
 // Black-box deterministic runner for the seven M2 walking-skeleton parts.
-// R2.1 implements Part 2 and Part 3. Other registered parts report pending.
+// R2.2 implements Part 1 through Part 3. Later registered parts report pending.
 
 import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const FIXED_NOW = "2026-07-31T00:00:00Z";
+const MIGRATION_NOW = "2026-07-31T00:00:00.000Z";
 const PARTS = [
-  { number: 1, name: "migration_v1_minimal_preserves_assets", status: "pending" },
+  { number: 1, name: "migration_v1_minimal_preserves_assets", status: "implemented", run: runPart1 },
   { number: 2, name: "docs_bootstrap_renders_architecture_draft", status: "implemented", run: runPart2 },
   { number: 3, name: "observe_json_preserves_v1_contract", status: "implemented", run: runPart3 },
   { number: 4, name: "compile_links_observation_kn_and_managed_block", status: "pending" },
@@ -27,10 +28,16 @@ const OBSERVE_VALIDATE = path.join(ROOT, "skills", "kg-observe", "scripts", "val
 const OBSERVE_THRESHOLD = path.join(ROOT, "skills", "kg-observe", "scripts", "check-threshold.mjs");
 const OBSERVE_ARCHIVE = path.join(ROOT, "skills", "kg-compile", "scripts", "archive-observations.mjs");
 const DOCS_VALIDATE = path.join(ROOT, "skills", "kg-compile", "scripts", "validate-project-documents.mjs");
+const MIGRATION_DETECT = path.join(ROOT, "skills", "kg-init", "scripts", "detect-migration.mjs");
+const MIGRATION_EXECUTE = path.join(ROOT, "skills", "kg-init", "scripts", "migrate-v1.mjs");
+const PROTOCOL_SELF_CHECK = path.join(ROOT, "scripts", "lib", "protocol.mjs");
+const SYNC_VENDORED = path.join(ROOT, "scripts", "sync-vendored.mjs");
 const EVAL_BOOTSTRAP = path.join(ROOT, "scripts", "eval-bootstrap.mjs");
 const MOCK_BOOTSTRAP_RUNNER = path.join(ROOT, "scripts", "fixtures", "m2", "mock-bootstrap-runner.mjs");
 const BOOTSTRAP_FIXTURE = path.join(ROOT, "scripts", "fixtures", "m2", "bootstrap");
 const OBSERVE_FIXTURE = path.join(ROOT, "scripts", "fixtures", "m2", "observe");
+const MIGRATION_FIXTURE = path.join(ROOT, "scripts", "fixtures", "m2", "migration-v1");
+const KG_SKILLS = ["kg-init", "kg-observe", "kg-compile", "kg-scan", "kg-kickoff", "kg-spec", "kg-docs"];
 
 class CaseFailure extends Error {
   constructor(context, message, details = {}) {
@@ -106,6 +113,535 @@ function listYaml(directory) {
     .filter((entry) => entry.isFile() && entry.name.endsWith(".yaml"))
     .map((entry) => entry.name)
     .sort();
+}
+
+function treeHash(root) {
+  const entries = [];
+  function walk(current, relative) {
+    for (const entry of fs.readdirSync(current, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+      const full = path.join(current, entry.name);
+      const rel = relative === "" ? entry.name : `${relative}/${entry.name}`;
+      const stat = fs.lstatSync(full);
+      if (stat.isSymbolicLink()) {
+        entries.push({ path: rel, type: "symlink", target: fs.readlinkSync(full) });
+      } else if (stat.isDirectory()) {
+        entries.push({ path: rel, type: "directory" });
+        walk(full, rel);
+      } else if (stat.isFile()) {
+        entries.push({ path: rel, type: "file", hash: fileHash(full) });
+      } else {
+        entries.push({ path: rel, type: "other" });
+      }
+    }
+  }
+  walk(root, "");
+  return crypto.createHash("sha256").update(JSON.stringify(entries)).digest("hex");
+}
+
+function migrationLineCount(text) {
+  const lines = text.split(/\r?\n/);
+  return lines.at(-1) === "" ? lines.length - 1 : lines.length;
+}
+
+function outsideManagedText(text) {
+  const begin = text.indexOf("<!-- kg:begin -->");
+  const end = text.indexOf("<!-- kg:end -->");
+  const beginLine = text.lastIndexOf("\n", begin) + 1;
+  const endNewline = text.indexOf("\n", end);
+  const endLine = endNewline < 0 ? text.length : endNewline + 1;
+  return text.slice(0, beginLine) + text.slice(endLine);
+}
+
+function countHeading(text, heading) {
+  const escaped = heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return [...text.matchAll(new RegExp(`^## ${escaped}[ \\t]*$`, "gm"))].length;
+}
+
+function cloneMigrationProject(destination) {
+  fs.cpSync(MIGRATION_FIXTURE, destination, { recursive: true });
+}
+
+function setupMigrationCase(context, name) {
+  const caseRoot = path.join(context.root, name);
+  const project = path.join(caseRoot, "project");
+  const artifacts = path.join(caseRoot, "artifacts");
+  fs.mkdirSync(artifacts, { recursive: true });
+  cloneMigrationProject(project);
+  return {
+    caseRoot,
+    project,
+    artifacts,
+    plan: path.join(artifacts, "migration-plan.json"),
+  };
+}
+
+function generateMigrationPlan(context, setup) {
+  const detection = runNode(context, MIGRATION_DETECT, ["--root", setup.project], {
+    cwd: setup.project,
+  });
+  const detected = JSON.parse(detection.stdout);
+  ensure(context, detected.classification === "v1", "migration detector did not classify the fixture as v1");
+  const generated = runNode(
+    context,
+    MIGRATION_EXECUTE,
+    ["--root", setup.project, "--output", setup.plan, "--now", MIGRATION_NOW],
+    { cwd: setup.project },
+  );
+  const plan = JSON.parse(generated.stdout);
+  ensure(context, JSON.stringify(plan) === JSON.stringify(readJson(setup.plan)), "stdout plan differs from saved plan");
+  return plan;
+}
+
+function executeMigration(context, setup, root = setup.project) {
+  const executed = runNode(
+    context,
+    MIGRATION_EXECUTE,
+    ["--root", root, "--execute", "--plan", setup.plan],
+    { cwd: root },
+  );
+  return JSON.parse(executed.stdout);
+}
+
+function assertMigrationSkills(context, project) {
+  const agentsSkills = path.join(project, ".agents", "skills");
+  const kgNames = fs
+    .readdirSync(agentsSkills, { withFileTypes: true })
+    .map((entry) => entry.name)
+    .filter((name) => name.startsWith("kg-"))
+    .sort();
+  ensure(context, JSON.stringify(kgNames) === JSON.stringify([...KG_SKILLS].sort()), "installed kg skill set is not exactly seven");
+  ensure(context, fs.existsSync(path.join(agentsSkills, "custom-tool", "sentinel.txt")), "non-kg skill sentinel was removed");
+  ensure(
+    context,
+    treeHash(path.join(agentsSkills, "kg-docs")) === treeHash(path.join(ROOT, "skills", "kg-docs")),
+    "installed kg-docs does not match the complete source skill",
+  );
+  ensure(
+    context,
+    fs.existsSync(path.join(agentsSkills, "kg-docs", "scripts", "lib", "protocol.mjs")),
+    "installed kg-docs lost its vendored scripts/lib",
+  );
+
+  const claudeSkills = path.join(project, ".claude", "skills");
+  const claudeNames = fs
+    .readdirSync(claudeSkills, { withFileTypes: true })
+    .filter((entry) => entry.name.startsWith("kg-"))
+    .map((entry) => entry.name)
+    .sort();
+  ensure(context, JSON.stringify(claudeNames) === JSON.stringify([...KG_SKILLS].sort()), "Claude skill set is not exactly seven");
+  for (const name of KG_SKILLS) {
+    const link = path.join(claudeSkills, name);
+    ensure(context, fs.lstatSync(link).isSymbolicLink(), `Claude skill is not a symlink: ${name}`);
+    ensure(
+      context,
+      fs.realpathSync(link) === fs.realpathSync(path.join(agentsSkills, name)),
+      `Claude skill link does not resolve to the canonical copy: ${name}`,
+    );
+  }
+}
+
+function runInstalledSkillSelfChecks(context, project) {
+  const keyScripts = {
+    "kg-init": "scripts/migrate-v1.mjs",
+    "kg-observe": "scripts/add-observation.mjs",
+    "kg-compile": "scripts/archive-observations.mjs",
+    "kg-scan": "scripts/scan-inventory.mjs",
+    "kg-kickoff": "scripts/gather-context.mjs",
+    "kg-spec": "scripts/produce-spec.mjs",
+    "kg-docs": "scripts/inventory.mjs",
+  };
+  for (const [name, relative] of Object.entries(keyScripts)) {
+    const skillRoot = path.join(project, ".agents", "skills", name);
+    runNode(context, "--check", [path.join(skillRoot, relative)], { cwd: project });
+    const resolverUrl = pathToFileURL(path.join(skillRoot, "scripts", "_lib.mjs")).href;
+    runNode(
+      context,
+      "--input-type=module",
+      ["--eval", `await import(${JSON.stringify(resolverUrl)})`],
+      { cwd: project },
+    );
+  }
+}
+
+function runPart1(context) {
+  testCase(context, "migration_v1_minimal_preserves_assets", () => {
+    const setup = setupMigrationCase(context, "positive");
+    const originalTree = treeHash(setup.project);
+    const originalConfig = fs.readFileSync(path.join(setup.project, ".kg", "config.yaml"));
+    const originalAgents = fs.readFileSync(path.join(setup.project, "AGENTS.md"), "utf8");
+    const oldSkillSnapshot = path.join(setup.artifacts, "legacy-kg-init");
+    fs.cpSync(path.join(setup.project, ".agents", "skills", "kg-init"), oldSkillSnapshot, { recursive: true });
+    const preservedPaths = [
+      ".kg/observations/OBS-20260731-002.yaml",
+      ".kg/observations/processed/OBS-20260730-001.yaml",
+      ".kg/queue/Q-20260731-001.yaml",
+      ".kg/reports/compile-20260731.md",
+      ".kg/unknown-sentinel.bin",
+      "knowledge/KN-0001-migration-preservation.md",
+      "docs/README.md",
+      "docs/accepted-migration-contract.md",
+      ".agents/skills/custom-tool/sentinel.txt",
+    ];
+    const preservedHashes = Object.fromEntries(
+      preservedPaths.map((relative) => [relative, fileHash(path.join(setup.project, relative))]),
+    );
+
+    const plan = generateMigrationPlan(context, setup);
+    ensure(context, treeHash(setup.project) === originalTree, "Phase 0 changed the migration fixture tree");
+    ensure(context, plan.kind === "kg.migration_plan" && plan.version === 1, "migration plan kind or version mismatch");
+    ensure(context, plan.detection.classification === "v1", "migration plan did not bind the v1 detection");
+    ensure(context, plan.queue.items.length === 1, "compatible queue item was not represented in the plan");
+    ensure(
+      context,
+      plan.queue.items[0].strategy === "preserve_compatible_v1_record",
+      "compatible queue item preservation strategy mismatch",
+    );
+    const operationPaths = plan.operations.map((operation) => operation.path);
+    ensure(context, new Set(operationPaths).size === operationPaths.length, "migration plan contains duplicate paths");
+    for (const required of [".kg/config.v1.bak", ".kg/config.yaml", "AGENTS.md"]) {
+      ensure(context, operationPaths.includes(required), `migration plan is missing ${required}`);
+    }
+    for (const operation of plan.operations) {
+      ensure(context, typeof operation.action === "string", `plan action missing for ${operation.path}`);
+      ensure(context, typeof operation.preserve === "string", `plan preservation strategy missing for ${operation.path}`);
+      ensure(context, operation.before?.type, `plan before fingerprint missing for ${operation.path}`);
+      ensure(context, operation.after?.type, `plan after fingerprint missing for ${operation.path}`);
+    }
+
+    const firstResult = executeMigration(context, setup);
+    ensure(context, firstResult.status === "complete", "migration result is not complete");
+    ensure(context, firstResult.advisories.length === 0, "bounded fixture unexpectedly exceeded the AGENTS line budget");
+    ensure(
+      context,
+      fs.readFileSync(path.join(setup.project, ".kg", "config.v1.bak")).equals(originalConfig),
+      "config.v1.bak is not byte-identical to the v1 config",
+    );
+    const config = fs.readFileSync(path.join(setup.project, ".kg", "config.yaml"), "utf8");
+    for (const field of ["kind: kg.config", "version: 2", "observation_threshold: 3", "skills_path: .agents/skills"]) {
+      ensure(context, config.includes(field), `v2 config is missing ${field}`);
+    }
+    ensure(context, !config.includes("agents_block_budget_lines"), "v2 config retained the v1 AGENTS budget");
+    for (const [relative, expected] of Object.entries(preservedHashes)) {
+      ensure(context, fileHash(path.join(setup.project, relative)) === expected, `migration changed preserved asset ${relative}`);
+    }
+    const knowledgeText = fs.readFileSync(
+      path.join(setup.project, "knowledge", "KN-0001-migration-preservation.md"),
+      "utf8",
+    );
+    ensure(context, !knowledgeText.includes("source_obs_ids:"), "migration bulk-added source_obs_ids to v1 knowledge");
+    ensure(context, !knowledgeText.includes("carrier_refs:"), "migration bulk-added carrier_refs to v1 knowledge");
+
+    const agents = fs.readFileSync(path.join(setup.project, "AGENTS.md"), "utf8");
+    ensure(context, agents.startsWith(outsideManagedText(originalAgents)), "manual AGENTS content was not preserved byte for byte");
+    ensure(context, !agents.includes("<!-- kg:begin -->") && !agents.includes("<!-- kg:end -->"), "v1 AGENTS markers remain");
+    ensure(context, countHeading(agents, "硬规则") === 1, "AGENTS hard-rule section count mismatch");
+    ensure(context, countHeading(agents, "Commands") === 1, "AGENTS Commands section count mismatch");
+    ensure(context, countHeading(agents, "使用 kg") === 1, "AGENTS kg usage section count mismatch");
+    const generatedBashBlocks = [...agents.matchAll(/^```bash$\n([\s\S]*?)^```$/gm)];
+    ensure(context, generatedBashBlocks.length === 1, "AGENTS Commands bash block count mismatch");
+    ensure(
+      context,
+      JSON.stringify(generatedBashBlocks[0][1].trimEnd().split("\n")) ===
+        JSON.stringify([
+          "# 构建",
+          "<YOUR_BUILD_COMMAND>",
+          "# 测试",
+          "<YOUR_TEST_COMMAND>",
+          "# Lint",
+          "<YOUR_LINT_COMMAND>",
+        ]),
+      "AGENTS generated Commands block structure mismatch",
+    );
+    for (const skill of ["kg-kickoff", "kg-spec", "kg-observe"]) {
+      ensure(context, agents.includes(`\`${skill}\``), `AGENTS kg usage section is missing ${skill}`);
+    }
+    ensure(context, migrationLineCount(agents) <= 30, "bounded fixture AGENTS.md exceeds 30 lines");
+
+    assertMigrationSkills(context, setup.project);
+    ensure(context, /^@AGENTS\.md$/m.test(fs.readFileSync(path.join(setup.project, "CLAUDE.md"), "utf8")), "CLAUDE.md import missing");
+    for (const relative of [
+      ".kg/migration",
+      "docs/specs",
+      "harness/artifacts",
+      "harness/skills",
+      "harness/scripts",
+    ]) {
+      ensure(context, fs.statSync(path.join(setup.project, relative)).isDirectory(), `v2 directory missing: ${relative}`);
+    }
+    for (const relative of [
+      "docs/glossary.md",
+      "docs/development.md",
+      "docs/architecture/overview.md",
+      "docs/decisions/0000-template.md",
+      "docs/rfcs/0000-template.md",
+    ]) {
+      ensure(context, !fs.existsSync(path.join(setup.project, relative)), `migration eagerly created ${relative}`);
+    }
+
+    const detectionAfter = runNode(context, MIGRATION_DETECT, ["--root", setup.project], { cwd: setup.project });
+    ensure(context, JSON.parse(detectionAfter.stdout).classification === "v2", "post-migration detector did not report v2");
+    runInstalledSkillSelfChecks(context, setup.project);
+    runNode(context, PROTOCOL_SELF_CHECK, [], { cwd: ROOT });
+    runNode(context, SYNC_VENDORED, ["--check"], { cwd: ROOT });
+
+    const stableTree = treeHash(setup.project);
+    const secondResult = executeMigration(context, setup);
+    ensure(context, secondResult.applied.length === 0, "second execution of the same plan applied extra changes");
+    ensure(context, treeHash(setup.project) === stableTree, "second execution changed the final file tree");
+
+    const installedInit = path.join(setup.project, ".agents", "skills", "kg-init");
+    fs.rmSync(installedInit, { recursive: true, force: true });
+    fs.cpSync(oldSkillSnapshot, installedInit, { recursive: true });
+    const resumed = executeMigration(context, setup);
+    ensure(context, resumed.applied.includes(".agents/skills/kg-init"), "mixed-state resume did not repair the pending skill");
+    ensure(context, treeHash(setup.project) === stableTree, "mixed-state resume did not restore the completed tree");
+  });
+
+  testCase(context, "existing_commands_and_normal_non_main_variants", () => {
+    const setup = setupMigrationCase(context, "existing-commands");
+    fs.rmSync(path.join(setup.project, ".agents", "skills", "kg-compile"), { recursive: true, force: true });
+    fs.rmSync(path.join(setup.project, ".agents", "skills", "kg-scan"), { recursive: true, force: true });
+    fs.rmSync(path.join(setup.project, "knowledge", "KN-0001-migration-preservation.md"));
+    fs.cpSync(
+      path.join(ROOT, "skills", "kg-docs"),
+      path.join(setup.project, ".agents", "skills", "kg-docs"),
+      { recursive: true },
+    );
+    fs.copyFileSync(
+      path.join(setup.project, ".kg", "config.yaml"),
+      path.join(setup.project, ".kg", "config.v1.bak"),
+    );
+    const installedDocsBefore = treeHash(path.join(setup.project, ".agents", "skills", "kg-docs"));
+    const commandsAgents = [
+      "# Existing Commands fixture",
+      "",
+      "Human content before the managed block.",
+      "",
+      "<!-- kg:begin -->",
+      "legacy managed content",
+      "<!-- kg:end -->",
+      "",
+      "## Commands",
+      "",
+      "```bash",
+      "# Build",
+      "npm run build",
+      "# Test",
+      "npm test",
+      "# Lint",
+      "npm run lint",
+      "```",
+      "",
+      "Human content after Commands.",
+      "",
+    ].join("\n");
+    fs.writeFileSync(path.join(setup.project, "AGENTS.md"), commandsAgents);
+
+    const plan = generateMigrationPlan(context, setup);
+    ensure(
+      context,
+      !plan.operations.some((operation) => operation.path === ".agents/skills/kg-docs"),
+      "source-identical kg-docs was scheduled for destructive replacement",
+    );
+    ensure(
+      context,
+      !plan.operations.some((operation) => operation.path === ".kg/config.v1.bak"),
+      "byte-identical recovery backup was scheduled for replacement",
+    );
+    ensure(context, plan.agents.injected_commands === false, "human Commands section was not detected");
+    executeMigration(context, setup);
+    const agents = fs.readFileSync(path.join(setup.project, "AGENTS.md"), "utf8");
+    ensure(context, countHeading(agents, "Commands") === 1, "migration duplicated the human Commands section");
+    const expectedManual = outsideManagedText(commandsAgents);
+    const expectedCommandIndex = expectedManual.indexOf("## Commands");
+    const actualHardIndex = agents.indexOf("## 硬规则");
+    const actualCommandIndex = agents.indexOf("## Commands");
+    ensure(
+      context,
+      agents.slice(0, actualHardIndex) === expectedManual.slice(0, expectedCommandIndex),
+      "human bytes before an existing Commands section were changed",
+    );
+    ensure(
+      context,
+      agents.slice(actualCommandIndex, actualCommandIndex + expectedManual.slice(expectedCommandIndex).length) ===
+        expectedManual.slice(expectedCommandIndex),
+      "human bytes from an existing Commands section onward were changed",
+    );
+    const humanBashBlocks = [...agents.matchAll(/^```bash$\n([\s\S]*?)^```$/gm)];
+    ensure(context, humanBashBlocks.length === 1, "human Commands bash block count mismatch");
+    ensure(
+      context,
+      JSON.stringify(humanBashBlocks[0][1].trimEnd().split("\n")) ===
+        JSON.stringify(["# Build", "npm run build", "# Test", "npm test", "# Lint", "npm run lint"]),
+      "human Commands block bytes were changed or placeholders were injected",
+    );
+    ensure(context, countHeading(agents, "硬规则") === 1 && countHeading(agents, "使用 kg") === 1, "v2 companion sections missing");
+    ensure(context, migrationLineCount(agents) <= 30, "existing Commands fixture exceeds the bounded 30-line budget");
+    ensure(
+      context,
+      treeHash(path.join(setup.project, ".agents", "skills", "kg-docs")) === installedDocsBefore,
+      "preinstalled complete kg-docs changed during migration",
+    );
+    ensure(context, fs.readdirSync(path.join(setup.project, "knowledge")).length === 0, "empty knowledge directory was populated");
+    ensure(context, fs.existsSync(path.join(setup.project, "CLAUDE.md")), "Claude marker without CLAUDE.md was not wired");
+    assertMigrationSkills(context, setup.project);
+  });
+
+  testCase(context, "long_manual_agents_content_is_advisory", () => {
+    const setup = setupMigrationCase(context, "agents-advisory");
+    const humanLines = Array.from({ length: 31 }, (_, index) => `Human instruction ${index + 1}.`);
+    const longAgents = [
+      "# Long human instructions",
+      ...humanLines,
+      "<!-- kg:begin -->",
+      "legacy managed content",
+      "<!-- kg:end -->",
+      "Human tail.",
+      "",
+    ].join("\n");
+    fs.writeFileSync(path.join(setup.project, "AGENTS.md"), longAgents);
+    const plan = generateMigrationPlan(context, setup);
+    ensure(context, plan.advisories.length === 1, "over-budget AGENTS plan did not emit one advisory");
+    ensure(context, plan.advisories[0].code === "agents_line_budget_exceeded", "AGENTS advisory code mismatch");
+    const result = executeMigration(context, setup);
+    ensure(context, result.advisories.length === 1, "execution report omitted the AGENTS advisory");
+    const migrated = fs.readFileSync(path.join(setup.project, "AGENTS.md"), "utf8");
+    ensure(context, migrationLineCount(migrated) > 30, "long human fixture was unexpectedly shortened");
+    for (const line of humanLines) ensure(context, migrated.includes(line), `long human content was removed: ${line}`);
+  });
+
+  testCase(context, "reject_unmappable_queue_items_with_complete_report", () => {
+    const setup = setupMigrationCase(context, "unmappable-queue");
+    fs.writeFileSync(
+      path.join(setup.project, ".kg", "queue", "Q-20260731-002.yaml"),
+      "kind: proposal\ncategory: legacy_unknown\nclaim: unmappable\n",
+    );
+    fs.writeFileSync(
+      path.join(setup.project, ".kg", "queue", "Q-20260731-003.yaml"),
+      "kind: [unterminated\n",
+    );
+    const before = treeHash(setup.project);
+    const rejected = runNode(
+      context,
+      MIGRATION_EXECUTE,
+      ["--root", setup.project, "--output", setup.plan, "--now", MIGRATION_NOW],
+      { cwd: setup.project, expectFailure: true },
+    );
+    const report = JSON.parse(rejected.stderr);
+    ensure(context, report.kind === "kg.migration_error_report", "queue failure report kind mismatch");
+    ensure(context, report.items.length === 2, "queue failure report did not include every unmappable item");
+    ensure(
+      context,
+      JSON.stringify(report.items.map((item) => item.reason).sort()) ===
+        JSON.stringify(["invalid_format", "unmappable_category"]),
+      "queue failure reasons are incomplete",
+    );
+    ensure(
+      context,
+      report.items.every((item) => item.recommendation === "M3_quarantine" && item.path.startsWith(".kg/queue/")),
+      "queue failure report omitted path or M3 disposition",
+    );
+    ensure(context, treeHash(setup.project) === before, "queue preflight failure changed the host");
+    ensure(context, !fs.existsSync(path.join(setup.project, ".kg", "config.v1.bak")), "queue failure created a backup");
+  });
+
+  testCase(context, "reject_malformed_managed_markers_and_commands", () => {
+    const variants = {
+      "one-anchor": "# Fixture\n<!-- kg:begin -->\nlegacy\n",
+      nested: "# Fixture\n<!-- kg:begin -->\n<!-- kg:begin -->\nlegacy\n<!-- kg:end -->\n",
+      "two-pairs": [
+        "# Fixture",
+        "<!-- kg:begin -->",
+        "one",
+        "<!-- kg:end -->",
+        "<!-- kg:begin -->",
+        "two",
+        "<!-- kg:end -->",
+        "",
+      ].join("\n"),
+      "commands-without-bash": [
+        "# Fixture",
+        "<!-- kg:begin -->",
+        "legacy",
+        "<!-- kg:end -->",
+        "## Commands",
+        "",
+        "npm test",
+        "",
+      ].join("\n"),
+      "commands-with-wrong-labels": [
+        "# Fixture",
+        "<!-- kg:begin -->",
+        "legacy",
+        "<!-- kg:end -->",
+        "## Commands",
+        "",
+        "```bash",
+        "# one",
+        "npm run build",
+        "# two",
+        "npm test",
+        "# three",
+        "npm run lint",
+        "```",
+        "",
+      ].join("\n"),
+    };
+    for (const [name, text] of Object.entries(variants)) {
+      const setup = setupMigrationCase(context, `bad-agents-${name}`);
+      fs.writeFileSync(path.join(setup.project, "AGENTS.md"), text);
+      const before = treeHash(setup.project);
+      runNode(
+        context,
+        MIGRATION_EXECUTE,
+        ["--root", setup.project, "--output", setup.plan, "--now", MIGRATION_NOW],
+        { cwd: setup.project, expectFailure: true },
+      );
+      ensure(context, treeHash(setup.project) === before, `${name} AGENTS failure changed the host`);
+      ensure(context, !fs.existsSync(path.join(setup.project, ".kg", "config.v1.bak")), `${name} failure created a backup`);
+    }
+  });
+
+  testCase(context, "reject_root_alias_source_alias_and_input_drift", () => {
+    const rootPlan = setupMigrationCase(context, "root-mismatch-plan");
+    generateMigrationPlan(context, rootPlan);
+    const other = setupMigrationCase(context, "root-mismatch-other");
+    const planHostBefore = treeHash(rootPlan.project);
+    const otherBefore = treeHash(other.project);
+    runNode(
+      context,
+      MIGRATION_EXECUTE,
+      ["--root", other.project, "--execute", "--plan", rootPlan.plan],
+      { cwd: other.project, expectFailure: true },
+    );
+    ensure(context, treeHash(rootPlan.project) === planHostBefore, "root mismatch changed the plan host");
+    ensure(context, treeHash(other.project) === otherBefore, "root mismatch changed the execute host");
+
+    const alias = setupMigrationCase(context, "source-alias");
+    fs.rmSync(path.join(alias.project, ".agents", "skills"), { recursive: true, force: true });
+    fs.symlinkSync(path.join(ROOT, "skills"), path.join(alias.project, ".agents", "skills"));
+    const aliasBefore = treeHash(alias.project);
+    runNode(
+      context,
+      MIGRATION_EXECUTE,
+      ["--root", alias.project, "--output", alias.plan, "--now", MIGRATION_NOW],
+      { cwd: alias.project, expectFailure: true },
+    );
+    ensure(context, treeHash(alias.project) === aliasBefore, "source alias failure changed the host");
+
+    const drift = setupMigrationCase(context, "input-drift");
+    generateMigrationPlan(context, drift);
+    fs.appendFileSync(path.join(drift.project, "AGENTS.md"), "\nHuman edit after plan generation.\n");
+    const driftBeforeExecute = treeHash(drift.project);
+    runNode(
+      context,
+      MIGRATION_EXECUTE,
+      ["--root", drift.project, "--execute", "--plan", drift.plan],
+      { cwd: drift.project, expectFailure: true },
+    );
+    ensure(context, treeHash(drift.project) === driftBeforeExecute, "input drift failure changed the host");
+    ensure(context, !fs.existsSync(path.join(drift.project, ".kg", "config.v1.bak")), "input drift created a backup");
+  });
 }
 
 function cloneBootstrapProject(destination, { hazards = false } = {}) {

@@ -1,0 +1,13 @@
+id: Q-20260731-001
+at: 2026-07-31T00:00:00Z
+kind: promotion
+category: project_contract
+claim: "Keep the migration fixture contract candidate pending."
+evidence:
+  - { type: quote, ref: "migration fixture queue item" }
+options: ["accept", "reject"]
+recommendation: "Keep pending until a human rules."
+entry: KN-0001
+source_observations: [OBS-20260730-001]
+resolution: pending
+resolution_note: null

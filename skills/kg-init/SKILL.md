@@ -22,8 +22,35 @@ Recommend `standard` for a normal long-lived project. Recommend `lean` for a
 small or short-lived project. Use `none` when the host already has a deliberate
 documentation system and only needs KG wiring.
 
-For brownfield, finish installation first, then continue with `kg-scan`.
-Semantic scanning stays outside the deterministic installer.
+For brownfield, finish installation first, then continue with the `kg-docs`
+bootstrap flow. Repository interpretation stays outside the deterministic
+installer.
+
+## Healthy v1 migration
+
+R2.2 supports one healthy v1 shape. Detect the host first:
+
+```bash
+node <plugin>/skills/kg-init/scripts/detect-migration.mjs --root <host-root>
+```
+
+Continue only when the JSON classification is `v1`. Generate a machine plan
+outside the host, review its operations and preservation strategies, then
+execute that exact plan:
+
+```bash
+node <plugin>/skills/kg-init/scripts/migrate-v1.mjs \
+  --root <host-root> --output <outside-host>/migration-plan.json
+
+node <plugin>/skills/kg-init/scripts/migrate-v1.mjs \
+  --root <host-root> --execute --plan <outside-host>/migration-plan.json
+```
+
+The executor never derives actions from prose. It verifies the canonical host
+and skill-source identities, input hashes, queue compatibility, managed
+markers, and all planned outputs before mutation. If the process is
+interrupted, re-run `--execute` with the same plan. Partial, ambiguous, and
+quarantine flows remain M3 work.
 
 ## Install
 
@@ -100,8 +127,8 @@ the normal collaboration surface.
 - Claude Code uses `.claude/skills/` and imports AGENTS.md through CLAUDE.md
   when the host already shows Claude markers.
 
-The installer wires six M1 skills: kg-init, kg-observe, kg-compile, kg-scan,
-kg-kickoff, and kg-spec. Symlink, copy, and registry layouts remain
+The installer wires seven skills: kg-init, kg-observe, kg-compile, kg-scan,
+kg-kickoff, kg-spec, and kg-docs. Symlink, copy, and registry layouts remain
 self-contained.
 
 ## After installing
@@ -109,7 +136,7 @@ self-contained.
 Tell the human what was created and which existing files were preserved.
 
 - Greenfield: begin normal work and use kg-observe for reusable task signals.
-- Brownfield: run kg-scan to draft architecture, API, glossary, and document
-  inventory files from the existing code.
+- Brownfield: use the kg-docs bootstrap flow to create an evidence-backed
+  architecture draft from a static repository inventory.
 - Compile: run kg-compile when observations are due or accepted project
   documents need publication.
