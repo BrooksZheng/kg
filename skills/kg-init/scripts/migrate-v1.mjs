@@ -93,7 +93,15 @@ try {
     } catch (error) {
       throw new MigrationError(`cannot read migration plan JSON: ${error.message}`);
     }
-    console.log(JSON.stringify(executeMigrationPlan({ root: args.root, plan }), null, 2));
+    const result = executeMigrationPlan({ root: args.root, plan });
+    result.plan_path = args.plan;
+    console.error(
+      `WARNING: migration recovery requires the plan file at ${args.plan}. ` +
+      `If lost, run "node <plugin>/skills/kg-init/scripts/detect-migration.mjs --root <host-root>" ` +
+      `to check the host classification. If still v1, you can re-generate a plan. ` +
+      `If already v2, recovery requires manual repair (M3).`,
+    );
+    console.log(JSON.stringify(result, null, 2));
   } else {
     const plan = buildMigrationPlan({
       root: args.root,

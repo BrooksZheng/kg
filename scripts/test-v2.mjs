@@ -642,6 +642,89 @@ function runPart1(context) {
     ensure(context, treeHash(drift.project) === driftBeforeExecute, "input drift failure changed the host");
     ensure(context, !fs.existsSync(path.join(drift.project, ".kg", "config.v1.bak")), "input drift created a backup");
   });
+
+  testCase(context, "reject_incomplete_skill_source_pre_mutation", () => {
+    const setup = setupMigrationCase(context, "bad-source");
+    const before = treeHash(setup.project);
+
+    // Create a temporary skills source missing scripts/lib/ in one skill
+    const badSource = path.join(setup.caseRoot, "bad-skills");
+    fs.cpSync(path.join(ROOT, "skills"), badSource, { recursive: true });
+    fs.rmSync(path.join(badSource, "kg-observe", "scripts", "lib"), { recursive: true, force: true });
+
+    runNode(
+      context,
+      MIGRATION_EXECUTE,
+      ["--root", setup.project, "--output", setup.plan, "--skills-source", badSource, "--now", MIGRATION_NOW],
+      { cwd: setup.project, expectFailure: true },
+    );
+    ensure(context, treeHash(setup.project) === before, "incomplete skill source failure changed the host");
+    ensure(context, !fs.existsSync(path.join(setup.project, ".kg", "config.v1.bak")), "incomplete source failure created a backup");
+  });
+
+  testCase(context, "cleanup_orphan_stage_directories_from_prior_plan", () => {
+    const setup = setupMigrationCase(context, "orphan-cleanup");
+
+    // Plant fake orphan stage/backup with a synthetic plan ID that will
+    // never match a real plan.
+    const skillsDir = path.join(setup.project, ".agents", "skills");
+    const fakePlanId = "MIG-0000000000000000";
+    const fakeSkill = "kg-init";
+
+    const stageRelative = `.agents/skills/.kg-migration-stage-${fakePlanId}-${fakeSkill}`;
+    const backupRelative = `.agents/skills/.kg-migration-backup-${fakePlanId}-${fakeSkill}`;
+    const orphanStage = path.join(setup.project, stageRelative);
+    const orphanBackup = path.join(setup.project, backupRelative);
+    fs.mkdirSync(orphanStage, { recursive: true });
+    fs.writeFileSync(path.join(orphanStage, "sentinel.txt"), "orphan stage");
+    fs.mkdirSync(orphanBackup, { recursive: true });
+    fs.writeFileSync(path.join(orphanBackup, "sentinel.txt"), "orphan backup");
+
+    const docsReadmeHash = fileHash(path.join(setup.project, "docs", "README.md"));
+    const expectedOrphans = JSON.stringify([backupRelative, stageRelative].sort());
+
+    const plan = generateMigrationPlan(context, setup);
+
+    // The removal is a plan-time decision, so the plan must claim the
+    // scaffolding and the preserved set must not also claim it.
+    const claimed = plan.orphans.map((orphan) => orphan.path).sort();
+    ensure(
+      context,
+      JSON.stringify(claimed) === expectedOrphans,
+      `plan did not claim the scaffolding; got ${JSON.stringify(claimed)}`,
+    );
+    const preservedPaths = plan.preserved.map((item) => item.path);
+    ensure(
+      context,
+      !preservedPaths.some((item) => item.startsWith(".agents/skills/.kg-migration-")),
+      "preserved set still claims migration scaffolding",
+    );
+
+    const result = executeMigration(context, setup);
+    ensure(context, result.status === "complete", "migration with orphan cleanup did not complete");
+    ensure(
+      context,
+      JSON.stringify([...result.cleaned_orphans].sort()) === expectedOrphans,
+      `cleanup report mismatch; got ${JSON.stringify(result.cleaned_orphans)}`,
+    );
+    ensure(context, !fs.existsSync(orphanStage), "orphan stage was not removed");
+    ensure(context, !fs.existsSync(orphanBackup), "orphan backup was not removed");
+    ensure(
+      context,
+      fileHash(path.join(setup.project, "docs", "README.md")) === docsReadmeHash,
+      "preserved asset changed while cleaning scaffolding",
+    );
+
+    // Re-running the same plan must not trip Phase 2 on the now-absent
+    // scaffolding the plan still lists.
+    const second = executeMigration(context, setup);
+    ensure(context, second.status === "complete", "re-run after orphan cleanup did not complete");
+    ensure(
+      context,
+      second.cleaned_orphans.length === 0,
+      `re-run re-reported cleanup; got ${JSON.stringify(second.cleaned_orphans)}`,
+    );
+  });
 }
 
 function cloneBootstrapProject(destination, { hazards = false } = {}) {

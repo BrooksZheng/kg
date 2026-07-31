@@ -40,17 +40,37 @@ execute that exact plan:
 
 ```bash
 node <plugin>/skills/kg-init/scripts/migrate-v1.mjs \
-  --root <host-root> --output <outside-host>/migration-plan.json
+  --root <host-root> --skills-source <plugin>/skills \
+  --output <outside-host>/migration-plan.json
 
 node <plugin>/skills/kg-init/scripts/migrate-v1.mjs \
   --root <host-root> --execute --plan <outside-host>/migration-plan.json
 ```
 
+`--skills-source` defaults to the `skills/` directory of the repository
+containing the migration script.  When running from a host-installed location
+(`.agents/skills/kg-init/scripts/migrate-v1.mjs`), the default resolves inside
+the host and triggers a canonical collision — pass `--skills-source` pointing
+to the kg plugin repository's `skills/` directory instead.
+
 The executor never derives actions from prose. It verifies the canonical host
 and skill-source identities, input hashes, queue compatibility, managed
-markers, and all planned outputs before mutation. If the process is
-interrupted, re-run `--execute` with the same plan. Partial, ambiguous, and
-quarantine flows remain M3 work.
+markers, and all planned outputs before mutation. Preserve the plan file after
+generation — it is required for recovery and for the executor's identity
+checks.
+
+If the process is interrupted, the recovery path depends on how far migration
+progressed:
+
+- **Interrupted during skill replacement** (config and AGENTS.md are still v1):
+  run `detect-migration.mjs --root <host-root>`.  If the classification is
+  `v1`, you can re-generate a fresh plan and execute it.
+
+- **Interrupted after skill replacement** (config and AGENTS.md are now v2):
+  re-run `--execute` with the **same** plan file.  Do NOT regenerate a new
+  plan on a partially-migrated host — the host is no longer classified as v1
+  and plan generation will refuse.  If you lose the plan in this state, the
+  host requires manual repair (M3).
 
 ## Install
 

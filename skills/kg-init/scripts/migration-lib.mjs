@@ -556,7 +556,33 @@ function sourceInventory(skillsSource, root) {
     }
     const destination = path.join(root, ".agents", "skills", name);
     if (host.canonicalPath(source) === host.canonicalPath(destination)) {
-      throw new MigrationError(`skill source and migration destination resolve to the same directory: ${name}`);
+      throw new MigrationError(
+        `skill source and migration destination resolve to the same directory: ${name}\n` +
+        `  If running from a host-installed location, specify --skills-source ` +
+        `pointing to the kg plugin repository's skills/ directory.`,
+      );
+    }
+    // KN-0003 self-contained invariant: every skill must carry vendored
+    // scripts/lib/ and protocol/ so it can run from a lone directory.
+    // sync-vendored.mjs enforces the same invariant at the repository
+    // level; this check catches a checkout where sync wasn't run.
+    const scriptsLib = path.join(source, "scripts", "lib");
+    if (!fs.existsSync(scriptsLib) || !fs.statSync(scriptsLib).isDirectory()) {
+      throw new MigrationError(
+        `v2 skill source is incomplete: ${name} is missing scripts/lib/\n` +
+        `  source: ${source}\n` +
+        `  The migration source checkout may not have vendored dependencies synced.\n` +
+        `  Run "node scripts/sync-vendored.mjs" in the kg plugin repository and retry.`,
+      );
+    }
+    const protocolDir = path.join(source, "protocol");
+    if (!fs.existsSync(protocolDir) || !fs.statSync(protocolDir).isDirectory()) {
+      throw new MigrationError(
+        `v2 skill source is incomplete: ${name} is missing protocol/\n` +
+        `  source: ${source}\n` +
+        `  The migration source checkout may not have vendored dependencies synced.\n` +
+        `  Run "node scripts/sync-vendored.mjs" in the kg plugin repository and retry.`,
+      );
     }
     inventory.push({
       name,
@@ -706,11 +732,25 @@ export function buildMigrationPlan({ root: rootValue, skillsSource: sourceValue,
     }
   }
 
+  // Preserved set: everything in the host that is NOT touched by an
+  // operation.  This is an implicit (subtractive) strategy — safe for M2
+  // because only four write_file paths exist.  If M3 adds new operation
+  // types or new target paths, add a preflight assertion that
+  // operation paths ∩ preserved paths = ∅, so a newly-added operation
+  // that overlaps a previously-preserved file is caught at plan-build
+  // time rather than silently dropped from the preserved set.
+  // Scaffolding left by an earlier, interrupted plan is migration-internal,
+  // not host content: it is claimed here so it leaves the preserved set and
+  // becomes a planned deletion instead of an execution-time improvisation.
+  const orphans = scanMigrationScaffolding(root);
+  const orphanPaths = orphans.map((orphan) => orphan.path);
+
   const operationPaths = operations.map((operation) => operation.path);
   const preserved = [];
   for (const full of listLeafPaths(root)) {
     const relative = relativePortable(root, full);
     if (operationPaths.some((candidate) => isWithin(relative, candidate))) continue;
+    if (orphanPaths.some((candidate) => isWithin(relative, candidate))) continue;
     preserved.push({
       path: relative,
       fingerprint: fingerprintPath(full),
@@ -751,6 +791,7 @@ export function buildMigrationPlan({ root: rootValue, skillsSource: sourceValue,
       line_count: migratedAgents.line_count,
     },
     lazy_absent_files: lazyAbsentFiles,
+    orphans,
     advisories,
   };
   return { ...core, id: planCoreId(core) };
@@ -780,6 +821,7 @@ function validatePlanShape(plan) {
       "claude_marker",
       "agents",
       "lazy_absent_files",
+      "orphans",
       "advisories",
     ],
     "migration plan",
@@ -791,8 +833,13 @@ function validatePlanShape(plan) {
   assertExactKeys(plan.root, ["declared", "canonical"], "migration plan root");
   assertPlainObject(plan.skills_source, "migration plan skills_source");
   assertExactKeys(plan.skills_source, ["declared", "canonical"], "migration plan skills_source");
-  if (!Array.isArray(plan.operations) || !Array.isArray(plan.preserved) || !Array.isArray(plan.skill_sources)) {
-    throw new MigrationError("migration plan operations, preserved, and skill_sources must be arrays");
+  if (
+    !Array.isArray(plan.operations) ||
+    !Array.isArray(plan.preserved) ||
+    !Array.isArray(plan.skill_sources) ||
+    !Array.isArray(plan.orphans)
+  ) {
+    throw new MigrationError("migration plan operations, preserved, skill_sources, and orphans must be arrays");
   }
   validatePlanId(plan);
 }
@@ -867,6 +914,46 @@ function stagePaths(root, plan, operation) {
     stage: path.join(parent, `.kg-migration-stage-${suffix}`),
     backup: path.join(parent, `.kg-migration-backup-${suffix}`),
   };
+}
+
+const STAGE_PREFIX = ".kg-migration-stage-";
+const BACKUP_PREFIX = ".kg-migration-backup-";
+
+// Scaffolding present while a plan is being built necessarily belongs to an
+// earlier plan: this plan has not executed yet. Claiming it at build time is
+// what lets the preserved set and the cleanup agree on who owns these paths.
+function scanMigrationScaffolding(root) {
+  const skillsDir = path.join(root, ".agents", "skills");
+  if (!fs.existsSync(skillsDir)) return [];
+
+  const found = [];
+  for (const entry of fs.readdirSync(skillsDir, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : 1))) {
+    if (!entry.name.startsWith(STAGE_PREFIX) && !entry.name.startsWith(BACKUP_PREFIX)) continue;
+    const full = path.join(skillsDir, entry.name);
+    found.push({
+      path: relativePortable(root, full),
+      fingerprint: fingerprintPath(full),
+      strategy: "remove_superseded_migration_scaffolding",
+    });
+  }
+  return found;
+}
+
+function cleanupPlannedOrphans(root, orphans) {
+  const cleaned = [];
+  for (const orphan of orphans) {
+    assertPlainObject(orphan, "orphan item");
+    assertExactKeys(orphan, ["path", "fingerprint", "strategy"], `orphan item ${orphan.path}`);
+    const full = operationPath(root, orphan.path);
+    const current = fingerprintPath(full);
+    if (current.type === "missing") continue;
+    if (!sameFingerprint(current, orphan.fingerprint)) {
+      throw new MigrationError(`migration scaffolding changed after plan generation: ${orphan.path}`);
+    }
+    fs.rmSync(full, { recursive: true, force: true });
+    cleaned.push(orphan.path);
+  }
+  return cleaned;
 }
 
 function classifySkillOperation(root, plan, operation) {
@@ -1020,6 +1107,15 @@ function phase2Validate(root, plan) {
   }
   validatePreserved(root, plan.preserved);
 
+  for (const orphan of plan.orphans) {
+    if (fingerprintPath(operationPath(root, orphan.path)).type !== "missing") {
+      throw new MigrationError(`Phase 2 migration scaffolding still present: ${orphan.path}`);
+    }
+  }
+  if (scanMigrationScaffolding(root).length) {
+    throw new MigrationError("Phase 2 found migration scaffolding that no plan claims");
+  }
+
   const queue = validateQueue(root);
   if (queue.errors.length) throw new QueueMigrationError(queue.errors);
   if (!sameFingerprint(queue.fingerprint, plan.queue.fingerprint)) {
@@ -1091,6 +1187,8 @@ export function executeMigrationPlan({ root: rootValue, plan }) {
     throw new MigrationError("queue changed after plan generation");
   }
 
+  const cleanedOrphans = cleanupPlannedOrphans(executeRoot, plan.orphans);
+
   const states = new Map();
   for (const operation of plan.operations) {
     const state =
@@ -1152,6 +1250,7 @@ export function executeMigrationPlan({ root: rootValue, plan }) {
     applied,
     already_applied: alreadyApplied,
     advisories: plan.advisories,
+    cleaned_orphans: cleanedOrphans,
     recovery: {
       model: "reentrant_continue",
       command: "re-run --execute with the same plan after an interruption",
