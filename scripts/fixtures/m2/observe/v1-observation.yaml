@@ -1,0 +1,10 @@
+id: OBS-20260730-001
+at: 2026-07-30T12:00:00Z
+source: task_outcome
+claim: "A v1 observation remains valid after the schema extension."
+context:
+  task: v1-preservation
+  paths: [src/**]
+evidence:
+  - { type: test, ref: "legacy observation validator fixture" }
+urgency: batch

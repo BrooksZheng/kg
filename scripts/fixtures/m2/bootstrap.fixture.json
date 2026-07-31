@@ -1,0 +1,6 @@
+{
+  "kind": "kg.eval_bootstrap_fixture",
+  "version": 1,
+  "project_source": "scripts/fixtures/m2/bootstrap/host",
+  "task": "Create an evidence-backed initial architecture overview for this brownfield service."
+}

@@ -1,0 +1,32 @@
+# kg protocol — Authority Model (RFC-001 §5.3)
+# Conflict adjudication order, highest authority first. When claims collide,
+# the higher level determines the RECOMMENDED default action — but the
+# compiler must NEVER silently pick a side: every collision produces a
+# conflict item in .kg/queue/ with the recommendation attached, and a human
+# rules. Authority is a default-action rank, not absolute truth (code can be
+# buggy; tests can freeze wrong behavior).
+
+kind: kg.authority
+version: 1
+
+ranking:
+  - user_explicit_constraint
+  - verified_runtime_behavior
+  - machine_constraint
+  - current_code_and_schema
+  - formal_decision
+  - project_knowledge
+  - past_task_conclusion
+  - agent_inference
+  - external_general_knowledge
+
+descriptions:
+  user_explicit_constraint: "The human stated it explicitly as a constraint."
+  verified_runtime_behavior: "Directly observed and reproduced runtime behavior."
+  machine_constraint: "Encoded in a test / type / lint / CI gate."
+  current_code_and_schema: "What the current code and schemas actually say."
+  formal_decision: "An accepted registered RFC, ADR, or confirmed project document."
+  project_knowledge: "A compiled active kg knowledge entry."
+  past_task_conclusion: "A conclusion from an earlier task, not re-verified."
+  agent_inference: "Agent reasoning without direct evidence."
+  external_general_knowledge: "General world knowledge, not project-specific."

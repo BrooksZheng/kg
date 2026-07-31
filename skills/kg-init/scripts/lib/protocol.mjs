@@ -280,6 +280,14 @@ if (isMain()) {
       }
     }
   }
+  const observation = docs["observation.schema.yaml"];
+  if (
+    observation?.fields?.compiled_to_kn?.type !== "string_or_null" ||
+    observation?.fields?.compiled_to_kn?.required !== false ||
+    observation?.fields?.compiled_to_kn?.pattern !== "^KN-[0-9]{4}$"
+  ) {
+    problems.push("observation: optional compile-owned compiled_to_kn field is invalid");
+  }
   const taxonomy = docs["document-taxonomy.yaml"];
   const projectDocument = docs["project-document.schema.yaml"];
   if (taxonomy && projectDocument) {

@@ -56,7 +56,7 @@ const SCRIPTS_DIR = path.dirname(fileURLToPath(import.meta.url));
 const SKILL_ROOT = path.resolve(SCRIPTS_DIR, "..");
 const PLUGIN_ROOT = path.resolve(SCRIPTS_DIR, "..", "..", "..");
 const DOC_TEMPLATES_DIR = path.join(SKILL_ROOT, "assets", "project-docs");
-const SKILL_NAMES = ["kg-init", "kg-observe", "kg-compile", "kg-scan", "kg-kickoff", "kg-spec"];
+const SKILL_NAMES = ["kg-init", "kg-observe", "kg-compile", "kg-scan", "kg-kickoff", "kg-spec", "kg-docs"];
 const paths = host.kgPaths(hostRoot);
 const log = (msg) => console.log(`kg: ${msg}`);
 
@@ -275,7 +275,7 @@ if (docsProfile !== "none") {
   log("project documents are ready under docs/; draft complete ADRs and RFCs there directly.");
 }
 if (projectStage === "brownfield") {
-  log("next: run the kg-scan skill to bootstrap architecture, API, glossary, and document inventory drafts from existing code.");
+  log("next: run the kg-docs bootstrap path to create an evidence-backed architecture draft from existing code.");
 } else {
   log("next: work normally; record observations via kg-observe; compile when the threshold reminder fires.");
 }

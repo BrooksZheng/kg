@@ -20,6 +20,93 @@ export function findHostRoot(cwd = process.cwd()) {
   }
 }
 
+// Canonicalize existing paths with realpath. When the tail does not exist,
+// resolve the deepest existing ancestor and rebuild the missing tail. Both
+// sides of every path comparison must use this function.
+export function canonicalPath(target) {
+  let current = path.resolve(target);
+  const missing = [];
+  for (;;) {
+    try {
+      return path.resolve(fs.realpathSync(current), ...missing);
+    } catch (error) {
+      if (!["ENOENT", "ENOTDIR", "ELOOP"].includes(error?.code)) throw error;
+      const parent = path.dirname(current);
+      if (parent === current) throw error;
+      missing.unshift(path.basename(current));
+      current = parent;
+    }
+  }
+}
+
+export function hasPathSegment(target, expected) {
+  const wanted = String(expected).toLowerCase();
+  return path
+    .resolve(target)
+    .split(path.sep)
+    .filter(Boolean)
+    .some((segment) => segment.toLowerCase() === wanted);
+}
+
+export function isOutside(root, target) {
+  const canonicalRoot = canonicalPath(root);
+  const canonicalTarget = canonicalPath(target);
+  const relative = path.relative(canonicalRoot, canonicalTarget);
+  return relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative);
+}
+
+export function assertSafeHostRoot(root) {
+  const declared = path.resolve(root);
+  const canonical = canonicalPath(declared);
+  if (hasPathSegment(declared, ".kg") || hasPathSegment(canonical, ".kg")) {
+    throw new Error(`host root must not be inside a .kg path: ${declared}`);
+  }
+  if (!fs.existsSync(canonical) || !fs.statSync(canonical).isDirectory()) {
+    throw new Error(`host root is not a directory: ${declared}`);
+  }
+  return canonical;
+}
+
+export function resolveSafeRelative(root, relative, { mustExist = true, allowSymlink = false, forbidKg = true } = {}) {
+  if (typeof relative !== "string" || relative.trim() === "" || path.isAbsolute(relative)) {
+    throw new Error(`path must be a non-empty relative path: ${relative}`);
+  }
+  const portable = relative.replaceAll("\\", "/");
+  const rawSegments = portable.split("/").filter((segment) => segment !== "" && segment !== ".");
+  if (rawSegments.includes("..")) throw new Error(`path escapes root: ${relative}`);
+  if (forbidKg && rawSegments.some((segment) => segment.toLowerCase() === ".kg")) {
+    throw new Error(`path must not enter .kg: ${relative}`);
+  }
+
+  const canonicalRoot = canonicalPath(root);
+  const target = path.resolve(canonicalRoot, ...rawSegments);
+  if (isOutside(canonicalRoot, target)) throw new Error(`path escapes root: ${relative}`);
+
+  let current = canonicalRoot;
+  for (const segment of rawSegments) {
+    current = path.join(current, segment);
+    let stat;
+    try {
+      stat = fs.lstatSync(current);
+    } catch (error) {
+      if (["ENOENT", "ENOTDIR"].includes(error?.code)) break;
+      throw error;
+    }
+    if (!allowSymlink && stat.isSymbolicLink()) throw new Error(`path contains a symbolic link: ${relative}`);
+  }
+
+  const canonicalTarget = canonicalPath(target);
+  if (isOutside(canonicalRoot, canonicalTarget)) throw new Error(`path resolves outside root: ${relative}`);
+  if (forbidKg && hasPathSegment(canonicalTarget, ".kg")) throw new Error(`path resolves through .kg: ${relative}`);
+  if (mustExist && !fs.existsSync(target)) throw new Error(`path does not exist: ${relative}`);
+  return {
+    root: canonicalRoot,
+    full: target,
+    canonical: canonicalTarget,
+    relative: rawSegments.join("/"),
+  };
+}
+
 export const CONFIG_DEFAULTS = {
   observation_threshold: 5,
 };

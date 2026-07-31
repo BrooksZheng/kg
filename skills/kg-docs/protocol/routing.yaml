@@ -1,0 +1,54 @@
+# kg protocol: two-stage compiler routing.
+# Stage one turns observations into atomic knowledge. Stage two proposes or
+# updates harness carriers from knowledge. Project documents are also compiler
+# inputs with one of three explicit roles.
+
+kind: kg.routing
+version: 2
+
+verdicts: [no_change]
+
+stages:
+  observation_to_knowledge: observation_to_knowledge
+  knowledge_to_harness: knowledge_to_harness
+
+compile_document_roles:
+  route_target: "A document that can receive a managed or co-managed update."
+  dedupe_baseline: "An accepted document used to detect duplicate knowledge."
+  conflict_baseline: "An accepted document used to detect conflicting knowledge."
+
+harness_carriers:
+  markdown_document: markdown_document
+  skill_proposal: skill_proposal
+  script_proposal: script_proposal
+
+categories:
+  needs_human_decision:
+    description: "Conflicting evidence or a major unknown; goes to the human ruling queue."
+    destination: ".kg/queue/"
+    autonomy: human
+  project_knowledge:
+    description: "Explanatory knowledge about the project."
+    destination: "knowledge/*.md"
+    autonomy: auto
+  procedure:
+    description: "Repeatable operation or troubleshooting flow."
+    destination: "knowledge/*.md"
+    autonomy: auto
+  project_contract:
+    description: "Stable contract, architecture boundary, or acceptance requirement."
+    destination: "knowledge/*.md"
+    autonomy: human_review
+  executable_constraint:
+    description: "Should be turned into a test / lint / type / CI gate."
+    destination: "knowledge/*.md"
+    autonomy: human_review
+
+always_human_review:
+  - "publishing a skill proposal"
+  - "publishing a script proposal"
+  - "changing a human-owned document"
+
+actions: [add, update, merge, demote, retire]
+queue_resolutions: [pending, accepted, rejected]
+subtraction_duty: true

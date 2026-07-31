@@ -41,6 +41,8 @@ fields:
   evidence[].type: { type: enum, required: true, values: "diff|test|log|quote" }
   evidence[].ref: { type: string, required: true }
   urgency: { type: enum, required: true, values: "fast_track|batch" }
+  # Compile owns this field. Agent observation drafts must not submit it.
+  compiled_to_kn: { type: string_or_null, required: false, pattern: "^KN-[0-9]{4}$" }
 
 defaults:
   # Applied by kg-observe when the field is missing.

@@ -74,16 +74,17 @@ real output, not fixtures.
 ```text
 skills/
   kg-init/      SKILL.md + scripts/ + assets/   setup, profiles, install
+  kg-docs/      SKILL.md + scripts/   evidence-backed brownfield bootstrap
   kg-observe/   SKILL.md + scripts/   record observations (light, in-task)
   kg-compile/   SKILL.md + scripts/   compile observations into knowledge (heavy, dedicated session)
-  kg-scan/      SKILL.md + scripts/ + references/   bootstrap brownfield docs
+  kg-scan/      SKILL.md + scripts/ + references/   existing static-scan compatibility
   kg-kickoff/   SKILL.md + scripts/ + references/   M1 retrieval and grill spike
   kg-spec/      SKILL.md + scripts/   M1 zero-interview task-spec spike
 protocol/       nine interfaces: observation, knowledge, project-document,
                 harness and task-spec schemas, taxonomy, lifecycle, authority,
                 and two-stage routing
-scripts/lib/    shared Node stdlib modules (KYAML parser, validator, host helpers,
-                and protocol loaders) — the SOURCE OF TRUTH; skill scripts
+scripts/lib/    shared Node stdlib modules (KYAML parser, validator, host and
+                repository helpers, and protocol loaders); the SOURCE OF TRUTH; skill scripts
                 reach it via each skill's scripts/_lib.mjs resolver
 skills/*/scripts/lib/, skills/*/protocol/
                 committed vendored copies of scripts/lib/ and protocol/ that make
@@ -201,12 +202,17 @@ and `superseded`. Only a human can authorize `accepted`.
 For an existing codebase:
 
 ```bash
-node .agents/skills/kg-scan/scripts/scan-inventory.mjs . --format markdown
+node .agents/skills/kg-docs/scripts/inventory.mjs \
+  --root . --output /path/to/artifacts/repository-inventory.json
+node .agents/skills/kg-docs/scripts/bootstrap.mjs \
+  --project-root . \
+  --inventory /path/to/artifacts/repository-inventory.json \
+  --plan /path/to/artifacts/bootstrap-plan.json
 ```
 
-Then follow `kg-scan/SKILL.md` to shape the evidence into architecture, API,
-glossary, and inventory drafts. Static scanning executes no host code and
-always excludes `.kg/`.
+Follow `kg-docs/SKILL.md` to create the strict JSON plan. R2.1 can create a
+missing architecture overview. Static inventory executes no host code and
+excludes `.kg/`, secrets, binaries, oversized files, and symbolic links.
 
 Validate registered documents:
 
@@ -217,10 +223,7 @@ node .agents/skills/kg-compile/scripts/validate-project-documents.mjs
 ```bash
 # during work, record an observation (see skills/kg-observe/SKILL.md)
 printf '%s\n' \
-  'source: human_correction' \
-  'claim: "..."' \
-  'evidence:' \
-  '  - { type: quote, ref: "..." }' \
+  '{"source":"human_correction","claim":"...","evidence":[{"type":"quote","ref":"..."}]}' \
   | node .agents/skills/kg-observe/scripts/add-observation.mjs --stdin
 
 # when the threshold reminder fires (or immediately for fast_track),

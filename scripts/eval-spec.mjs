@@ -172,6 +172,31 @@ function validateResponse(response) {
       errors.push(`products[${index}] must contain kind and path`);
     }
   }
+  if (response.tool_events !== undefined && !Array.isArray(response.tool_events)) {
+    errors.push("tool_events must be an array when present");
+  }
+  for (const [index, event] of (response.tool_events ?? []).entries()) {
+    if (
+      typeof event?.name !== "string" ||
+      typeof event?.command !== "string" ||
+      (!Number.isInteger(event?.at_step) && typeof event?.at_step !== "string") ||
+      typeof event?.ok !== "boolean"
+    ) {
+      errors.push(`tool_events[${index}] must contain name, command, at_step, and ok`);
+    }
+  }
+  if (response.permission_denials !== undefined && !Array.isArray(response.permission_denials)) {
+    errors.push("permission_denials must be an array when present");
+  }
+  for (const [index, denial] of (response.permission_denials ?? []).entries()) {
+    if (
+      typeof denial?.tool !== "string" ||
+      (!Number.isInteger(denial?.at_step) && typeof denial?.at_step !== "string") ||
+      typeof denial?.detail !== "string"
+    ) {
+      errors.push(`permission_denials[${index}] must contain tool, at_step, and detail`);
+    }
+  }
   return errors;
 }
 
@@ -334,6 +359,14 @@ function runReal(fixturePath, transcriptValue, artifactsValue) {
   const schemaFailures = validateResponse(response);
   const questionFailures = questionAudit(response);
   const citationFailures = citationAudit(response, loaded.projectRoot);
+  const executionFailures = [
+    ...(response.permission_denials ?? []).map(
+      (denial) => `permission denied for ${denial.tool} at step ${denial.at_step}: ${denial.detail}`,
+    ),
+    ...(response.tool_events ?? [])
+      .filter((event) => event?.ok === false)
+      .map((event) => `tool failed at step ${event.at_step}: ${event.name} ${event.command}`),
+  ];
   let synthesisFile = null;
   let specFailures = [];
   try {
@@ -371,8 +404,10 @@ function runReal(fixturePath, transcriptValue, artifactsValue) {
     schema_pass: schemaFailures.length === 0 && specFailures.length === 0,
     references_pass: citationFailures.length === 0 && specFailures.length === 0,
     no_followup_pass: questionFailures.length === 0,
+    runner_execution_pass: executionFailures.length === 0,
     failures: {
       runner_schema: schemaFailures,
+      runner_execution: executionFailures,
       questions: questionFailures,
       citations: citationFailures,
       spec: specFailures,
@@ -382,7 +417,8 @@ function runReal(fixturePath, transcriptValue, artifactsValue) {
     result.c1_zero_interview_score === 4 &&
     result.schema_pass &&
     result.references_pass &&
-    result.no_followup_pass;
+    result.no_followup_pass &&
+    result.runner_execution_pass;
   writeJson(path.join(artifacts, "result.json"), result);
   if (!result.pass) fail(`真实 kg-spec 门禁失败，详见 ${path.join(artifacts, "result.json")}`);
   console.log(`kg: 真实 kg-spec 门禁通过，产物已保存到 ${artifacts}`);

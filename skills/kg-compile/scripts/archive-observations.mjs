@@ -1,43 +1,121 @@
-// Move processed observations out of the inbox into
-// .kg/observations/processed/. Run at the end of a compile session, AFTER the
-// report is written — an observation left in the inbox is by definition not
-// yet compiled.
+// Create a canonical processed observation with its compile-owned KN
+// writeback, then remove the untouched pending original.
 //
 // Usage:
-//   node skills/kg-compile/scripts/archive-observations.mjs OBS-... [OBS-...]
-//   node skills/kg-compile/scripts/archive-observations.mjs --all
+//   node archive-observations.mjs --observation OBS-... --compiled-to-kn KN-...
+//
+// All predictable errors are checked before mutation. The referenced
+// knowledge entry must exist and pass the knowledge schema.
 
 import fs from "node:fs";
 import path from "node:path";
-import { host } from "./_lib.mjs";
+import { kyaml, protocol, host } from "./_lib.mjs";
 
-const args = process.argv.slice(2);
-const hostRoot = host.findHostRoot();
+function parseArgs(argv) {
+  const out = {};
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (!["--observation", "--compiled-to-kn"].includes(arg)) host.fail(`unknown option: ${arg}`);
+    const value = argv[index + 1];
+    if (!value || value.startsWith("--")) host.fail(`${arg} needs a value`);
+    const key = arg === "--observation" ? "observation" : "compiledToKn";
+    if (out[key]) host.fail(`${arg} may be supplied only once`);
+    out[key] = value;
+    index += 1;
+  }
+  if (!out.observation || !out.compiledToKn) {
+    host.fail("usage: archive-observations.mjs --observation OBS-... --compiled-to-kn KN-...");
+  }
+  return out;
+}
+
+function canonicalObservation(record) {
+  return {
+    id: record.id,
+    at: record.at,
+    source: record.source,
+    claim: record.claim,
+    context: record.context,
+    evidence: record.evidence,
+    urgency: record.urgency,
+    compiled_to_kn: record.compiled_to_kn,
+  };
+}
+
+function findKnowledgeEntry(knowledgeDir, id) {
+  const matches = host
+    .listFiles(knowledgeDir, ".md")
+    .filter((file) => path.basename(file) === `${id}.md` || path.basename(file).startsWith(`${id}-`));
+  if (matches.length !== 1) {
+    host.fail(
+      matches.length === 0
+        ? `knowledge entry not found: ${id}`
+        : `knowledge id ${id} resolves to multiple files: ${matches.map((file) => path.basename(file)).join(", ")}`,
+    );
+  }
+  const file = matches[0];
+  if (fs.lstatSync(file).isSymbolicLink()) host.fail(`knowledge entry must not be a symbolic link: ${file}`);
+  let frontmatter, body;
+  try {
+    ({ frontmatter, body } = protocol.splitFrontmatter(fs.readFileSync(file, "utf8")));
+  } catch (error) {
+    host.fail(`knowledge entry parse failed for ${id}: ${error.message}`);
+  }
+  const errors = protocol.validateRecord(frontmatter, protocol.loadKnowledgeSchema());
+  if (frontmatter.id !== id) errors.push(`knowledge frontmatter id must equal ${id}`);
+  if (body.trim() === "") errors.push("knowledge body is empty");
+  if (errors.length) host.fail(`knowledge entry ${id} is invalid: ${errors.join("; ")}`);
+  return file;
+}
+
+const args = parseArgs(process.argv.slice(2));
+if (!/^OBS-[0-9]{8}-[0-9]{3}$/.test(args.observation)) host.fail(`invalid observation id: ${args.observation}`);
+if (!/^KN-[0-9]{4}$/.test(args.compiledToKn)) host.fail(`invalid compiled_to_kn: ${args.compiledToKn}`);
+
+let hostRoot;
+try {
+  hostRoot = host.assertSafeHostRoot(host.findHostRoot());
+} catch (error) {
+  host.fail(error.message);
+}
 const paths = host.kgPaths(hostRoot);
-
-let files;
-if (args.includes("--all")) {
-  files = host.listFiles(paths.observations, ".yaml");
-} else {
-  const ids = args.filter((a) => !a.startsWith("--"));
-  if (ids.length === 0) host.fail("usage: archive-observations.mjs <OBS-id>... | --all");
-  files = ids.map((id) => {
-    const f = path.join(paths.observations, `${id}.yaml`);
-    if (!fs.existsSync(f)) host.fail(`observation not found in inbox: ${id}`);
-    return f;
-  });
+const source = path.join(paths.observations, `${args.observation}.yaml`);
+const destination = path.join(paths.processed, `${args.observation}.yaml`);
+if (!fs.existsSync(source) || !fs.statSync(source).isFile()) {
+  host.fail(`observation not found in inbox: ${args.observation}`);
 }
+if (fs.existsSync(destination)) host.fail(`already archived: ${path.basename(destination)}`);
 
-if (files.length === 0) {
-  console.log("kg: inbox is empty — nothing to archive.");
-  process.exit(0);
+findKnowledgeEntry(paths.knowledge, args.compiledToKn);
+
+let observation;
+try {
+  observation = kyaml.parse(fs.readFileSync(source, "utf8"));
+} catch (error) {
+  host.fail(`observation parse failed: ${error.message}`);
 }
+const inputErrors = protocol.validateRecord(observation, protocol.loadObservationSchema());
+if (observation.id !== args.observation) inputErrors.push(`observation id must equal ${args.observation}`);
+if (observation.compiled_to_kn !== undefined && observation.compiled_to_kn !== null) {
+  inputErrors.push("pending observation already has compiled_to_kn");
+}
+if (inputErrors.length) host.fail(`observation is invalid: ${inputErrors.join("; ")}`);
+
+const processed = canonicalObservation({ ...observation, compiled_to_kn: args.compiledToKn });
+const outputErrors = protocol.validateRecord(processed, protocol.loadObservationSchema());
+if (outputErrors.length) host.fail(`processed observation would be invalid: ${outputErrors.join("; ")}`);
 
 fs.mkdirSync(paths.processed, { recursive: true });
-for (const file of files) {
-  const dest = path.join(paths.processed, path.basename(file));
-  if (fs.existsSync(dest)) host.fail(`already archived: ${path.basename(file)}`);
-  fs.renameSync(file, dest);
-  console.log(`kg: archived ${path.basename(file, ".yaml")}`);
+const temporary = path.join(paths.processed, `.${args.observation}.${process.pid}.tmp`);
+let destinationCreated = false;
+try {
+  fs.writeFileSync(temporary, kyaml.stringify(processed), { flag: "wx" });
+  fs.renameSync(temporary, destination);
+  destinationCreated = true;
+  fs.unlinkSync(source);
+} catch (error) {
+  if (fs.existsSync(temporary)) fs.rmSync(temporary, { force: true });
+  if (destinationCreated) fs.rmSync(destination, { force: true });
+  throw error;
 }
-console.log(`kg: ${files.length} observation(s) moved to observations/processed/`);
+console.log(`kg: archived ${args.observation} with compiled_to_kn ${args.compiledToKn}`);

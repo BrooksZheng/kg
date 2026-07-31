@@ -47,11 +47,28 @@ safety exclusions.
 ## Observation intake
 
 ```bash
-node skills/kg-observe/scripts/add-observation.mjs <draft.yaml>
+node skills/kg-observe/scripts/add-observation.mjs <draft.json>
 node skills/kg-observe/scripts/add-observation.mjs --stdin
 node skills/kg-observe/scripts/validate-observations.mjs
 node skills/kg-observe/scripts/check-threshold.mjs
 ```
+
+Agent drafts are strict JSON. The writer generates `id` and `at`, rejects
+agent-submitted `compiled_to_kn`, and stores canonical KYAML.
+
+## Brownfield architecture bootstrap
+
+```bash
+node skills/kg-docs/scripts/inventory.mjs \
+  --root <project-root> --output <inventory.json>
+node skills/kg-docs/scripts/bootstrap.mjs \
+  --project-root <project-root> \
+  --inventory <inventory.json> \
+  --plan <bootstrap-plan.json>
+```
+
+The inventory is static-only. The plan is strict JSON. R2.1 creates only a
+missing `docs/architecture/overview.md`.
 
 ## Project-document sources
 
@@ -70,7 +87,8 @@ node skills/kg-compile/scripts/add-entry.mjs <draft.md>
 node skills/kg-compile/scripts/add-queue-item.mjs <draft.yaml>
 node skills/kg-compile/scripts/validate-knowledge.mjs
 node skills/kg-compile/scripts/transition-entry.mjs ...
-node skills/kg-compile/scripts/archive-observations.mjs ...
+node skills/kg-compile/scripts/archive-observations.mjs \
+  --observation <OBS-id> --compiled-to-kn <KN-id>
 node skills/kg-compile/scripts/report-metrics.mjs [--clear-round]
 ```
 

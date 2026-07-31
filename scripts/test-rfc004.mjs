@@ -41,7 +41,9 @@ try {
     ROOT,
   );
   assert.match(firstInstall, /created docs\/README\.md/);
-  assert.match(firstInstall, /run the kg-scan skill/);
+  // Rev C moves brownfield bootstrap ownership to kg-docs. Part 2 of
+  // test-v2.mjs covers the full inventory, JSON plan, and renderer chain.
+  assert.match(firstInstall, /run the kg-docs bootstrap path/);
   assert.equal(fs.readFileSync(path.join(standard, "docs", "glossary.md"), "utf8"), "human glossary\n");
 
   for (const rel of [
@@ -56,6 +58,10 @@ try {
     ".agents/skills/kg-scan/SKILL.md",
     ".agents/skills/kg-scan/scripts/scan-inventory.mjs",
     ".agents/skills/kg-scan/protocol/project-document.schema.yaml",
+    ".agents/skills/kg-docs/SKILL.md",
+    ".agents/skills/kg-docs/scripts/bootstrap.mjs",
+    ".agents/skills/kg-docs/scripts/inventory.mjs",
+    ".agents/skills/kg-docs/protocol/project-document.schema.yaml",
   ]) {
     assert.equal(exists(standard, rel), true, `standard profile missing ${rel}`);
   }

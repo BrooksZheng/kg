@@ -134,6 +134,31 @@ function validateRunnerResponse(response) {
       errors.push(`products[${index}] must contain kind and path`);
     }
   }
+  if (response.tool_events !== undefined && !Array.isArray(response.tool_events)) {
+    errors.push("tool_events must be an array when present");
+  }
+  for (const [index, event] of (response.tool_events ?? []).entries()) {
+    if (
+      typeof event?.name !== "string" ||
+      typeof event?.command !== "string" ||
+      (!Number.isInteger(event?.at_step) && typeof event?.at_step !== "string") ||
+      typeof event?.ok !== "boolean"
+    ) {
+      errors.push(`tool_events[${index}] must contain name, command, at_step, and ok`);
+    }
+  }
+  if (response.permission_denials !== undefined && !Array.isArray(response.permission_denials)) {
+    errors.push("permission_denials must be an array when present");
+  }
+  for (const [index, denial] of (response.permission_denials ?? []).entries()) {
+    if (
+      typeof denial?.tool !== "string" ||
+      (!Number.isInteger(denial?.at_step) && typeof denial?.at_step !== "string") ||
+      typeof denial?.detail !== "string"
+    ) {
+      errors.push(`permission_denials[${index}] must contain tool, at_step, and detail`);
+    }
+  }
   return errors;
 }
 
@@ -349,6 +374,14 @@ function evaluate(fixture, response, projectRoot, productRoot) {
       citationFailures.push(error.message);
     }
   }
+  const executionFailures = [
+    ...(response.permission_denials ?? []).map(
+      (denial) => `permission denied for ${denial.tool} at step ${denial.at_step}: ${denial.detail}`,
+    ),
+    ...(response.tool_events ?? [])
+      .filter((event) => event?.ok === false)
+      .map((event) => `tool failed at step ${event.at_step}: ${event.name} ${event.command}`),
+  ];
   const result = {
     pass: false,
     hard_gate_pass: false,
@@ -365,6 +398,7 @@ function evaluate(fixture, response, projectRoot, productRoot) {
     file_read_policy: { pass: readFailures.length === 0, failures: readFailures },
     citations: { pass: citationFailures.length === 0, failures: citationFailures },
     runner_schema: { pass: schemaErrors.length === 0, failures: schemaErrors },
+    runner_execution: { pass: executionFailures.length === 0, failures: executionFailures },
   };
   result.hard_gate_pass = [
     result.must_find,
@@ -375,6 +409,7 @@ function evaluate(fixture, response, projectRoot, productRoot) {
     result.file_read_policy,
     result.citations,
     result.runner_schema,
+    result.runner_execution,
   ].every((item) => item.pass);
   result.pass = result.hard_gate_pass;
   return result;

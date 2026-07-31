@@ -147,9 +147,11 @@ constraints (propose the constraint, then retire the prose once it lands).
    path; when a human is present, run the ruling interview (§6) instead of
    ending on a checklist dump.
 3. Archive processed observations:
-   `node .../archive-observations.mjs <OBS-id>...` (or `--all` if every
-   pending observation was handled). Malformed/deferred ones stay in the
-   inbox.
+   run `node .../archive-observations.mjs --observation <OBS-id>
+   --compiled-to-kn <KN-id>` once for each compiled observation. The script
+   validates the target KN, writes `compiled_to_kn` into the canonical
+   processed copy, and then removes the untouched pending original.
+   Malformed or deferred observations stay in the inbox.
 4. Clear the round log: `node .../report-metrics.mjs --clear-round`.
 
 ### 6. Ruling interview (when a human is present)
@@ -186,8 +188,8 @@ exactly how regret gets recorded.
 
 ## Hard rules
 
-- Never edit files in `.kg/observations/` — the inbox is append-only; you
-  only move processed files via `archive-observations.mjs`.
+- Never edit files in `.kg/observations/`. The inbox is append-only.
+  Processed copies are created only through `archive-observations.mjs`.
 - Never treat ordinary, draft, or proposed project documents as accepted
   authority.
 - Never require an observation before a human or agent can draft a complete
