@@ -5,7 +5,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { protocol } from "./_lib.mjs";
+import { harness, host, protocol } from "./_lib.mjs";
 
 const DEFAULT_INDEX_BUDGET = 64 * 1024;
 const DEFAULT_DEEP_BUDGET = 128 * 1024;
@@ -157,7 +157,62 @@ function documentMetadata(text, rel) {
   }
 }
 
-function fixedIndexPaths(root) {
+function sourceRefPath(ref) {
+  return String(ref).replace(/#L[1-9][0-9]*(?:-L[1-9][0-9]*)?$/, "");
+}
+
+function harnessIndex(root) {
+  const entries = [];
+  const sourcePaths = [];
+  for (const rel of listRegularFiles(root, "harness", (file) => file.endsWith(".yaml"))) {
+    try {
+      const record = harness.readHarnessSidecar(root, path.join(root, ...rel.split("/")));
+      const sourceRefIssues = [];
+      for (const ref of record.source_refs) {
+        const candidate = sourceRefPath(ref);
+        try {
+          const resolved = host.resolveSafeRelative(root, candidate);
+          if (path.extname(resolved.relative).toLowerCase() !== ".md") {
+            throw new Error(`source_ref 目标必须是 Markdown：${candidate}`);
+          }
+          if (!fs.statSync(resolved.full).isFile()) {
+            throw new Error(`source_ref 目标不是文件：${candidate}`);
+          }
+          if (!sourcePaths.includes(resolved.relative)) sourcePaths.push(resolved.relative);
+        } catch (error) {
+          sourceRefIssues.push({
+            source_ref: ref,
+            error: error.message,
+          });
+        }
+      }
+      const entry = {
+        path: rel,
+        source: "harness",
+        artifact_id: record.artifact_id,
+        target_path: record.path,
+        status: record.status,
+        authority: "inventory_only",
+        ownership: record.ownership,
+        source_kn_ids: record.source_kn_ids,
+        source_refs: record.source_refs,
+      };
+      if (sourceRefIssues.length > 0) entry.source_ref_issues = sourceRefIssues;
+      entries.push(entry);
+    } catch (error) {
+      entries.push({
+        path: rel,
+        source: "harness",
+        status: "invalid",
+        authority: "inventory_only",
+        parse_error: error.message,
+      });
+    }
+  }
+  return { entries, sourcePaths };
+}
+
+function fixedIndexPaths(root, harnessEntries, harnessSourcePaths) {
   const paths = ["AGENTS.md", "docs/README.md", "docs/glossary.md"];
   for (const rel of [
     "docs/architecture/overview.md",
@@ -165,6 +220,10 @@ function fixedIndexPaths(root) {
     ...listRegularFiles(root, "docs/standards", (file) => file.endsWith(".md")),
     ...listRegularFiles(root, "docs/traps", (file) => file.endsWith(".md")),
     ...listRegularFiles(root, "knowledge", (file) => /^knowledge\/KN-[^/]+\.md$/.test(file)),
+    ...harnessEntries
+      .map((entry) => entry.target_path)
+      .filter((target) => typeof target === "string" && target.endsWith(".md")),
+    ...harnessSourcePaths,
   ]) {
     if (!paths.includes(rel)) paths.push(rel);
   }
@@ -179,8 +238,9 @@ function writeJson(output, value) {
 function runIndex(args, root, output) {
   if (!args.task) fail("--phase index 需要 --task");
   const budget = createBudget(parseBudget(args.budget, DEFAULT_INDEX_BUDGET));
+  const { entries: harnessEntries, sourcePaths: harnessSourcePaths } = harnessIndex(root);
   const entries = [];
-  for (const candidate of fixedIndexPaths(root)) {
+  for (const candidate of fixedIndexPaths(root, harnessEntries, harnessSourcePaths)) {
     const { full, rel } = resolveSafeFile(root, candidate);
     const read = readBudgeted(full, budget);
     const metadata = documentMetadata(read.content, rel);
@@ -197,19 +257,13 @@ function runIndex(args, root, output) {
     });
     if (budget.consumed >= budget.limit) break;
   }
-  const harness = listRegularFiles(root, "harness", () => true).map((rel) => ({
-    path: rel,
-    source: "harness",
-    status: "listed",
-    authority: "inventory_only",
-  }));
   writeJson(output, {
     kind: "kg.kickoff_context_index",
     version: 1,
     project_root: root,
     task: args.task,
     entries,
-    harness,
+    harness: harnessEntries,
     budget: budgetReport(budget),
   });
   console.log(`kg: 索引阶段完成，收录 ${entries.length} 项，使用 ${budget.consumed}/${budget.limit} 字节`);

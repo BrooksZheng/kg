@@ -1,0 +1,13 @@
+id: OBS-20260731-007
+at: 2026-07-31T06:56:06Z
+source: agent_insight
+claim: "Kickoff finding source metadata is canonicalized as status from status or lifecycle, and authority from an explicit authority or the accepted and active source mapping."
+context:
+  task: kg-v2-r24-record-turn
+  paths:
+    - skills/kg-kickoff/scripts/record-turn.mjs
+    - skills/kg-kickoff/scripts/gather-context.mjs
+    - scripts/eval-kickoff.mjs
+evidence:
+  - { type: diff, ref: "R2.4 record-turn and evaluator apply the same metadata mapping to registered docs, KN entries, AGENTS.md, and unregistered carriers" }
+urgency: batch

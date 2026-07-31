@@ -1,5 +1,5 @@
 // Black-box deterministic runner for the seven M2 walking-skeleton parts.
-// R2.2 implements Part 1 through Part 3. Later registered parts report pending.
+// R2.4 implements Part 1 through Part 5. Later registered parts report pending.
 
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -19,7 +19,7 @@ const PARTS = [
   { number: 2, name: "docs_bootstrap_renders_architecture_draft", status: "implemented", run: runPart2 },
   { number: 3, name: "observe_json_preserves_v1_contract", status: "implemented", run: runPart3 },
   { number: 4, name: "compile_links_observation_kn_and_managed_block", status: "implemented", run: runPart4 },
-  { number: 5, name: "kickoff_indexes_compiled_kn_and_carrier", status: "pending" },
+  { number: 5, name: "kickoff_indexes_compiled_kn_and_carrier", status: "implemented", run: runPart5 },
   { number: 6, name: "spec_archives_compiled_context_transcript", status: "pending" },
   { number: 7, name: "scan_reports_one_missing_source_ref", status: "pending" },
 ];
@@ -39,12 +39,22 @@ const EVAL_BOOTSTRAP = path.join(ROOT, "scripts", "eval-bootstrap.mjs");
 const COMPILE_CONTEXT = path.join(ROOT, "skills", "kg-compile", "scripts", "compile.mjs");
 const COMPILE_APPLY = path.join(ROOT, "skills", "kg-compile", "scripts", "apply-compile-plan.mjs");
 const EVAL_COMPILE = path.join(ROOT, "scripts", "eval-compile.mjs");
+const EVAL_KICKOFF = path.join(ROOT, "scripts", "eval-kickoff.mjs");
+const GATHER_KICKOFF_CONTEXT = path.join(ROOT, "skills", "kg-kickoff", "scripts", "gather-context.mjs");
+const RECORD_KICKOFF_TURN = path.join(ROOT, "skills", "kg-kickoff", "scripts", "record-turn.mjs");
 const MOCK_BOOTSTRAP_RUNNER = path.join(ROOT, "scripts", "fixtures", "m2", "mock-bootstrap-runner.mjs");
 const MOCK_COMPILE_RUNNER = path.join(ROOT, "scripts", "fixtures", "m2", "mock-compile-runner.mjs");
+const MOCK_KICKOFF_RUNNER = path.join(ROOT, "scripts", "fixtures", "m2", "mock-kickoff-runner.mjs");
 const BOOTSTRAP_FIXTURE = path.join(ROOT, "scripts", "fixtures", "m2", "bootstrap");
 const OBSERVE_FIXTURE = path.join(ROOT, "scripts", "fixtures", "m2", "observe");
 const MIGRATION_FIXTURE = path.join(ROOT, "scripts", "fixtures", "m2", "migration-v1");
 const COMPILE_FIXTURE = path.join(ROOT, "scripts", "fixtures", "m2", "compile-fixture");
+const KICKOFF_FIXTURES = [
+  path.join(ROOT, "scripts", "fixtures", "m1", "kickoff.fixture.yaml"),
+  path.join(ROOT, "scripts", "fixtures", "m1", "kickoff-no-conflict.fixture.yaml"),
+  path.join(ROOT, "scripts", "fixtures", "m2", "kickoff-03.fixture.yaml"),
+];
+const KICKOFF_COMPILED_PROJECT = path.join(ROOT, "scripts", "fixtures", "m2", "kickoff-03-project");
 const KG_SKILLS = ["kg-init", "kg-observe", "kg-compile", "kg-scan", "kg-kickoff", "kg-spec", "kg-docs"];
 
 class CaseFailure extends Error {
@@ -1783,6 +1793,558 @@ function runPart4(context) {
       context,
       readJson(path.join(earlyRead, "result.json")).pass === true,
       "input read before compile context must not fail the gate",
+    );
+  });
+}
+
+function runPart5(context) {
+  function runKickoffGate(name, fixture, env = {}, expectFailure = false) {
+    const artifacts = path.join(context.root, name);
+    runNode(context, EVAL_KICKOFF, ["--fixture", fixture, "--artifacts", artifacts], {
+      cwd: ROOT,
+      env: { KG_EVAL_RUNNER: MOCK_KICKOFF_RUNNER, ...env },
+      expectFailure,
+    });
+    return {
+      artifacts,
+      result: readJson(path.join(artifacts, "result.json")),
+    };
+  }
+
+  testCase(context, "compiled_fixture_matches_real_m2d_apply_output", () => {
+    const setup = setupCompileCase(
+      context,
+      "kickoff-compiled-source",
+      "publish-plan.json",
+      "OBS-20260731-101",
+    );
+    applyCompile(context, setup);
+    const generatedKn = path.join(
+      setup.project,
+      "knowledge",
+      knowledgeFiles(setup.project).find((name) => name.startsWith("KN-0002-")),
+    );
+    const landedKn = path.join(
+      KICKOFF_COMPILED_PROJECT,
+      "knowledge",
+      "KN-0002-compile-managed-runbooks-must-preserve-human.md",
+    );
+    ensure(
+      context,
+      fs.readFileSync(generatedKn, "utf8") === fs.readFileSync(landedKn, "utf8"),
+      "third kickoff fixture KN differs from real M2D apply output",
+    );
+    ensure(
+      context,
+      fs.readFileSync(path.join(setup.project, "docs", "runbooks", "compile-notes.md"), "utf8") ===
+        fs.readFileSync(path.join(KICKOFF_COMPILED_PROJECT, "docs", "runbooks", "compile-notes.md"), "utf8"),
+      "third kickoff fixture carrier differs from real M2D apply output",
+    );
+    ensure(
+      context,
+      fs.readFileSync(
+        path.join(setup.project, "harness", "artifacts", "HAR-COMPILE-NOTES.yaml"),
+        "utf8",
+      ) ===
+        fs.readFileSync(
+          path.join(KICKOFF_COMPILED_PROJECT, "harness", "artifacts", "HAR-COMPILE-NOTES.yaml"),
+          "utf8",
+        ),
+      "third kickoff fixture sidecar differs from real M2D apply output",
+    );
+  });
+
+  testCase(context, "record_turn_rejects_agent_envelope_fields_and_validates_semantics", () => {
+    const caseRoot = path.join(context.root, "record-turn");
+    fs.mkdirSync(caseRoot, { recursive: true });
+    const projectRoot = path.join(ROOT, "scripts", "fixtures", "m1", "project");
+    const kickoffIndex = path.join(caseRoot, "kickoff-index.json");
+    runNode(
+      context,
+      GATHER_KICKOFF_CONTEXT,
+      [
+        "--root",
+        projectRoot,
+        "--task",
+        "为 Payment 到 Order 的写入增加重试",
+        "--phase",
+        "index",
+        "--output",
+        kickoffIndex,
+      ],
+      { cwd: ROOT },
+    );
+    const transcript = path.join(caseRoot, "transcript.json");
+    const question = "你希望采用事件发布重试吗？";
+    writeJson(transcript, {
+      transcript: [
+        { role: "user", content: "为 Payment 到 Order 的写入增加重试" },
+        { role: "assistant", content: `我推荐事件发布。理由：保留已接受边界。${question}` },
+      ],
+    });
+    const validInput = {
+      findings: [
+        {
+          source_path: "docs/decisions/0001-payment-order-event-bus.md",
+          line: 15,
+          status: "accepted",
+          authority: "formal_decision",
+        },
+      ],
+      question: {
+        question_text: question,
+        assistant_message_index: 1,
+      },
+    };
+    const input = path.join(caseRoot, "input.json");
+    const output = path.join(caseRoot, "turn.yaml");
+    writeJson(input, validInput);
+    runNode(
+      context,
+      RECORD_KICKOFF_TURN,
+      [
+        "--project-root",
+        projectRoot,
+        "--index",
+        kickoffIndex,
+        "--input",
+        input,
+        "--transcript",
+        transcript,
+        "--output",
+        output,
+        "--now",
+        "2026-07-31T05:00:00Z",
+      ],
+      { cwd: ROOT },
+    );
+    const record = readKyaml(output);
+    ensure(context, record.kind === "kg.kickoff_turn" && record.version === 1, "turn envelope was not injected");
+    ensure(context, record.recorded_at === "2026-07-31T05:00:00.000Z", "turn timestamp was not injected");
+    ensure(context, typeof record.session_id === "string" && record.session_id.length > 0, "turn session_id missing");
+    const text = fs.readFileSync(output, "utf8");
+    const canonicalKeys = ["kind:", "version:", "recorded_at:", "session_id:", "findings:", "question:"];
+    ensure(
+      context,
+      canonicalKeys.every(
+        (key, index) => index === 0 || text.indexOf(canonicalKeys[index - 1]) < text.indexOf(key),
+      ),
+      "turn KYAML keys are not canonical",
+    );
+
+    const variants = [
+      ["script-field", { ...validInput, kind: "kg.kickoff_turn" }],
+      [
+        "bad-status",
+        {
+          ...validInput,
+          findings: [{ ...validInput.findings[0], status: "draft" }],
+        },
+      ],
+      [
+        "implementation-path",
+        {
+          ...validInput,
+          findings: [
+            {
+              source_path: "scripts/eval-kickoff.mjs",
+              line: 1,
+              status: "unregistered",
+              authority: "reference_only",
+            },
+          ],
+        },
+      ],
+      [
+        "bad-index",
+        {
+          ...validInput,
+          question: { ...validInput.question, assistant_message_index: 0 },
+        },
+      ],
+      [
+        "duplicate-question",
+        {
+          ...validInput,
+          question: { ...validInput.question, question_text: "事件" },
+        },
+      ],
+      [
+        "duplicate-finding",
+        {
+          ...validInput,
+          findings: [validInput.findings[0], { ...validInput.findings[0] }],
+        },
+      ],
+      [
+        "finding-outside-index",
+        {
+          ...validInput,
+          findings: [
+            {
+              source_path: "docs/unrelated/marketing.md",
+              line: 1,
+              status: "unregistered",
+              authority: "reference_only",
+            },
+          ],
+        },
+      ],
+    ];
+    for (const [name, value] of variants) {
+      const badInput = path.join(caseRoot, `${name}.json`);
+      const badOutput = path.join(caseRoot, `${name}.yaml`);
+      writeJson(badInput, value);
+      runNode(
+        context,
+        RECORD_KICKOFF_TURN,
+        [
+          "--project-root",
+          projectRoot,
+          "--index",
+          kickoffIndex,
+          "--input",
+          badInput,
+          "--transcript",
+          transcript,
+          "--output",
+          badOutput,
+          "--now",
+          "2026-07-31T05:00:00Z",
+        ],
+        { cwd: ROOT, expectFailure: true },
+      );
+      ensure(context, !fs.existsSync(badOutput), `${name} rejection wrote a turn product`);
+    }
+
+    for (const [name, mutation] of [
+      ["bad-kind", (index) => { index.kind = "kg.tampered"; }],
+      ["bad-version", (index) => { index.version = 99; }],
+      ["bad-entries", (index) => { index.entries = {}; }],
+    ]) {
+      const invalidIndex = path.join(caseRoot, `${name}-index.json`);
+      const index = readJson(kickoffIndex);
+      mutation(index);
+      writeJson(invalidIndex, index);
+      const badOutput = path.join(caseRoot, `${name}-index-turn.yaml`);
+      runNode(
+        context,
+        RECORD_KICKOFF_TURN,
+        [
+          "--project-root",
+          projectRoot,
+          "--index",
+          invalidIndex,
+          "--input",
+          input,
+          "--transcript",
+          transcript,
+          "--output",
+          badOutput,
+        ],
+        { cwd: ROOT, expectFailure: true },
+      );
+      ensure(context, !fs.existsSync(badOutput), `${name} index rejection wrote a turn product`);
+    }
+
+    const missingIndexOutput = path.join(caseRoot, "missing-index.yaml");
+    runNode(
+      context,
+      RECORD_KICKOFF_TURN,
+      [
+        "--project-root",
+        projectRoot,
+        "--input",
+        input,
+        "--transcript",
+        transcript,
+        "--output",
+        missingIndexOutput,
+      ],
+      { cwd: ROOT, expectFailure: true },
+    );
+    ensure(context, !fs.existsSync(missingIndexOutput), "missing --index wrote a turn product");
+  });
+
+  testCase(context, "sidecar_source_refs_enter_index_and_support_findings", () => {
+    const caseRoot = path.join(context.root, "source-ref-positive");
+    const project = path.join(caseRoot, "project");
+    fs.cpSync(KICKOFF_COMPILED_PROJECT, project, { recursive: true });
+    const indexFile = path.join(caseRoot, "kickoff-index.json");
+    const contextFile = path.join(caseRoot, "kickoff-context.json");
+    const transcriptFile = path.join(caseRoot, "transcript.json");
+    const inputFile = path.join(caseRoot, "turn-input.json");
+    const turnFile = path.join(caseRoot, "turn.yaml");
+    const sourcePath = "docs/accepted-compile-contract.md";
+    runNode(
+      context,
+      GATHER_KICKOFF_CONTEXT,
+      [
+        "--root",
+        project,
+        "--task",
+        "验证 accepted compile contract",
+        "--phase",
+        "index",
+        "--output",
+        indexFile,
+      ],
+      { cwd: ROOT },
+    );
+    const index = readJson(indexFile);
+    const entry = index.entries.find((item) => item.path === sourcePath);
+    ensure(context, entry?.status === "accepted", "source_ref target did not retain accepted status");
+    ensure(context, entry?.authority === "formal_decision", "source_ref target authority mapping is wrong");
+    runNode(
+      context,
+      GATHER_KICKOFF_CONTEXT,
+      [
+        "--root",
+        project,
+        "--phase",
+        "deep",
+        "--index",
+        indexFile,
+        "--include",
+        sourcePath,
+        "--output",
+        contextFile,
+      ],
+      { cwd: ROOT },
+    );
+    const deep = readJson(contextFile);
+    ensure(context, deep.documents.some((item) => item.path === sourcePath), "source_ref target could not be deep-read");
+    const question = "你希望保留 accepted route target 吗？";
+    writeJson(transcriptFile, {
+      transcript: [
+        { role: "user", content: "验证 accepted compile contract" },
+        { role: "assistant", content: `我推荐保留。理由：这是 accepted contract。${question}` },
+      ],
+    });
+    writeJson(inputFile, {
+      findings: [
+        {
+          source_path: sourcePath,
+          line: 14,
+          status: "accepted",
+          authority: "formal_decision",
+        },
+      ],
+      question: {
+        question_text: question,
+        assistant_message_index: 1,
+      },
+    });
+    runNode(
+      context,
+      RECORD_KICKOFF_TURN,
+      [
+        "--project-root",
+        project,
+        "--index",
+        indexFile,
+        "--input",
+        inputFile,
+        "--transcript",
+        transcriptFile,
+        "--output",
+        turnFile,
+        "--now",
+        "2026-07-31T05:00:00Z",
+      ],
+      { cwd: ROOT },
+    );
+    ensure(
+      context,
+      readKyaml(turnFile).findings[0].source_path === sourcePath,
+      "source_ref target finding was not recorded",
+    );
+  });
+
+  testCase(context, "missing_sidecar_source_ref_is_reported_without_hallucinated_entry", () => {
+    const caseRoot = path.join(context.root, "source-ref-missing");
+    const project = path.join(caseRoot, "project");
+    fs.cpSync(KICKOFF_COMPILED_PROJECT, project, { recursive: true });
+    const sidecarFile = path.join(project, "harness", "artifacts", "HAR-COMPILE-NOTES.yaml");
+    const missingRef = "docs/missing-accepted-contract.md#L15";
+    const sidecar = readKyaml(sidecarFile);
+    sidecar.source_refs = [missingRef];
+    fs.writeFileSync(sidecarFile, harness.renderHarnessSidecar(sidecar));
+    const indexFile = path.join(caseRoot, "kickoff-index.json");
+    runNode(
+      context,
+      GATHER_KICKOFF_CONTEXT,
+      [
+        "--root",
+        project,
+        "--task",
+        "验证缺失 source_ref 降级",
+        "--phase",
+        "index",
+        "--output",
+        indexFile,
+      ],
+      { cwd: ROOT },
+    );
+    const index = readJson(indexFile);
+    const harnessEntry = index.harness.find((item) => item.artifact_id === "HAR-COMPILE-NOTES");
+    ensure(context, harnessEntry?.status === "active", "missing source_ref invalidated the legal sidecar");
+    ensure(
+      context,
+      harnessEntry.source_ref_issues?.some((issue) => issue.source_ref === missingRef),
+      "missing source_ref issue was not recorded on the harness entry",
+    );
+    ensure(
+      context,
+      !index.entries.some((entry) => entry.path === "docs/missing-accepted-contract.md"),
+      "missing source_ref produced a hallucinated index entry",
+    );
+  });
+
+  testCase(context, "three_saved_fixtures_pass_structured_checks", () => {
+    for (const fixture of KICKOFF_FIXTURES) {
+      runNode(context, EVAL_KICKOFF, ["--check-fixture", fixture], { cwd: ROOT });
+    }
+  });
+
+  testCase(context, "three_mock_sessions_pass_without_oracle_prompt_leakage", () => {
+    for (const [index, fixture] of KICKOFF_FIXTURES.entries()) {
+      const run = runKickoffGate(`mock-positive-${index + 1}`, fixture);
+      ensure(context, run.result.pass === true, `mock fixture ${index + 1} did not pass`);
+      const fixtureRecord = readKyaml(fixture);
+      const prompt = fs.readFileSync(path.join(run.artifacts, "actual-prompt.txt"), "utf8");
+      for (const secret of [
+        ...fixtureRecord.must_find,
+        ...fixtureRecord.must_report,
+        ...fixtureRecord.distractors,
+      ]) {
+        ensure(context, !prompt.includes(secret), `fixture oracle leaked into prompt: ${secret}`);
+      }
+      for (const directive of [
+        "--index",
+        "逐字节恰好出现一次",
+        "markdown 反引号",
+        "加粗",
+        "引号替换",
+        "英文双引号必须用反斜杠转义",
+        "「」",
+      ]) {
+        ensure(context, prompt.includes(directive), `kickoff prompt lacks hardening directive: ${directive}`);
+      }
+    }
+  });
+
+  testCase(context, "structured_negative_cases_fail_the_target_criteria", () => {
+    const compiledFixture = KICKOFF_FIXTURES[2];
+    const proseOnly = runKickoffGate(
+      "negative-prose-only",
+      compiledFixture,
+      { KG_FAKE_PROSE_ONLY: "1" },
+      true,
+    );
+    ensure(context, proseOnly.result.must_find.pass === false, "prose-only KN mention passed must_find");
+
+    for (const role of ["analysis", "tool", "out_of_range"]) {
+      const badIndex = runKickoffGate(
+        `negative-question-${role}`,
+        compiledFixture,
+        { KG_FAKE_BAD_QUESTION_INDEX: role },
+        true,
+      );
+      ensure(context, badIndex.result.must_ask.pass === false, `${role} question pointer passed must_ask`);
+    }
+
+    const uncoveredConflict = runKickoffGate(
+      "negative-uncovered-conflict",
+      compiledFixture,
+      { KG_FAKE_CONFLICT_NOT_COVERED: "1" },
+      true,
+    );
+    ensure(
+      context,
+      uncoveredConflict.result.must_ask.pass === false,
+      "question turn without the recorded conflict source passed must_ask",
+    );
+
+    const unreadReason = runKickoffGate(
+      "negative-unread-reason",
+      compiledFixture,
+      { KG_FAKE_UNREAD_REASON: "1" },
+      true,
+    );
+    ensure(
+      context,
+      unreadReason.result.forbid_fabrication.pass === false,
+      "finding used as an unread reason source passed forbid_fabrication",
+    );
+
+    const readDistractor = runKickoffGate(
+      "negative-read-distractor",
+      compiledFixture,
+      { KG_FAKE_READ_DISTRACTOR: "1" },
+      true,
+    );
+    ensure(
+      context,
+      readDistractor.result.forbid_fabrication.pass === false &&
+        readDistractor.result.file_read_policy.pass === false,
+      "deep-read distractor passed the structural read policy",
+    );
+
+    for (const source of ["kn", "carrier"]) {
+      const singleSource = runKickoffGate(
+        `negative-single-${source}`,
+        compiledFixture,
+        { KG_FAKE_SINGLE_SOURCE: source },
+        true,
+      );
+      ensure(context, singleSource.result.must_find.pass === false, `single ${source} source passed dual-source closure`);
+    }
+
+    const unexpectedConflict = runKickoffGate(
+      "negative-no-conflict-product",
+      KICKOFF_FIXTURES[1],
+      { KG_FAKE_NONEMPTY_CONFLICT: "1" },
+      true,
+    );
+    ensure(
+      context,
+      unexpectedConflict.result.must_report.pass === false,
+      "non-empty conflict product passed the no-conflict fixture",
+    );
+  });
+
+  testCase(context, "failed_exploration_warns_and_early_reads_remain_valid", () => {
+    const failedExploration = runKickoffGate(
+      "regression-failed-exploration",
+      KICKOFF_FIXTURES[2],
+      { KG_FAKE_FAILED_EXPLORATION: "1" },
+    );
+    ensure(context, failedExploration.result.pass === true, "failed exploratory read invalidated kickoff");
+    ensure(
+      context,
+      failedExploration.result.warnings.some((warning) => warning.includes("missing-exploration.md")),
+      "failed exploratory read warning was not retained",
+    );
+
+    const earlyRead = runKickoffGate(
+      "regression-early-read",
+      KICKOFF_FIXTURES[2],
+      { KG_FAKE_EARLY_READ: "1" },
+    );
+    ensure(context, earlyRead.result.pass === true, "early source reads invalidated kickoff");
+
+    // D48: recorder-vs-recorder ordering has no integrity function; only
+    // "conflict recorder after deep" is an invariant.
+    const lateConflict = runKickoffGate(
+      "regression-late-conflict",
+      KICKOFF_FIXTURES[2],
+      { KG_FAKE_LATE_CONFLICT: "1" },
+    );
+    ensure(
+      context,
+      lateConflict.result.pass === true,
+      "conflict recorder running after turn recorder invalidated kickoff",
     );
   });
 }

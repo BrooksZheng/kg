@@ -1,0 +1,4 @@
+kind: kg.kickoff_conflicts
+version: 1
+conflicts:
+  - { summary: "任务中的写入若指直接写 Order 数据库，与已接受决策冲突", source_path: docs/decisions/0001-payment-order-event-bus.md, line: 15 }

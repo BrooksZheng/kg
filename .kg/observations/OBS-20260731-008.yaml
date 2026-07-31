@@ -1,0 +1,13 @@
+id: OBS-20260731-008
+at: 2026-07-31T06:56:06Z
+source: task_outcome
+claim: "A kickoff assistant_message_index is authoritative only against the final Runner Contract transcript; recorder-time transcript validation is a preflight check."
+context:
+  task: kg-v2-r24-kickoff-turn
+  paths:
+    - skills/kg-kickoff/scripts/record-turn.mjs
+    - scripts/eval-kickoff.mjs
+    - scripts/eval-runner-contract.md
+evidence:
+  - { type: test, ref: "Part 5 rejects assistant_message_index values that resolve to analysis, tool, or out-of-range messages in the final runner response" }
+urgency: batch

@@ -1,0 +1,11 @@
+artifact_id: HAR-COMPILE-NOTES
+type: markdown_document
+path: docs/runbooks/compile-notes.md
+ownership: managed
+status: active
+source_kn_ids: [KN-0002]
+source_refs: ["docs/accepted-compile-contract.md#L15"]
+content_hash: sha256:eb4c1194965389d066426eb04f3f1fbf189f3704f7f4df8a9fa8231e5707c711
+generator_version: kg-compile/2.0.0-m2
+last_verified: 2026-07-31
+update_policy: automatic

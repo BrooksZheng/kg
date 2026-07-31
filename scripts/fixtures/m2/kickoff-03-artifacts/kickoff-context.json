@@ -1,0 +1,44 @@
+{
+  "kind": "kg.kickoff_context",
+  "version": 1,
+  "project_root": "scripts/fixtures/m2/kickoff-03-project",
+  "index_path": "scripts/fixtures/m2/kickoff-03-artifacts/kickoff-index.json",
+  "documents": [
+    {
+      "path": "knowledge/KN-0002-compile-managed-runbooks-must-preserve-human.md",
+      "source": "knowledge",
+      "status": "active",
+      "authority": "verified_runtime_behavior",
+      "content": "---\nid: KN-0002\nclaim: \"Compile-managed runbooks must preserve human text outside their managed block.\"\ncategory: project_knowledge\nscope:\n  paths: [\"docs/runbooks/**\"]\nevidence:\n  - { type: observation, ref: OBS-20260731-101 }\nauthority: verified_runtime_behavior\nconfidence: 1\nlifecycle: active\nsupersedes: null\nlast_verified: 2026-07-31\nregret: null\nsource_obs_ids: [OBS-20260731-101]\ncarrier_refs:\n  - \"HAR-COMPILE-NOTES@docs/runbooks/compile-notes.md#kg:managed\"\n---\n\n## Constraint\n\nManaged carrier updates replace only the uniquely identified marker content.\n",
+      "bytes": 565,
+      "original_bytes": 565,
+      "truncated": false
+    },
+    {
+      "path": "docs/runbooks/compile-notes.md",
+      "source": "project_document",
+      "status": "unregistered",
+      "authority": "reference_only",
+      "content": "# Compile notes\n\nHuman preface that compile must preserve byte for byte.\n\n<!-- kg:managed HAR-COMPILE-NOTES begin -->\n<!-- kg:source KN-0002 -->\nCompile updates this block while preserving both surrounding human sections.\n<!-- kg:managed HAR-COMPILE-NOTES end -->\n\nHuman epilogue that compile must preserve byte for byte.\n",
+      "bytes": 322,
+      "original_bytes": 322,
+      "truncated": false
+    },
+    {
+      "path": "docs/accepted-compile-contract.md",
+      "source": "project_document",
+      "status": "accepted",
+      "authority": "formal_decision",
+      "content": "---\nkind: kg.project_document\ntitle: \"M2 compile fixture contract\"\ndoc_type: rfc\nstatus: accepted\nowners: [\"kg\"]\naccepted_at: 2026-07-31\nsupersedes: null\nsource_refs: []\n---\n\n# M2 compile fixture contract\n\nThe managed runbook carrier is an accepted route target for the isolated compile fixture.\n",
+      "bytes": 296,
+      "original_bytes": 296,
+      "truncated": false
+    }
+  ],
+  "budget": {
+    "limit_bytes": 131072,
+    "consumed_bytes": 1183,
+    "remaining_bytes": 129889,
+    "truncated": false
+  }
+}

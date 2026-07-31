@@ -1,0 +1,24 @@
+{
+  "kind": "kg.kickoff_context",
+  "version": 1,
+  "project_root": "scripts/fixtures/m1/project",
+  "index_path": "scripts/fixtures/m1/kickoff-artifacts/no-conflict/kickoff-index.json",
+  "documents": [
+    {
+      "path": "docs/decisions/0001-payment-order-event-bus.md",
+      "source": "project_document",
+      "status": "accepted",
+      "authority": "formal_decision",
+      "content": "---\nkind: kg.project_document\ntitle: \"Payment to Order event boundary\"\ndoc_type: decision\nstatus: accepted\nowners: [payments, orders]\naccepted_at: 2026-07-28\nsupersedes: null\n---\n\n# Payment to Order event boundary\n\n## Decision\n\nPayment emits `payment.authorized`; Order consumes the event. Payment must not write the Order database directly.\n\n## Retry constraint\n\nPublication retries must reuse the same idempotency key so Order can discard duplicate delivery.\n",
+      "bytes": 461,
+      "original_bytes": 461,
+      "truncated": false
+    }
+  ],
+  "budget": {
+    "limit_bytes": 131072,
+    "consumed_bytes": 461,
+    "remaining_bytes": 130611,
+    "truncated": false
+  }
+}

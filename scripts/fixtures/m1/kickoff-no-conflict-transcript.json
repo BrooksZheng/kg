@@ -1,45 +1,61 @@
 {
-  "session_id": "m1-kickoff-no-conflict-fixture-01",
+  "session_id": "m1-kickoff-no-conflict-structured-01",
   "transcript": [
     {
       "role": "user",
-      "content": "通过事件总线为 payment.authorized 发布增加重试机制。"
+      "content": "通过事件总线为 payment.authorized 发布增加重试机制"
     },
     {
       "role": "assistant",
-      "content": "已接受约束 docs/decisions/0001-payment-order-event-bus.md 写明 Payment must not write the Order database directly，发布重试还要 reuse the same idempotency key。当前任务已经明确通过事件总线重试 payment.authorized 发布，任务文本已排除直接写 Order 数据库的冲突解读。你希望先确定重试次数还是退避策略？我推荐先确定退避策略。理由：已接受决策要求每次发布重试复用同一幂等键，退避策略会先确定各次尝试的时间边界。"
+      "content": "任务已经明确使用事件总线，符合已接受边界。你希望先确定退避策略，还是先确定重试次数？我推荐先确定退避策略。理由：退避时间会先界定复用同一幂等键的重试窗口。",
+      "tool_calls": []
     }
   ],
   "file_reads": [
     {
       "path": "docs/decisions/0001-payment-order-event-bus.md",
-      "at_step": 1
+      "at_step": 2
     }
   ],
   "citations": [
     {
       "path": "docs/decisions/0001-payment-order-event-bus.md",
-      "line": 15,
-      "context": "accepted event boundary"
-    },
-    {
-      "path": "docs/decisions/0001-payment-order-event-bus.md",
-      "line": 19,
-      "context": "publication retry constraint"
+      "line": 19
     }
   ],
-  "products": [],
-  "context_index": {
-    "kind": "kg.kickoff_context_index",
-    "selected_paths": [
-      "docs/decisions/0001-payment-order-event-bus.md"
-    ]
-  },
-  "gathered_context": {
-    "kind": "kg.kickoff_context",
-    "documents": [
-      "docs/decisions/0001-payment-order-event-bus.md"
-    ]
-  },
-  "intermediate_products": []
+  "products": [
+    {
+      "kind": "kg.kickoff_context_index",
+      "path": "kickoff-index.json"
+    },
+    {
+      "kind": "kg.kickoff_context",
+      "path": "kickoff-context.json"
+    },
+    {
+      "kind": "kg.kickoff_turn",
+      "path": "kickoff-turn.yaml"
+    }
+  ],
+  "tool_events": [
+    {
+      "name": "Bash",
+      "command": "node gather-context.mjs --phase index --output kickoff-index.json",
+      "at_step": 1,
+      "ok": true
+    },
+    {
+      "name": "Bash",
+      "command": "node gather-context.mjs --phase deep --include docs/decisions/0001-payment-order-event-bus.md --output kickoff-context.json",
+      "at_step": 2,
+      "ok": true
+    },
+    {
+      "name": "Bash",
+      "command": "node record-turn.mjs --index kickoff-index.json --output kickoff-turn.yaml",
+      "at_step": 4,
+      "ok": true
+    }
+  ],
+  "permission_denials": []
 }
