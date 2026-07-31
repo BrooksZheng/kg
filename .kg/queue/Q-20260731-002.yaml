@@ -13,5 +13,5 @@ options:
 recommendation: "Accept. D50 independently reproduced the failure family (substring scanning), and the M3 contract §10.1.8 codifies the rule; activation binds all future gate authors."
 entry: KN-0029
 source_observations: [OBS-20260730-004]
-resolution: pending
-resolution_note: null
+resolution: accepted
+resolution_note: "Human delegated the ruling to the compiler agent in-session: 裁决有你帮我决定 (2026-07-31). Ruled per the recorded recommendation."

@@ -14,7 +14,7 @@ evidence:
   - { type: quote, ref: ".mission/kg-v2-refactor/contract-3.md §1.5.1: Agent 创作的机器输入使用严格 JSON。KYAML 与 Markdown 只由校验后的 writer 生成。" }
 authority: formal_decision
 confidence: 0.9
-lifecycle: candidate
+lifecycle: active
 supersedes: null
 last_verified: 2026-07-31
 regret: null

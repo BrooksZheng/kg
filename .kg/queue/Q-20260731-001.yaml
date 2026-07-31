@@ -13,5 +13,5 @@ options:
 recommendation: "Accept. The rule is already the negotiated M3 contract invariant (§1.5.1) and every v2 writer implements it; activating the entry makes it binding knowledge outside the mission docs."
 entry: KN-0028
 source_observations: [OBS-20260730-003]
-resolution: pending
-resolution_note: null
+resolution: accepted
+resolution_note: "Human delegated the ruling to the compiler agent in-session: 裁决有你帮我决定 (2026-07-31). Ruled per the recorded recommendation."

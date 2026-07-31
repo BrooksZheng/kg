@@ -14,7 +14,7 @@ evidence:
   - { type: quote, ref: ".mission/kg-v2-refactor/contract-3.md §10.1.8: 判据检查机器产物与事件，不扫描 agent 自由散文的词、子串或固定句式。" }
 authority: formal_decision
 confidence: 0.9
-lifecycle: candidate
+lifecycle: active
 supersedes: null
 last_verified: 2026-07-31
 regret: null
