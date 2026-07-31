@@ -1,0 +1,12 @@
+id: OBS-20260731-004
+at: 2026-07-31T04:00:00Z
+source: task_outcome
+claim: "A host-isolated self-check option must branch before host-root discovery, and unknown CLI options must be rejected instead of silently falling through to live inbox validation."
+context:
+  task: kg-v2-r23-compile
+  paths:
+    - skills/kg-observe/scripts/validate-observations.mjs
+    - scripts/test-v2.mjs
+evidence:
+  - { type: test, ref: "scripts/test-v2.mjs: validator_self_check_is_host_isolated" }
+urgency: batch

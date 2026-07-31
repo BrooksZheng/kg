@@ -1,0 +1,13 @@
+id: OBS-20260731-005
+at: 2026-07-31T04:00:01Z
+source: task_outcome
+claim: "A multi-surface compile transaction must persist baseline and expected states, use writer-owned deterministic temporary files, and make observation archival idempotent so an interrupted plan can resume without duplicate outputs."
+context:
+  task: kg-v2-r23-compile
+  paths:
+    - skills/kg-compile/scripts/apply-compile-plan.mjs
+    - skills/kg-compile/scripts/archive-observations.mjs
+    - scripts/test-v2.mjs
+evidence:
+  - { type: test, ref: "scripts/test-v2.mjs: transaction_manifest_resumes_after_mutation_interruptions" }
+urgency: batch

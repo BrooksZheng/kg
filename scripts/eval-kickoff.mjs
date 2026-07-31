@@ -358,10 +358,11 @@ function evaluate(fixture, response, projectRoot, productRoot) {
     ...(response.permission_denials ?? []).map(
       (denial) => `permission denied for ${denial.tool} at step ${denial.at_step}: ${denial.detail}`,
     ),
-    ...(response.tool_events ?? [])
-      .filter((event) => event?.ok === false)
-      .map((event) => `tool failed at step ${event.at_step}: ${event.name} ${event.command}`),
   ];
+  // Failed tool events are evidence, not verdicts (see eval-compile.mjs).
+  const executionWarnings = (response.tool_events ?? [])
+    .filter((event) => event?.ok === false)
+    .map((event) => `tool failed at step ${event.at_step}: ${event.name} ${event.command}`);
   const result = {
     pass: false,
     hard_gate_pass: false,
@@ -379,6 +380,7 @@ function evaluate(fixture, response, projectRoot, productRoot) {
     citations: { pass: citationFailures.length === 0, failures: citationFailures },
     runner_schema: { pass: schemaErrors.length === 0, failures: schemaErrors },
     runner_execution: { pass: executionFailures.length === 0, failures: executionFailures },
+    warnings: executionWarnings,
   };
   result.hard_gate_pass = [
     result.must_find,

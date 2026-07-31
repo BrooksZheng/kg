@@ -1,0 +1,10 @@
+id: OBS-20260731-103
+at: 2026-07-31T01:02:00Z
+source: agent_insight
+claim: "The existing ledger already covers this fixture observation."
+context:
+  task: m2d-compile-fixture
+  paths: ["knowledge/**"]
+evidence:
+  - { type: test, ref: "compile fixture no-change path" }
+urgency: batch

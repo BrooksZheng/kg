@@ -88,17 +88,16 @@ if (errors.length) {
 }
 if (body.trim() === "") host.fail("entry body is empty — write the explanation, the entry IS the reference doc");
 
-const slug =
-  record.claim
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .split("-")
-    .slice(0, 6)
-    .join("-") || "entry";
-const outFile = path.join(paths.knowledge, `${id}-${slug}.md`);
+const outFile = path.join(paths.knowledge, host.knowledgeFilename(id, record.claim));
 if (fs.existsSync(outFile)) host.fail(`refusing to overwrite ${outFile}`);
-fs.writeFileSync(outFile, `---\n${kyaml.stringify(record)}---\n\n${body.trim()}\n`);
+const temporary = path.join(paths.knowledge, `.${path.basename(outFile)}.kg-entry-write.tmp`);
+try {
+  if (fs.existsSync(temporary)) fs.rmSync(temporary, { force: true });
+  fs.writeFileSync(temporary, `---\n${kyaml.stringify(record)}---\n\n${body.trim()}\n`, { flag: "wx" });
+  fs.renameSync(temporary, outFile);
+} finally {
+  if (fs.existsSync(temporary)) fs.rmSync(temporary, { force: true });
+}
 host.appendRoundAction(paths, { action: "add", entry: id, category, lifecycle: derivedLifecycle });
 
 console.log(`kg: created ${id} (${derivedLifecycle}) -> ${path.relative(process.cwd(), outFile) || outFile}`);

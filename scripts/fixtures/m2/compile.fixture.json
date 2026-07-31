@@ -1,0 +1,6 @@
+{
+  "kind": "kg.eval_compile_fixture",
+  "version": 1,
+  "project_source": "scripts/fixtures/m2/compile-fixture/host",
+  "task": "Compile every pending observation through the three explicit result types."
+}

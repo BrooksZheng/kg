@@ -122,11 +122,59 @@ try {
 const paths = host.kgPaths(hostRoot);
 const source = path.join(paths.observations, `${args.observation}.yaml`);
 const destination = path.join(paths.processed, `${args.observation}.yaml`);
+if (args.compiledToKn) findKnowledgeEntry(paths.knowledge, args.compiledToKn);
+
+function parseObservationFile(file, label) {
+  let record;
+  try {
+    record = kyaml.parse(fs.readFileSync(file, "utf8"));
+  } catch (error) {
+    host.fail(`${label} observation parse failed: ${error.message}`);
+  }
+  const errors = protocol.validateRecord(record, protocol.loadObservationSchema());
+  if (record.id !== args.observation) errors.push(`observation id must equal ${args.observation}`);
+  if (errors.length) host.fail(`${label} observation is invalid: ${errors.join("; ")}`);
+  return record;
+}
+
+if (fs.existsSync(destination)) {
+  if (!fs.statSync(destination).isFile() || fs.lstatSync(destination).isSymbolicLink()) {
+    host.fail(`processed observation target is not a regular file: ${destination}`);
+  }
+  const processed = parseObservationFile(destination, "processed");
+  if (args.compiledToKn && processed.compiled_to_kn !== args.compiledToKn) {
+    host.fail(
+      `already archived with different compiled_to_kn: ${processed.compiled_to_kn ?? "none"} (expected ${args.compiledToKn})`,
+    );
+  }
+  if (args.verdict && processed.compiled_to_kn !== undefined && processed.compiled_to_kn !== null) {
+    host.fail(`already archived with compiled_to_kn, cannot apply verdict ${args.verdict}`);
+  }
+  if (fs.existsSync(source)) {
+    if (!fs.statSync(source).isFile() || fs.lstatSync(source).isSymbolicLink()) {
+      host.fail(`pending observation source is not a regular file: ${source}`);
+    }
+    const pending = parseObservationFile(source, "pending");
+    if (pending.compiled_to_kn !== undefined && pending.compiled_to_kn !== null) {
+      host.fail("pending observation already has compiled_to_kn");
+    }
+    const expected = canonicalObservation(pending, args.compiledToKn);
+    if (kyaml.stringify(expected) !== kyaml.stringify(processed)) {
+      host.fail(`processed observation differs from pending source: ${args.observation}`);
+    }
+    fs.unlinkSync(source);
+  }
+  console.log(
+    args.compiledToKn
+      ? `kg: already archived ${args.observation} with compiled_to_kn ${args.compiledToKn}`
+      : `kg: already archived ${args.observation} with verdict ${args.verdict}`,
+  );
+  process.exit(0);
+}
 if (!fs.existsSync(source) || !fs.statSync(source).isFile()) {
   host.fail(`observation not found in inbox: ${args.observation}`);
 }
-if (fs.existsSync(destination)) host.fail(`already archived: ${path.basename(destination)}`);
-if (args.compiledToKn) findKnowledgeEntry(paths.knowledge, args.compiledToKn);
+if (fs.lstatSync(source).isSymbolicLink()) host.fail(`pending observation must not be a symbolic link: ${source}`);
 
 let observation;
 try {
@@ -146,9 +194,10 @@ const outputErrors = protocol.validateRecord(processed, protocol.loadObservation
 if (outputErrors.length) host.fail(`processed observation would be invalid: ${outputErrors.join("; ")}`);
 
 fs.mkdirSync(paths.processed, { recursive: true });
-const temporary = path.join(paths.processed, `.${args.observation}.${process.pid}.tmp`);
+const temporary = path.join(paths.processed, `.${args.observation}.kg-archive-write.tmp`);
 let destinationCreated = false;
 try {
+  if (fs.existsSync(temporary)) fs.rmSync(temporary, { force: true });
   fs.writeFileSync(temporary, kyaml.stringify(processed), { flag: "wx" });
   fs.renameSync(temporary, destination);
   destinationCreated = true;

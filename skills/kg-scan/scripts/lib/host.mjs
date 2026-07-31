@@ -168,6 +168,23 @@ export function nextKnowledgeId(paths) {
   return `KN-${String(max + 1).padStart(4, "0")}`;
 }
 
+export function knowledgeSlug(claim) {
+  return (
+    String(claim)
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .split("-")
+      .slice(0, 6)
+      .join("-") || "entry"
+  );
+}
+
+export function knowledgeFilename(id, claim) {
+  if (!/^KN-[0-9]{4}$/.test(id)) throw new Error(`invalid knowledge id: ${id}`);
+  return `${id}-${knowledgeSlug(claim)}.md`;
+}
+
 export function fail(message) {
   console.error(`kg: error: ${message}`);
   process.exit(1);

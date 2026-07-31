@@ -1,0 +1,26 @@
+{
+  "kind": "kg.compile_plan",
+  "version": 1,
+  "items": [
+    {
+      "observation_id": "OBS-20260731-101",
+      "result_type": "publish_kn_and_carrier",
+      "knowledge": {
+        "claim": "Compile-managed runbooks must preserve human text outside their managed block.",
+        "category": "project_knowledge",
+        "scope": {
+          "paths": [
+            "docs/runbooks/**"
+          ]
+        },
+        "authority": "verified_runtime_behavior",
+        "confidence": 1,
+        "body": "## Constraint\n\nManaged carrier updates replace only the uniquely identified marker content."
+      },
+      "carrier": {
+        "artifact_id": "HAR-COMPILE-NOTES",
+        "content": "Compile updates this block while preserving both surrounding human sections."
+      }
+    }
+  ]
+}

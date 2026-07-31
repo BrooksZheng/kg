@@ -18,6 +18,49 @@ Read first: `protocol/routing.yaml` (verdict + categories + autonomy),
 (legal transitions). Scripts live in `skills/kg-compile/scripts/`; run them
 with `node <script>.mjs` from anywhere inside the host repo.
 
+## M2 deterministic plan/apply path
+
+This section overrides the older per-record publishing instructions below for
+the M2-supported path. The compiler agent produces one strict JSON plan. It
+never writes a KN, queue item, carrier, sidecar, processed observation, or
+report directly.
+
+1. Run `compile.mjs --root <host> --output <session-artifacts>/compile-context.json`.
+   Keep the context outside `.kg/`. The script records independent input
+   fingerprints for every pending observation, all KN entries, accepted
+   project documents, harness sidecars, and carrier targets.
+2. Read every file declared by the context. Submit one JSON
+   `kg.compile_plan` with a non-shell file-writing tool. Each observation item
+   must explicitly select exactly one result:
+   `publish_kn_and_carrier`, `queue_only`, or `no_change`.
+3. Run `apply-compile-plan.mjs --root <host> --context <context.json>
+   --plan <plan.json>`. Use `--check` for deterministic preflight or final
+   state verification. The apply script assigns IDs, timestamps, hashes,
+   lifecycle, paths, trace fields, queue record fields, and report paths.
+
+The plan top level is exactly `kind`, `version`, and `items`.
+
+- `publish_kn_and_carrier` has `observation_id`, `result_type`, `knowledge`,
+  and `carrier`. `knowledge` has `claim`, `category`, `scope`, `authority`,
+  `confidence`, and `body`. `carrier` has `artifact_id` and `content`.
+- `queue_only` has `observation_id`, `result_type`, and `queue`. `queue` has
+  `claim`, `evidence`, `options`, and `recommendation`.
+- `no_change` has `observation_id`, `result_type`, and `reason`.
+
+M2 publication supports one auto-tier `project_knowledge` observation to one
+active KN and one `ownership: managed`, `update_policy: automatic` Markdown
+block. Queue-only and no-change observations may share the plan. Update,
+merge, conflict mutation, candidate publication, co-managed or human targets,
+and skill or script proposals remain deferred. Do not approximate those paths
+with direct writes.
+
+The apply script calls `archive-observations.mjs` once per completed
+observation and records the exact arguments in the machine report. The report
+also records the M2 known limitation: deterministic validation proves
+reference existence and managed-block hash consistency, while semantic
+equivalence between rendered prose and `source_kn_ids` remains for the M5
+agent-assisted scan.
+
 ## Session procedure
 
 ### 1. Load inputs

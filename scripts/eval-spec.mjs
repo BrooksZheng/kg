@@ -343,10 +343,11 @@ function runReal(fixturePath, transcriptValue, artifactsValue) {
     ...(response.permission_denials ?? []).map(
       (denial) => `permission denied for ${denial.tool} at step ${denial.at_step}: ${denial.detail}`,
     ),
-    ...(response.tool_events ?? [])
-      .filter((event) => event?.ok === false)
-      .map((event) => `tool failed at step ${event.at_step}: ${event.name} ${event.command}`),
   ];
+  // Failed tool events are evidence, not verdicts (see eval-compile.mjs).
+  const executionWarnings = (response.tool_events ?? [])
+    .filter((event) => event?.ok === false)
+    .map((event) => `tool failed at step ${event.at_step}: ${event.name} ${event.command}`);
   let synthesisFile = null;
   let specFailures = [];
   try {
@@ -392,6 +393,7 @@ function runReal(fixturePath, transcriptValue, artifactsValue) {
       citations: citationFailures,
       spec: specFailures,
     },
+    warnings: executionWarnings,
   };
   result.pass =
     result.c1_zero_interview_score === 4 &&

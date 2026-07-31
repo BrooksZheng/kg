@@ -335,11 +335,10 @@ function main() {
       (denial) => `${denial.tool} denied at step ${denial.at_step}: ${denial.detail}`,
     ),
   );
-  result.failures.tools.push(
-    ...(response.tool_events ?? [])
-      .filter((event) => event?.ok === false)
-      .map((event) => `${event.name} failed at step ${event.at_step}: ${event.command}`),
-  );
+  // Failed tool events are evidence, not verdicts (see eval-compile.mjs).
+  result.warnings = (response.tool_events ?? [])
+    .filter((event) => event?.ok === false)
+    .map((event) => `${event.name} failed at step ${event.at_step}: ${event.command}`);
   result.failures.project_reads.push(...auditProjectReads(response, projectRoot));
 
   let inventoryFile, planFile;

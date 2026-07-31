@@ -23,15 +23,41 @@ import fs from "node:fs";
 import path from "node:path";
 import { kyaml, host, protocol } from "./_lib.mjs";
 
-function readInput() {
-  const args = process.argv.slice(2);
-  if (args.includes("--stdin")) return fs.readFileSync(0, "utf8");
-  const file = args.find((a) => !a.startsWith("--"));
-  if (!file) host.fail("usage: add-queue-item.mjs <draft.yaml> | --stdin");
-  if (!fs.existsSync(file)) host.fail(`draft not found: ${file}`);
-  return fs.readFileSync(file, "utf8");
+function parseArgs(argv) {
+  const out = {};
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg === "--stdin") {
+      if (out.stdin) host.fail("--stdin may be supplied only once");
+      out.stdin = true;
+      continue;
+    }
+    if (arg === "--now") {
+      const value = argv[index + 1];
+      if (!value || value.startsWith("--")) host.fail("--now needs a value");
+      if (out.now) host.fail("--now may be supplied only once");
+      out.now = value;
+      index += 1;
+      continue;
+    }
+    if (arg.startsWith("--")) host.fail(`unknown option: ${arg}`);
+    if (out.file) host.fail("only one queue draft file may be supplied");
+    out.file = arg;
+  }
+  if (out.stdin && out.file) host.fail("--stdin and a draft file are mutually exclusive");
+  if (!out.stdin && !out.file) host.fail("usage: add-queue-item.mjs <draft.yaml> | --stdin [--now <ISO>]");
+  const now = out.now ? new Date(out.now) : new Date();
+  if (Number.isNaN(now.getTime())) host.fail(`invalid --now timestamp: ${out.now}`);
+  return { ...out, now };
 }
 
+function readInput(args) {
+  if (args.stdin) return fs.readFileSync(0, "utf8");
+  if (!fs.existsSync(args.file)) host.fail(`draft not found: ${args.file}`);
+  return fs.readFileSync(args.file, "utf8");
+}
+
+const args = parseArgs(process.argv.slice(2));
 const hostRoot = host.findHostRoot();
 const paths = host.kgPaths(hostRoot);
 if (!fs.existsSync(paths.kg)) host.fail(`.kg/ not found under ${hostRoot} — run kg-init first`);
@@ -39,7 +65,7 @@ fs.mkdirSync(paths.queue, { recursive: true });
 
 let draft;
 try {
-  draft = kyaml.parse(readInput());
+  draft = kyaml.parse(readInput(args));
 } catch (err) {
   host.fail(`draft is not valid KYAML — ${err.message}`);
 }
@@ -65,7 +91,7 @@ if (errors.length) {
 }
 
 // Allocate Q-YYYYMMDD-NNN.
-const day = new Date().toISOString().slice(0, 10).replaceAll("-", "");
+const day = args.now.toISOString().slice(0, 10).replaceAll("-", "");
 let max = 0;
 for (const f of host.listFiles(paths.queue, ".yaml")) {
   const m = new RegExp(`^Q-${day}-(\\d{3})\\.yaml$`).exec(path.basename(f));
@@ -75,7 +101,7 @@ const id = `Q-${day}-${String(max + 1).padStart(3, "0")}`;
 
 const record = {
   id,
-  at: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
+  at: args.now.toISOString().replace(/\.\d{3}Z$/, "Z"),
   kind: draft.kind,
   category: draft.category,
   claim: draft.claim,
@@ -89,6 +115,13 @@ const record = {
 };
 
 const outFile = path.join(paths.queue, `${id}.yaml`);
-fs.writeFileSync(outFile, kyaml.stringify(record));
+const temporary = path.join(paths.queue, `.${id}.kg-queue-write.tmp`);
+try {
+  if (fs.existsSync(temporary)) fs.rmSync(temporary, { force: true });
+  fs.writeFileSync(temporary, kyaml.stringify(record), { flag: "wx" });
+  fs.renameSync(temporary, outFile);
+} finally {
+  if (fs.existsSync(temporary)) fs.rmSync(temporary, { force: true });
+}
 console.log(`kg: queued ${id} -> ${path.relative(process.cwd(), outFile) || outFile}`);
 console.log("kg: list this item in the compile report's ruling checklist.");

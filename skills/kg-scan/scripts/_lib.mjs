@@ -23,3 +23,4 @@ export const protocol = await import(new URL("protocol.mjs", libUrl).href);
 export const host = await import(new URL("host.mjs", libUrl).href);
 export const documentAnchor = await import(new URL("document-anchor.mjs", libUrl).href);
 export const repository = await import(new URL("repository.mjs", libUrl).href);
+export const harness = await import(new URL("harness.mjs", libUrl).href);

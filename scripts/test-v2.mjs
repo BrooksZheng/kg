@@ -7,6 +7,9 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import * as kyaml from "./lib/kyaml.mjs";
+import * as protocol from "./lib/protocol.mjs";
+import * as harness from "./lib/harness.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const FIXED_NOW = "2026-07-31T00:00:00Z";
@@ -15,7 +18,7 @@ const PARTS = [
   { number: 1, name: "migration_v1_minimal_preserves_assets", status: "implemented", run: runPart1 },
   { number: 2, name: "docs_bootstrap_renders_architecture_draft", status: "implemented", run: runPart2 },
   { number: 3, name: "observe_json_preserves_v1_contract", status: "implemented", run: runPart3 },
-  { number: 4, name: "compile_links_observation_kn_and_managed_block", status: "pending" },
+  { number: 4, name: "compile_links_observation_kn_and_managed_block", status: "implemented", run: runPart4 },
   { number: 5, name: "kickoff_indexes_compiled_kn_and_carrier", status: "pending" },
   { number: 6, name: "spec_archives_compiled_context_transcript", status: "pending" },
   { number: 7, name: "scan_reports_one_missing_source_ref", status: "pending" },
@@ -33,10 +36,15 @@ const MIGRATION_EXECUTE = path.join(ROOT, "skills", "kg-init", "scripts", "migra
 const PROTOCOL_SELF_CHECK = path.join(ROOT, "scripts", "lib", "protocol.mjs");
 const SYNC_VENDORED = path.join(ROOT, "scripts", "sync-vendored.mjs");
 const EVAL_BOOTSTRAP = path.join(ROOT, "scripts", "eval-bootstrap.mjs");
+const COMPILE_CONTEXT = path.join(ROOT, "skills", "kg-compile", "scripts", "compile.mjs");
+const COMPILE_APPLY = path.join(ROOT, "skills", "kg-compile", "scripts", "apply-compile-plan.mjs");
+const EVAL_COMPILE = path.join(ROOT, "scripts", "eval-compile.mjs");
 const MOCK_BOOTSTRAP_RUNNER = path.join(ROOT, "scripts", "fixtures", "m2", "mock-bootstrap-runner.mjs");
+const MOCK_COMPILE_RUNNER = path.join(ROOT, "scripts", "fixtures", "m2", "mock-compile-runner.mjs");
 const BOOTSTRAP_FIXTURE = path.join(ROOT, "scripts", "fixtures", "m2", "bootstrap");
 const OBSERVE_FIXTURE = path.join(ROOT, "scripts", "fixtures", "m2", "observe");
 const MIGRATION_FIXTURE = path.join(ROOT, "scripts", "fixtures", "m2", "migration-v1");
+const COMPILE_FIXTURE = path.join(ROOT, "scripts", "fixtures", "m2", "compile-fixture");
 const KG_SKILLS = ["kg-init", "kg-observe", "kg-compile", "kg-scan", "kg-kickoff", "kg-spec", "kg-docs"];
 
 class CaseFailure extends Error {
@@ -1033,6 +1041,19 @@ function canonicalV1ObservationText() {
 }
 
 function runPart3(context) {
+  testCase(context, "validator_self_check_is_host_isolated", () => {
+    const sentinel = setupObservationHost(context, "self-check-sentinel");
+    const pending = path.join(sentinel.project, ".kg", "observations", "unreadable-sentinel.yaml");
+    fs.writeFileSync(pending, "this is deliberately invalid\n");
+    const before = fileHash(pending);
+    const checked = runNode(context, OBSERVE_VALIDATE, ["--self-check"], {
+      cwd: sentinel.project,
+      env: observationEnv(sentinel.project),
+    });
+    ensure(context, checked.stdout.includes("in-memory"), "observation self-check did not use its isolated path");
+    ensure(context, fileHash(pending) === before, "observation self-check changed the host inbox");
+  });
+
   testCase(context, "v1_validation_json_write_threshold_and_archive", () => {
     const setup = setupObservationHost(context, "positive", { includeLegacy: true });
     const standaloneLegacy = path.join(setup.artifacts, "OBS-20260730-001.yaml");
@@ -1277,6 +1298,492 @@ function runPart3(context) {
     );
     ensure(context, fileHash(pending) === pendingHash, "existing destination failure changed pending source");
     ensure(context, fs.readFileSync(processed, "utf8") === "sentinel\n", "existing processed target was overwritten");
+  });
+}
+
+function setupCompileCase(context, name, planName, observationId) {
+  const caseRoot = path.join(context.root, name);
+  const project = path.join(caseRoot, "project");
+  const artifacts = path.join(caseRoot, "artifacts");
+  fs.cpSync(path.join(COMPILE_FIXTURE, "host"), project, { recursive: true });
+  fs.mkdirSync(artifacts, { recursive: true });
+  const observations = path.join(project, ".kg", "observations");
+  for (const file of fs.readdirSync(observations)) {
+    if (file.endsWith(".yaml") && file !== `${observationId}.yaml`) fs.rmSync(path.join(observations, file));
+  }
+  const compileContext = path.join(artifacts, "compile-context.json");
+  const plan = path.join(artifacts, "compile-plan.json");
+  fs.copyFileSync(path.join(COMPILE_FIXTURE, planName), plan);
+  runNode(
+    context,
+    COMPILE_CONTEXT,
+    ["--root", project, "--output", compileContext, "--now", "2026-07-31T02:00:00Z"],
+    { cwd: project, env: { KG_ROOT: project } },
+  );
+  return { caseRoot, project, artifacts, context: compileContext, plan, observationId };
+}
+
+function applyCompile(context, setup, options = {}) {
+  return runNode(
+    context,
+    COMPILE_APPLY,
+    [
+      "--root",
+      setup.project,
+      "--context",
+      setup.context,
+      "--plan",
+      setup.plan,
+      "--now",
+      "2026-07-31T02:00:00Z",
+    ],
+    {
+      cwd: setup.project,
+      env: { KG_ROOT: setup.project, ...(options.env ?? {}) },
+      expectFailure: options.expectFailure,
+    },
+  );
+}
+
+function compileReports(project) {
+  return fs
+    .readdirSync(path.join(project, ".kg", "reports"))
+    .filter((name) => /^COMPILE-[a-f0-9]+\.json$/.test(name))
+    .sort();
+}
+
+function knowledgeFiles(project) {
+  return fs
+    .readdirSync(path.join(project, "knowledge"))
+    .filter((name) => /^KN-[0-9]{4}.*\.md$/.test(name))
+    .sort();
+}
+
+function readKnowledge(file) {
+  return protocol.splitFrontmatter(fs.readFileSync(file, "utf8"));
+}
+
+function readKyaml(file) {
+  return kyaml.parse(fs.readFileSync(file, "utf8"));
+}
+
+function assertCompileFailurePreservesHost(context, setup, options = {}) {
+  const before = treeHash(setup.project);
+  const rejected = applyCompile(context, setup, { ...options, expectFailure: true });
+  ensure(context, treeHash(setup.project) === before, "compile preflight failure changed host state");
+  return rejected;
+}
+
+function mutatePlan(setup, callback) {
+  const plan = readJson(setup.plan);
+  callback(plan);
+  writeJson(setup.plan, plan);
+}
+
+function outsideArtifactBlock(text, artifactId) {
+  const block = harness.inspectManagedBlock(text, artifactId);
+  return `${text.slice(0, block.begin.index + block.begin.text.length)}\n<managed>\n${text.slice(block.end.index)}`;
+}
+
+function runPart4(context) {
+  testCase(context, "compile_links_observation_kn_and_managed_block", () => {
+    const setup = setupCompileCase(
+      context,
+      "publish-positive",
+      "publish-plan.json",
+      "OBS-20260731-101",
+    );
+    const target = path.join(setup.project, "docs", "runbooks", "compile-notes.md");
+    const sidecarFile = path.join(setup.project, "harness", "artifacts", "HAR-COMPILE-NOTES.yaml");
+    const targetBefore = fs.readFileSync(target, "utf8");
+    const outsideBefore = outsideArtifactBlock(targetBefore, "HAR-COMPILE-NOTES");
+    ensure(context, knowledgeFiles(setup.project).length === 1, "publish fixture did not start with one KN");
+    ensure(
+      context,
+      listYaml(path.join(setup.project, ".kg", "observations")).length === 1,
+      "publish fixture did not start with one pending observation",
+    );
+    const beforeChecks = treeHash(setup.project);
+    runNode(
+      context,
+      COMPILE_CONTEXT,
+      ["--root", setup.project, "--check", "--context", setup.context],
+      { cwd: setup.project, env: { KG_ROOT: setup.project } },
+    );
+    runNode(
+      context,
+      COMPILE_APPLY,
+      ["--check", "--root", setup.project, "--context", setup.context, "--plan", setup.plan],
+      { cwd: setup.project, env: { KG_ROOT: setup.project } },
+    );
+    ensure(context, treeHash(setup.project) === beforeChecks, "compile/apply checks mutated the host");
+    applyCompile(context, setup);
+
+    const entries = knowledgeFiles(setup.project);
+    ensure(context, entries.length === 2, "publish did not create exactly one KN");
+    const newEntry = path.join(setup.project, "knowledge", entries.find((name) => name.startsWith("KN-0002")));
+    const { frontmatter: knowledge, body } = readKnowledge(newEntry);
+    ensure(context, knowledge.id === "KN-0002", "script-assigned KN id mismatch");
+    ensure(context, knowledge.lifecycle === "active", "published KN is not active");
+    ensure(context, knowledge.category === "project_knowledge", "published KN category mismatch");
+    ensure(context, body.trim() !== "", "published KN body is empty");
+    ensure(
+      context,
+      JSON.stringify(knowledge.source_obs_ids) === JSON.stringify(["OBS-20260731-101"]),
+      "published KN source_obs_ids mismatch",
+    );
+    ensure(context, knowledge.carrier_refs.length === 1, "published KN carrier_refs must be unique");
+
+    const pending = path.join(setup.project, ".kg", "observations", "OBS-20260731-101.yaml");
+    const processed = path.join(setup.project, ".kg", "observations", "processed", "OBS-20260731-101.yaml");
+    ensure(context, !fs.existsSync(pending), "publish left the observation pending");
+    const processedRecord = readKyaml(processed);
+    ensure(context, processedRecord.compiled_to_kn === "KN-0002", "processed observation KN link mismatch");
+
+    const targetAfter = fs.readFileSync(target, "utf8");
+    ensure(
+      context,
+      outsideArtifactBlock(targetAfter, "HAR-COMPILE-NOTES") === outsideBefore,
+      "publish changed text outside the managed block",
+    );
+    ensure(context, targetAfter.includes("<!-- kg:source KN-0002 -->"), "managed block lacks a machine KN reference");
+    const sidecar = readKyaml(sidecarFile);
+    const block = harness.inspectManagedBlock(targetAfter, "HAR-COMPILE-NOTES");
+    ensure(
+      context,
+      JSON.stringify(sidecar.source_kn_ids) === JSON.stringify(["KN-0002"]),
+      "sidecar source_kn_ids mismatch",
+    );
+    ensure(context, sidecar.content_hash === block.contentHash, "sidecar hash does not match marker-inner content");
+    ensure(context, sidecar.ownership === "managed", "sidecar ownership changed");
+    ensure(context, sidecar.update_policy === "automatic", "sidecar update_policy changed");
+    for (const ref of sidecar.source_refs) {
+      const sourcePath = ref.replace(/#L[1-9][0-9]*$/, "");
+      ensure(context, fs.existsSync(path.join(setup.project, sourcePath)), `sidecar source_ref is missing: ${ref}`);
+    }
+    ensure(
+      context,
+      knowledge.carrier_refs[0] ===
+        `HAR-COMPILE-NOTES@docs/runbooks/compile-notes.md#kg:managed`,
+      "KN carrier reference does not identify artifact, path, and managed block",
+    );
+
+    const reports = compileReports(setup.project);
+    ensure(context, reports.length === 1, "publish did not create exactly one compile report");
+    const report = readJson(path.join(setup.project, ".kg", "reports", reports[0]));
+    ensure(context, report.results.publish_kn_and_carrier.length === 1, "publish report group mismatch");
+    ensure(context, report.results.queue_only.length === 0 && report.results.no_change.length === 0, "publish report has cross-type results");
+    ensure(context, report.known_limitations.length === 1, "D13 known limitation missing from machine report");
+    ensure(
+      context,
+      JSON.stringify(report.archives[0].arguments) ===
+        JSON.stringify(["--observation", "OBS-20260731-101", "--compiled-to-kn", "KN-0002"]),
+      "publish report archive arguments mismatch",
+    );
+
+    const stable = treeHash(setup.project);
+    applyCompile(context, setup);
+    ensure(context, treeHash(setup.project) === stable, "same publish plan changed state on rerun");
+    fs.appendFileSync(target, "\nHuman edit after completed compile.\n");
+    ensure(
+      context,
+      harness.inspectManagedBlock(fs.readFileSync(target, "utf8"), "HAR-COMPILE-NOTES").contentHash ===
+        sidecar.content_hash,
+      "human text outside the marker changed the managed content hash",
+    );
+  });
+
+  testCase(context, "compile_queue_only_preserves_queue_item", () => {
+    const setup = setupCompileCase(
+      context,
+      "queue-positive",
+      "queue-plan.json",
+      "OBS-20260731-102",
+    );
+    const knowledgeBefore = treeHash(path.join(setup.project, "knowledge"));
+    const carrierBefore = fileHash(path.join(setup.project, "docs", "runbooks", "compile-notes.md"));
+    const sidecarBefore = fileHash(path.join(setup.project, "harness", "artifacts", "HAR-COMPILE-NOTES.yaml"));
+    applyCompile(context, setup);
+    ensure(context, treeHash(path.join(setup.project, "knowledge")) === knowledgeBefore, "queue_only created a KN");
+    ensure(context, fileHash(path.join(setup.project, "docs", "runbooks", "compile-notes.md")) === carrierBefore, "queue_only changed carrier");
+    ensure(context, fileHash(path.join(setup.project, "harness", "artifacts", "HAR-COMPILE-NOTES.yaml")) === sidecarBefore, "queue_only changed sidecar");
+    const queueFiles = listYaml(path.join(setup.project, ".kg", "queue"));
+    ensure(context, queueFiles.length === 1, "queue_only did not create exactly one queue item");
+    const queue = readKyaml(path.join(setup.project, ".kg", "queue", queueFiles[0]));
+    ensure(context, queue.category === "needs_human_decision", "queue_only category mismatch");
+    ensure(
+      context,
+      JSON.stringify(queue.source_observations) === JSON.stringify(["OBS-20260731-102"]),
+      "queue_only source_observations mismatch",
+    );
+    const processed = readKyaml(
+      path.join(setup.project, ".kg", "observations", "processed", "OBS-20260731-102.yaml"),
+    );
+    ensure(context, processed.compiled_to_kn === undefined, "queue_only wrote compiled_to_kn");
+    const report = readJson(path.join(setup.project, ".kg", "reports", compileReports(setup.project)[0]));
+    ensure(context, report.results.queue_only.length === 1, "queue_only report group mismatch");
+    ensure(
+      context,
+      JSON.stringify(report.archives[0].arguments) ===
+        JSON.stringify(["--observation", "OBS-20260731-102", "--verdict", "needs_human_decision"]),
+      "queue_only report archive arguments mismatch",
+    );
+  });
+
+  testCase(context, "compile_no_change_preserves_state", () => {
+    const setup = setupCompileCase(
+      context,
+      "no-change-positive",
+      "no-change-plan.json",
+      "OBS-20260731-103",
+    );
+    const knowledgeBefore = treeHash(path.join(setup.project, "knowledge"));
+    const carrierBefore = fileHash(path.join(setup.project, "docs", "runbooks", "compile-notes.md"));
+    const sidecarBefore = fileHash(path.join(setup.project, "harness", "artifacts", "HAR-COMPILE-NOTES.yaml"));
+    applyCompile(context, setup);
+    ensure(context, treeHash(path.join(setup.project, "knowledge")) === knowledgeBefore, "no_change created a KN");
+    ensure(context, listYaml(path.join(setup.project, ".kg", "queue")).length === 0, "no_change created a queue item");
+    ensure(context, fileHash(path.join(setup.project, "docs", "runbooks", "compile-notes.md")) === carrierBefore, "no_change changed carrier");
+    ensure(context, fileHash(path.join(setup.project, "harness", "artifacts", "HAR-COMPILE-NOTES.yaml")) === sidecarBefore, "no_change changed sidecar");
+    const processed = readKyaml(
+      path.join(setup.project, ".kg", "observations", "processed", "OBS-20260731-103.yaml"),
+    );
+    ensure(context, processed.compiled_to_kn === undefined, "no_change wrote compiled_to_kn");
+    const report = readJson(path.join(setup.project, ".kg", "reports", compileReports(setup.project)[0]));
+    ensure(context, report.results.no_change.length === 1, "no_change report group mismatch");
+    ensure(context, report.results.no_change[0].result_reason.includes("KN-0001"), "no_change audit reason missing");
+  });
+
+  testCase(context, "reject_unknown_kn_id_script_fields_and_cross_type_side_effects", () => {
+    const variants = [
+      ["unknown-top", (plan) => { plan.unexpected = true; }],
+      ["self-kn-id", (plan) => { plan.items[0].knowledge.id = "KN-9999"; }],
+      ["script-source-ids", (plan) => { plan.items[0].knowledge.source_obs_ids = ["OBS-20260731-101"]; }],
+      ["script-carrier-path", (plan) => { plan.items[0].carrier.path = "docs/runbooks/compile-notes.md"; }],
+      ["script-hash", (plan) => { plan.items[0].carrier.content_hash = "sha256:" + "0".repeat(64); }],
+      ["queue-claims-kn-side-effect", (plan) => {
+        plan.items[0] = {
+          observation_id: "OBS-20260731-101",
+          result_type: "queue_only",
+          queue: {
+            claim: "Queue this.",
+            evidence: [{ type: "test", ref: "fixture" }],
+            options: ["accept", "reject"],
+            recommendation: "review",
+          },
+          knowledge: plan.items[0].knowledge,
+        };
+      }],
+      ["no-change-claims-queue-side-effect", (plan) => {
+        plan.items[0] = {
+          observation_id: "OBS-20260731-101",
+          result_type: "no_change",
+          reason: "nothing",
+          queue: {
+            claim: "unexpected",
+            evidence: [{ type: "test", ref: "fixture" }],
+            options: ["accept", "reject"],
+            recommendation: "review",
+          },
+        };
+      }],
+    ];
+    for (const [name, mutate] of variants) {
+      const setup = setupCompileCase(context, name, "publish-plan.json", "OBS-20260731-101");
+      mutatePlan(setup, mutate);
+      assertCompileFailurePreservesHost(context, setup);
+    }
+  });
+
+  testCase(context, "preflight_kn_and_carrier_failures_leave_zero_partial_writes", () => {
+    for (const point of ["kn_write", "carrier_write"]) {
+      const setup = setupCompileCase(
+        context,
+        `preflight-${point}`,
+        "publish-plan.json",
+        "OBS-20260731-101",
+      );
+      const rejected = assertCompileFailurePreservesHost(context, setup, {
+        env: { KG_COMPILE_FAIL_PREFLIGHT: point },
+      });
+      ensure(context, rejected.stderr.includes(`injected ${point === "kn_write" ? "KN" : "carrier"} write preflight failure`), `${point} injection reason missing`);
+      ensure(context, compileReports(setup.project).length === 0, `${point} preflight failure created a report`);
+      ensure(context, knowledgeFiles(setup.project).length === 1, `${point} preflight failure created a KN`);
+    }
+  });
+
+  testCase(context, "reject_observation_document_and_sidecar_drift_after_plan", () => {
+    const variants = {
+      observation: (setup) =>
+        fs.appendFileSync(
+          path.join(setup.project, ".kg", "observations", "OBS-20260731-101.yaml"),
+          "\n# changed after context\n",
+        ),
+      document: (setup) =>
+        fs.appendFileSync(
+          path.join(setup.project, "docs", "runbooks", "compile-notes.md"),
+          "\nHuman edit after context.\n",
+        ),
+      sidecar: (setup) =>
+        fs.appendFileSync(
+          path.join(setup.project, "harness", "artifacts", "HAR-COMPILE-NOTES.yaml"),
+          "\n# changed after context\n",
+        ),
+    };
+    for (const [name, mutate] of Object.entries(variants)) {
+      const setup = setupCompileCase(context, `drift-${name}`, "publish-plan.json", "OBS-20260731-101");
+      mutate(setup);
+      const drifted = treeHash(setup.project);
+      applyCompile(context, setup, { expectFailure: true });
+      ensure(context, treeHash(setup.project) === drifted, `${name} drift failure changed host state`);
+    }
+  });
+
+  testCase(context, "reject_non_managed_ownership_and_bad_markers", () => {
+    for (const ownership of ["co_managed", "human"]) {
+      const setupRoot = path.join(context.root, `ownership-${ownership}`);
+      const project = path.join(setupRoot, "project");
+      const artifacts = path.join(setupRoot, "artifacts");
+      fs.cpSync(path.join(COMPILE_FIXTURE, "host"), project, { recursive: true });
+      fs.mkdirSync(artifacts, { recursive: true });
+      for (const file of fs.readdirSync(path.join(project, ".kg", "observations"))) {
+        if (file.endsWith(".yaml") && file !== "OBS-20260731-101.yaml") {
+          fs.rmSync(path.join(project, ".kg", "observations", file));
+        }
+      }
+      const sidecar = path.join(project, "harness", "artifacts", "HAR-COMPILE-NOTES.yaml");
+      fs.writeFileSync(sidecar, fs.readFileSync(sidecar, "utf8").replace("ownership: managed", `ownership: ${ownership}`));
+      const setup = {
+        project,
+        artifacts,
+        context: path.join(artifacts, "context.json"),
+        plan: path.join(artifacts, "plan.json"),
+      };
+      fs.copyFileSync(path.join(COMPILE_FIXTURE, "publish-plan.json"), setup.plan);
+      runNode(
+        context,
+        COMPILE_CONTEXT,
+        ["--root", project, "--output", setup.context, "--now", "2026-07-31T02:00:00Z"],
+        { cwd: project, env: { KG_ROOT: project } },
+      );
+      assertCompileFailurePreservesHost(context, setup);
+    }
+
+    const markerVariants = {
+      missing: (text) => text.replace("<!-- kg:managed HAR-COMPILE-NOTES begin -->\n", ""),
+      duplicate: (text) =>
+        text.replace(
+          "<!-- kg:managed HAR-COMPILE-NOTES begin -->",
+          "<!-- kg:managed HAR-COMPILE-NOTES begin -->\n<!-- kg:managed HAR-COMPILE-NOTES begin -->",
+        ),
+      mismatch: (text) => text.replaceAll("HAR-COMPILE-NOTES", "HAR-OTHER-NOTES"),
+    };
+    for (const [name, mutate] of Object.entries(markerVariants)) {
+      const caseRoot = path.join(context.root, `marker-${name}`);
+      const project = path.join(caseRoot, "project");
+      const artifacts = path.join(caseRoot, "artifacts");
+      fs.cpSync(path.join(COMPILE_FIXTURE, "host"), project, { recursive: true });
+      fs.mkdirSync(artifacts, { recursive: true });
+      const target = path.join(project, "docs", "runbooks", "compile-notes.md");
+      fs.writeFileSync(target, mutate(fs.readFileSync(target, "utf8")));
+      const before = treeHash(project);
+      runNode(
+        context,
+        COMPILE_CONTEXT,
+        ["--root", project, "--output", path.join(artifacts, "context.json"), "--now", "2026-07-31T02:00:00Z"],
+        { cwd: project, env: { KG_ROOT: project }, expectFailure: true },
+      );
+      ensure(context, treeHash(project) === before, `${name} marker rejection changed host state`);
+    }
+  });
+
+  testCase(context, "transaction_manifest_resumes_after_mutation_interruptions", () => {
+    for (const point of ["kn_write", "carrier_write"]) {
+      const setup = setupCompileCase(
+        context,
+        `resume-${point}`,
+        "publish-plan.json",
+        "OBS-20260731-101",
+      );
+      const interrupted = applyCompile(context, setup, {
+        expectFailure: true,
+        env: { KG_COMPILE_FAIL_AFTER: point },
+      });
+      ensure(context, interrupted.stderr.includes(`injected failure after ${point === "kn_write" ? "KN" : "carrier"} write`), `${point} interruption did not trigger`);
+      ensure(
+        context,
+        fs.readdirSync(path.join(setup.project, ".kg", "reports")).some((name) => name.startsWith(".compile-transaction-")),
+        `${point} interruption did not preserve a transaction manifest`,
+      );
+      applyCompile(context, setup);
+      ensure(context, compileReports(setup.project).length === 1, `${point} resume did not complete the report`);
+      ensure(context, knowledgeFiles(setup.project).length === 2, `${point} resume duplicated or lost the KN`);
+      const stable = treeHash(setup.project);
+      applyCompile(context, setup);
+      ensure(context, treeHash(setup.project) === stable, `${point} completed resume is not idempotent`);
+    }
+  });
+
+  testCase(context, "gd_evaluator_requires_reads_non_shell_plan_apply_and_no_denials", () => {
+    const fixture = path.join(ROOT, "scripts", "fixtures", "m2", "compile.fixture.json");
+    const passing = path.join(context.root, "gd-pass");
+    runNode(context, EVAL_COMPILE, ["--fixture", fixture, "--artifacts", passing], {
+      cwd: ROOT,
+      env: { KG_EVAL_RUNNER: MOCK_COMPILE_RUNNER },
+    });
+    ensure(context, readJson(path.join(passing, "result.json")).pass === true, "G-D mock session did not pass");
+    const prompt = fs.readFileSync(path.join(passing, "actual-prompt.txt"), "utf8");
+    ensure(
+      context,
+      !prompt.includes("OBS-20260731-101") && !prompt.includes("KN-0001 already"),
+      "G-D fixture oracle leaked into the runner prompt",
+    );
+
+    const switches = {
+      shell: "KG_FAKE_SHELL_PLAN",
+      missing_tool: "KG_FAKE_MISSING_TOOL",
+      missing_read: "KG_FAKE_MISSING_READ",
+      denial: "KG_FAKE_DENIAL",
+      wrong_order: "KG_FAKE_WRONG_ORDER",
+    };
+    for (const [name, variable] of Object.entries(switches)) {
+      const artifacts = path.join(context.root, `gd-${name}`);
+      runNode(context, EVAL_COMPILE, ["--fixture", fixture, "--artifacts", artifacts], {
+        cwd: ROOT,
+        env: { KG_EVAL_RUNNER: MOCK_COMPILE_RUNNER, [variable]: "1" },
+        expectFailure: true,
+      });
+      ensure(context, readJson(path.join(artifacts, "result.json")).pass === false, `G-D ${name} regression passed`);
+    }
+
+    // D38: a failed exploratory read (ENOENT probe) is evidence, not a verdict.
+    // The gate must still pass and surface the event as a warning.
+    const exploration = path.join(context.root, "gd-failed-exploration");
+    runNode(context, EVAL_COMPILE, ["--fixture", fixture, "--artifacts", exploration], {
+      cwd: ROOT,
+      env: { KG_EVAL_RUNNER: MOCK_COMPILE_RUNNER, KG_FAKE_FAILED_EXPLORATION: "1" },
+    });
+    const explorationResult = readJson(path.join(exploration, "result.json"));
+    ensure(context, explorationResult.pass === true, "failed exploratory read must not fail the gate");
+    ensure(
+      context,
+      Array.isArray(explorationResult.warnings) &&
+        explorationResult.warnings.some((warning) => warning.includes("routing.yaml")),
+      "failed exploratory read was not surfaced as a warning",
+    );
+
+    // Reads that happen before the compile context step still count: only
+    // "read after plan submission" breaks the chain proof.
+    const earlyRead = path.join(context.root, "gd-early-read");
+    runNode(context, EVAL_COMPILE, ["--fixture", fixture, "--artifacts", earlyRead], {
+      cwd: ROOT,
+      env: { KG_EVAL_RUNNER: MOCK_COMPILE_RUNNER, KG_FAKE_EARLY_READ: "1" },
+    });
+    ensure(
+      context,
+      readJson(path.join(earlyRead, "result.json")).pass === true,
+      "input read before compile context must not fail the gate",
+    );
   });
 }
 
