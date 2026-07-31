@@ -1,5 +1,4 @@
-// M2 migration detection. This round identifies the healthy v1 fixture and
-// reports other shapes without attempting the full M3 classification matrix.
+// Read-only version 2 migration detection with five canonical classifications.
 
 import path from "node:path";
 import { detectMigration, MigrationError } from "./migration-lib.mjs";

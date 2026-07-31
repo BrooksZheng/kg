@@ -1,8 +1,8 @@
 {
   "kind": "kg.kickoff_context",
   "version": 1,
-  "project_root": "/private/tmp/c9-r24r/g3f/workspace/project",
-  "index_path": "/tmp/c9-r24r/g3f/session/kickoff-index.json",
+  "project_root": "scripts/fixtures/m2/spec-03-compiled/project",
+  "index_path": "scripts/fixtures/m2/spec-03-compiled/kickoff/session/kickoff-index.json",
   "documents": [
     {
       "path": "docs/accepted-compile-contract.md",

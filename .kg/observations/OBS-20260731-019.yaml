@@ -1,0 +1,13 @@
+id: OBS-20260731-019
+at: 2026-07-31T15:39:24Z
+source: task_outcome
+claim: "Fixture-generating CLIs must preserve declared project and index paths in saved products while comparing canonical filesystem identities."
+context:
+  task: kg-v2-r31-path-hygiene
+  paths:
+    - skills/kg-kickoff/scripts/gather-context.mjs
+    - "scripts/eval-*.mjs"
+    - "scripts/fixtures/**"
+evidence:
+  - { type: test, ref: "live_and_check_modes_share_canonical_path_semantics and D56 saved-oracle regeneration" }
+urgency: batch

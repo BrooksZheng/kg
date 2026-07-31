@@ -41,20 +41,17 @@ try {
     ROOT,
   );
   assert.match(firstInstall, /created docs\/README\.md/);
-  // Rev C moves brownfield bootstrap ownership to kg-docs. Part 2 of
-  // test-v2.mjs covers the full inventory, JSON plan, and renderer chain.
-  assert.match(firstInstall, /run the kg-docs bootstrap path/);
   assert.equal(fs.readFileSync(path.join(standard, "docs", "glossary.md"), "utf8"), "human glossary\n");
 
   for (const rel of [
     "docs/README.md",
-    "docs/architecture/overview.md",
-    "docs/decisions/README.md",
-    "docs/decisions/0000-template.md",
-    "docs/rfcs/README.md",
-    "docs/rfcs/0000-template.md",
-    "docs/standards/README.md",
-    "docs/development.md",
+    "docs/architecture",
+    "docs/decisions",
+    "docs/rfcs",
+    "docs/standards",
+    "docs/api",
+    "docs/runbooks",
+    "docs/traps",
     ".agents/skills/kg-scan/SKILL.md",
     ".agents/skills/kg-scan/scripts/scan-inventory.mjs",
     ".agents/skills/kg-scan/protocol/project-document.schema.yaml",
@@ -64,6 +61,14 @@ try {
     ".agents/skills/kg-docs/protocol/project-document.schema.yaml",
   ]) {
     assert.equal(exists(standard, rel), true, `standard profile missing ${rel}`);
+  }
+  for (const rel of [
+    "docs/architecture/overview.md",
+    "docs/decisions/0000-template.md",
+    "docs/rfcs/0000-template.md",
+    "docs/development.md",
+  ]) {
+    assert.equal(exists(standard, rel), false, `standard profile eagerly created ${rel}`);
   }
 
   assert.equal(exists(standard, "AGENTS.md"), true);
@@ -77,10 +82,23 @@ try {
   assert.equal(fs.readFileSync(path.join(standard, "docs", "glossary.md"), "utf8"), "human glossary\n");
 
   const architecture = path.join(standard, "docs", "architecture", "overview.md");
-  const acceptedArchitecture = fs
-    .readFileSync(architecture, "utf8")
-    .replace("status: draft", "status: accepted\naccepted_at: 2026-07-24");
-  fs.writeFileSync(architecture, acceptedArchitecture);
+  write(
+    architecture,
+    [
+      "---",
+      "kind: kg.project_document",
+      'title: "RFC-004 fixture architecture"',
+      "doc_type: architecture",
+      "status: accepted",
+      "accepted_at: 2026-07-24",
+      "supersedes: null",
+      "source_refs: []",
+      "---",
+      "",
+      "# RFC-004 fixture architecture",
+      "",
+    ].join("\n"),
+  );
   write(path.join(standard, "docs", "notes.md"), "# Ordinary project note\n");
 
   const validator = path.join(
@@ -197,9 +215,12 @@ try {
   const lean = path.join(tempRoot, "lean-host");
   fs.mkdirSync(lean);
   run(INSTALLER, [lean, "--copy", "--docs-profile", "lean"], ROOT);
-  assert.equal(exists(lean, "docs/architecture/overview.md"), true);
-  assert.equal(exists(lean, "docs/rfcs/0000-template.md"), false);
-  assert.equal(exists(lean, "docs/standards/README.md"), false);
+  assert.equal(exists(lean, "docs/README.md"), true);
+  assert.equal(exists(lean, "docs/architecture"), true);
+  assert.equal(exists(lean, "docs/decisions"), true);
+  assert.equal(exists(lean, "docs/architecture/overview.md"), false);
+  assert.equal(exists(lean, "docs/rfcs"), false);
+  assert.equal(exists(lean, "docs/standards"), false);
   assert.equal(exists(lean, "docs/development.md"), false);
 
   const none = path.join(tempRoot, "none-host");

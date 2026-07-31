@@ -39,6 +39,68 @@ export function canonicalPath(target) {
   }
 }
 
+export function normalizeRoot(root, { mustExist = true, forbidKg = true } = {}) {
+  const declared = path.resolve(root);
+  const canonical = canonicalPath(declared);
+  if (forbidKg && (hasPathSegment(declared, ".kg") || hasPathSegment(canonical, ".kg"))) {
+    throw new Error(`root must not be inside a .kg path: ${declared}`);
+  }
+  if (mustExist && (!fs.existsSync(canonical) || !fs.statSync(canonical).isDirectory())) {
+    throw new Error(`root is not a directory: ${declared}`);
+  }
+  return { declared, canonical };
+}
+
+export function symbolicLinksOnPath(target) {
+  const absolute = path.resolve(target);
+  const filesystemRoot = path.parse(absolute).root;
+  const relative = path.relative(filesystemRoot, absolute);
+  const links = [];
+  let current = filesystemRoot;
+  for (const segment of relative.split(path.sep).filter(Boolean)) {
+    current = path.join(current, segment);
+    try {
+      if (fs.lstatSync(current).isSymbolicLink()) links.push(path.resolve(current));
+    } catch (error) {
+      if (["ENOENT", "ENOTDIR"].includes(error?.code)) break;
+      throw error;
+    }
+  }
+  return links;
+}
+
+// Evaluators keep both spellings of their allowed root. Containment compares
+// canonical paths, while the symlink differential compares declared paths so
+// a symlink used to reach the root is allowed and a new symlink below it is
+// rejected in the same way in live and fixture-check modes.
+export function resolveProductPath(rootValue, targetValue, { label = "product", type = "file" } = {}) {
+  const root = normalizeRoot(rootValue);
+  if (typeof targetValue !== "string" || targetValue.trim() === "") {
+    throw new Error(`${label} path must be a non-empty string`);
+  }
+  const declared = path.isAbsolute(targetValue)
+    ? path.resolve(targetValue)
+    : path.resolve(root.declared, ...targetValue.replaceAll("\\", "/").split("/"));
+  const canonical = canonicalPath(declared);
+  if (isOutside(root.canonical, canonical)) throw new Error(`${label} escapes its allowed root`);
+  if (hasPathSegment(declared, ".kg") || hasPathSegment(canonical, ".kg")) {
+    throw new Error(`${label} must not be inside .kg`);
+  }
+  const rootLinks = new Set(symbolicLinksOnPath(root.declared));
+  for (const link of symbolicLinksOnPath(declared)) {
+    if (!rootLinks.has(link)) throw new Error(`${label} path must not contain a symbolic link`);
+  }
+  if (!fs.existsSync(declared)) throw new Error(`${label} does not exist`);
+  const stat = fs.statSync(declared);
+  if ((type === "file" && !stat.isFile()) || (type === "directory" && !stat.isDirectory())) {
+    throw new Error(`${label} is not a ${type}`);
+  }
+  if (fs.lstatSync(declared).isSymbolicLink() && declared !== root.declared) {
+    throw new Error(`${label} must not be a symbolic link`);
+  }
+  return { root, declared, canonical, verdict: "accepted" };
+}
+
 export function hasPathSegment(target, expected) {
   const wanted = String(expected).toLowerCase();
   return path
@@ -56,15 +118,7 @@ export function isOutside(root, target) {
 }
 
 export function assertSafeHostRoot(root) {
-  const declared = path.resolve(root);
-  const canonical = canonicalPath(declared);
-  if (hasPathSegment(declared, ".kg") || hasPathSegment(canonical, ".kg")) {
-    throw new Error(`host root must not be inside a .kg path: ${declared}`);
-  }
-  if (!fs.existsSync(canonical) || !fs.statSync(canonical).isDirectory()) {
-    throw new Error(`host root is not a directory: ${declared}`);
-  }
-  return canonical;
+  return normalizeRoot(root).canonical;
 }
 
 export function resolveSafeRelative(root, relative, { mustExist = true, allowSymlink = false, forbidKg = true } = {}) {

@@ -26,9 +26,11 @@ node skills/kg-init/scripts/install.mjs [host-root] [--copy] \
   [--project-stage greenfield|brownfield]
 ```
 
-The installer creates missing pipeline and document files, ensures an
-`AGENTS.md` file exists without generating its content, and wires the current
-installable skills. Existing project documents are preserved.
+The installer consumes `kg.migration_detection` version 2 before mutation.
+Greenfield and non-KG hosts receive the v2 pipeline, skill wiring, profile
+directories, and only `docs/README.md` as document content. Existing project
+documents and human AGENTS bytes are preserved. V1, v2, and partial hosts are
+routed to Phase 0, verify, or repair and human handling respectively.
 
 ## Brownfield inventory
 

@@ -127,8 +127,9 @@ function requirePath(value, label, type) {
   if ((type === "file" && !stat.isFile()) || (type === "directory" && !stat.isDirectory())) {
     throw new Error(`${label} is not a ${type}: ${file}`);
   }
+  if (type === "directory") return host.normalizeRoot(file).declared;
   if (fs.lstatSync(file).isSymbolicLink()) throw new Error(`${label} must not be a symbolic link`);
-  return type === "directory" ? host.canonicalPath(file) : file;
+  return host.canonicalPath(file);
 }
 
 function loadFixture(value) {
@@ -156,7 +157,7 @@ function loadFixture(value) {
     version: 2,
     fixture,
     fixtureFile,
-    projectRoot: requirePath(fixture.project_root, "project_root", "directory"),
+    projectRoot: host.canonicalPath(requirePath(fixture.project_root, "project_root", "directory")),
     kickoffResponse: requirePath(fixture.kickoff_response, "kickoff_response", "file"),
     kickoffArtifactsRoot: requirePath(fixture.kickoff_artifacts_root, "kickoff_artifacts_root", "directory"),
     specResponse: requirePath(fixture.spec_response, "spec_response", "file"),
@@ -250,24 +251,6 @@ function validateRunnerResponse(response, label) {
   return errors;
 }
 
-function symbolicLinksOnPath(target) {
-  const absolute = path.resolve(target);
-  const filesystemRoot = path.parse(absolute).root;
-  const relative = path.relative(filesystemRoot, absolute);
-  const links = [];
-  let current = filesystemRoot;
-  for (const segment of relative.split(path.sep).filter(Boolean)) {
-    current = path.join(current, segment);
-    try {
-      if (fs.lstatSync(current).isSymbolicLink()) links.push(path.resolve(current));
-    } catch (error) {
-      if (["ENOENT", "ENOTDIR"].includes(error?.code)) break;
-      throw error;
-    }
-  }
-  return links;
-}
-
 function productOfKind(response, kind, { required = true } = {}) {
   const matches = (response.products ?? []).filter((product) => product?.kind === kind);
   if (matches.length === 0 && !required) return null;
@@ -276,37 +259,15 @@ function productOfKind(response, kind, { required = true } = {}) {
 }
 
 function resolveProduct(product, allowedRoot, label, { archived = false } = {}) {
-  const declaredRoot = path.resolve(allowedRoot);
-  const root = host.canonicalPath(declaredRoot);
-  let declaredFile;
+  let productPath = product.path;
   if (archived && path.isAbsolute(product.path)) {
     const basename = path.basename(product.path);
     if (basename !== product.path.replaceAll("\\", "/").split("/").at(-1)) {
       throw new Error(`${label} product basename is not portable`);
     }
-    declaredFile = path.resolve(declaredRoot, basename);
-  } else {
-    declaredFile = path.isAbsolute(product.path)
-      ? path.resolve(product.path)
-      : path.resolve(declaredRoot, ...product.path.replaceAll("\\", "/").split("/"));
+    productPath = basename;
   }
-  const canonicalFile = host.canonicalPath(declaredFile);
-  if (host.isOutside(root, canonicalFile)) throw new Error(`${label} product escapes artifacts_root`);
-  if (host.hasPathSegment(declaredFile, ".kg") || host.hasPathSegment(canonicalFile, ".kg")) {
-    throw new Error(`${label} product must not be inside .kg`);
-  }
-  const rootLinks = new Set(symbolicLinksOnPath(declaredRoot));
-  for (const link of symbolicLinksOnPath(declaredFile)) {
-    if (!rootLinks.has(link)) throw new Error(`${label} product path must not contain a symbolic link`);
-  }
-  if (
-    !fs.existsSync(declaredFile) ||
-    !fs.statSync(declaredFile).isFile() ||
-    fs.lstatSync(declaredFile).isSymbolicLink()
-  ) {
-    throw new Error(`${label} product does not exist or is a symbolic link`);
-  }
-  return declaredFile;
+  return host.resolveProductPath(allowedRoot, productPath, { label: `${label} product` }).declared;
 }
 
 function sourceMetadata(file, sourcePath) {

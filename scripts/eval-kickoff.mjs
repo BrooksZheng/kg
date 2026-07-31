@@ -106,7 +106,7 @@ function loadFixture(value) {
   if (!fs.existsSync(projectInput) || !fs.statSync(projectInput).isDirectory()) {
     fail(`夹具项目不存在：${projectInput}`);
   }
-  const projectRoot = host.canonicalPath(projectInput);
+  const projectRoot = host.normalizeRoot(projectInput).canonical;
   const transcriptFile = resolveDeclared(fixture.transcript);
   if (!fs.existsSync(transcriptFile) || !fs.statSync(transcriptFile).isFile()) {
     fail(`夹具 transcript 不存在：${transcriptFile}`);
@@ -115,7 +115,7 @@ function loadFixture(value) {
   if (!fs.existsSync(artifactsInput) || !fs.statSync(artifactsInput).isDirectory()) {
     fail(`夹具 artifacts_root 不存在：${artifactsInput}`);
   }
-  const artifactsRoot = host.canonicalPath(artifactsInput);
+  const artifactsRoot = host.normalizeRoot(artifactsInput).declared;
   for (const [field, values] of [
     ["must_find", fixture.must_find],
     ["must_report", fixture.must_report],
@@ -199,43 +199,8 @@ function productOfKind(response, kind, { required = true } = {}) {
   return matches[0];
 }
 
-function symbolicLinksOnPath(target) {
-  const absolute = path.resolve(target);
-  const filesystemRoot = path.parse(absolute).root;
-  const relative = path.relative(filesystemRoot, absolute);
-  const links = [];
-  let current = filesystemRoot;
-  for (const segment of relative.split(path.sep).filter(Boolean)) {
-    current = path.join(current, segment);
-    try {
-      if (fs.lstatSync(current).isSymbolicLink()) links.push(path.resolve(current));
-    } catch (error) {
-      if (["ENOENT", "ENOTDIR"].includes(error?.code)) break;
-      throw error;
-    }
-  }
-  return links;
-}
-
 function resolveProduct(product, allowedRoot, label) {
-  const declaredRoot = path.resolve(allowedRoot);
-  const root = host.canonicalPath(declaredRoot);
-  const declaredFile = path.isAbsolute(product.path)
-    ? path.resolve(product.path)
-    : path.resolve(declaredRoot, ...product.path.replaceAll("\\", "/").split("/"));
-  const file = host.canonicalPath(declaredFile);
-  if (host.isOutside(root, file)) throw new Error(`${label} product escapes artifacts_root`);
-  if (host.hasPathSegment(declaredFile, ".kg") || host.hasPathSegment(file, ".kg")) {
-    throw new Error(`${label} product must not be inside .kg`);
-  }
-  const rootLinks = new Set(symbolicLinksOnPath(declaredRoot));
-  for (const link of symbolicLinksOnPath(declaredFile)) {
-    if (!rootLinks.has(link)) throw new Error(`${label} product path must not contain a symbolic link`);
-  }
-  if (!fs.existsSync(declaredFile) || !fs.statSync(declaredFile).isFile()) {
-    throw new Error(`${label} product does not exist`);
-  }
-  return declaredFile;
+  return host.resolveProductPath(allowedRoot, product.path, { label: `${label} product` }).declared;
 }
 
 function readMachineProduct(file, label) {

@@ -10,6 +10,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import * as kyaml from "./lib/kyaml.mjs";
 import * as protocol from "./lib/protocol.mjs";
 import * as harness from "./lib/harness.mjs";
+import * as host from "./lib/host.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const FIXED_NOW = "2026-07-31T00:00:00Z";
@@ -47,6 +48,7 @@ const SPEC_PRODUCE = path.join(ROOT, "skills", "kg-spec", "scripts", "produce-sp
 const STALENESS_CHECK = path.join(ROOT, "skills", "kg-scan", "scripts", "check-staleness.mjs");
 const HEALTH_CHECK = path.join(ROOT, "skills", "kg-scan", "scripts", "health-check.mjs");
 const INIT_INSTALL = path.join(ROOT, "skills", "kg-init", "scripts", "install.mjs");
+const FIXTURE_LINT = path.join(ROOT, "scripts", "lint-fixtures.mjs");
 const MOCK_BOOTSTRAP_RUNNER = path.join(ROOT, "scripts", "fixtures", "m2", "mock-bootstrap-runner.mjs");
 const MOCK_COMPILE_RUNNER = path.join(ROOT, "scripts", "fixtures", "m2", "mock-compile-runner.mjs");
 const MOCK_KICKOFF_RUNNER = path.join(ROOT, "scripts", "fixtures", "m2", "mock-kickoff-runner.mjs");
@@ -230,6 +232,20 @@ function executeMigration(context, setup, root = setup.project) {
   return JSON.parse(executed.stdout);
 }
 
+function detectHost(context, project) {
+  const result = runNode(context, MIGRATION_DETECT, ["--root", project], { cwd: project });
+  return JSON.parse(result.stdout);
+}
+
+function installHost(context, project, options = {}) {
+  return runNode(
+    context,
+    INIT_INSTALL,
+    [project, "--copy", "--docs-profile", options.docsProfile ?? "none"],
+    { cwd: ROOT, expectFailure: options.expectFailure === true },
+  );
+}
+
 function assertMigrationSkills(context, project) {
   const agentsSkills = path.join(project, ".agents", "skills");
   const kgNames = fs
@@ -292,6 +308,160 @@ function runInstalledSkillSelfChecks(context, project) {
 }
 
 function runPart1(context) {
+  testCase(context, "detects_greenfield_without_mutation", () => {
+    const project = path.join(context.root, "detect-greenfield");
+    fs.mkdirSync(project, { recursive: true });
+    const before = treeHash(project);
+    const detected = detectHost(context, project);
+    ensure(context, detected.kind === "kg.migration_detection" && detected.version === 2, "detection shape version mismatch");
+    ensure(context, detected.classification === "greenfield", "empty host was not classified greenfield");
+    ensure(context, detected.spec_scenario === "fresh" && detected.condition === "healthy", "greenfield scenario mismatch");
+    ensure(context, JSON.stringify(detected.allowed_actions) === JSON.stringify(["install"]), "greenfield actions mismatch");
+    ensure(context, detected.requires_human === false && detected.bootstrap_recommended === false, "greenfield flags mismatch");
+    ensure(context, treeHash(project) === before, "greenfield detection mutated the host");
+  });
+
+  testCase(context, "detects_non_kg_host_and_recommends_bootstrap", () => {
+    const project = path.join(context.root, "detect-non-kg");
+    fs.mkdirSync(project, { recursive: true });
+    writeJson(path.join(project, "package.json"), { name: "non-kg-host" });
+    fs.mkdirSync(path.join(project, "src"));
+    fs.writeFileSync(path.join(project, "src", "index.mjs"), "export const ready = true;\n");
+    const before = treeHash(project);
+    const detected = detectHost(context, project);
+    ensure(context, detected.classification === "non_kg_host", "project host was not classified non_kg_host");
+    ensure(context, detected.spec_scenario === "brownfield", "non-kg scenario mismatch");
+    ensure(context, detected.bootstrap_recommended === true, "source host did not recommend bootstrap");
+    ensure(context, JSON.stringify(detected.allowed_actions) === JSON.stringify(["install"]), "non-kg actions mismatch");
+    ensure(context, treeHash(project) === before, "non-kg detection mutated the host");
+  });
+
+  testCase(context, "detects_healthy_v1", () => {
+    const setup = setupMigrationCase(context, "detect-v1");
+    const before = treeHash(setup.project);
+    const detected = detectHost(context, setup.project);
+    ensure(context, detected.classification === "v1" && detected.condition === "healthy", "healthy v1 was not detected");
+    ensure(context, JSON.stringify(detected.allowed_actions) === JSON.stringify(["migrate"]), "v1 actions mismatch");
+    ensure(context, detected.problems.length === 0, "healthy v1 reported problems");
+    ensure(context, treeHash(setup.project) === before, "v1 detection mutated the host");
+  });
+
+  testCase(context, "detects_healthy_v2_as_noop", () => {
+    const project = path.join(context.root, "detect-v2");
+    fs.mkdirSync(project, { recursive: true });
+    installHost(context, project, { docsProfile: "lean" });
+    const before = treeHash(project);
+    const detected = detectHost(context, project);
+    ensure(context, detected.classification === "v2" && detected.condition === "healthy", "healthy v2 was not detected");
+    ensure(context, JSON.stringify(detected.allowed_actions) === JSON.stringify(["verify"]), "v2 actions mismatch");
+    installHost(context, project, { docsProfile: "lean" });
+    ensure(context, treeHash(project) === before, "healthy v2 installer rerun changed the host");
+  });
+
+  testCase(context, "detects_partial_broken_with_stable_problem_codes", () => {
+    const setup = setupMigrationCase(context, "detect-partial");
+    for (const name of ["kg-compile", "kg-scan"]) {
+      fs.rmSync(path.join(setup.project, ".agents", "skills", name), { recursive: true, force: true });
+    }
+    const before = treeHash(setup.project);
+    const first = detectHost(context, setup.project);
+    const second = detectHost(context, setup.project);
+    ensure(context, first.classification === "partial_broken" && first.condition === "partial", "incomplete v1 was not partial");
+    ensure(context, first.requires_human === false, "automatic incomplete v1 requested human review");
+    ensure(context, JSON.stringify(first.allowed_actions) === JSON.stringify(["repair"]), "automatic partial actions mismatch");
+    ensure(
+      context,
+      JSON.stringify(first.problems.map((problem) => problem.code)) === JSON.stringify(["V1_SKILL_MISSING", "V1_SKILL_MISSING"]),
+      "incomplete v1 problem codes are unstable",
+    );
+    ensure(context, first.problems.every((problem) => problem.recoverability === "automatic"), "missing skills are not automatic");
+    ensure(context, JSON.stringify(first.problems) === JSON.stringify(second.problems), "problem list changed across identical reads");
+    ensure(context, treeHash(setup.project) === before, "partial detection mutated the host");
+  });
+
+  testCase(context, "classification_is_canonical_path_invariant", () => {
+    const project = path.join(context.root, "canonical-host");
+    const alias = path.join(context.root, "canonical-host-alias");
+    fs.mkdirSync(path.join(project, "src"), { recursive: true });
+    fs.writeFileSync(path.join(project, "src", "main.ts"), "export const value = 1;\n");
+    fs.symlinkSync(project, alias, "dir");
+    const direct = detectHost(context, project);
+    const throughAlias = detectHost(context, alias);
+    for (const field of ["classification", "spec_scenario", "condition", "signals", "problems", "allowed_actions", "requires_human", "bootstrap_recommended"]) {
+      ensure(context, JSON.stringify(direct[field]) === JSON.stringify(throughAlias[field]), `canonical alias changed ${field}`);
+    }
+    ensure(context, direct.root.canonical === throughAlias.root.canonical, "canonical roots differ through alias");
+    ensure(context, direct.root.declared !== throughAlias.root.declared, "declared roots did not retain audit spelling");
+  });
+
+  testCase(context, "greenfield_install_is_lazy_and_idempotent", () => {
+    const project = path.join(context.root, "lazy-greenfield");
+    fs.mkdirSync(project, { recursive: true });
+    installHost(context, project, { docsProfile: "standard" });
+    for (const relative of ["docs/README.md", "docs/architecture", "docs/decisions", "docs/rfcs", "docs/standards"]) {
+      ensure(context, fs.existsSync(path.join(project, relative)), `lazy standard profile missing ${relative}`);
+    }
+    for (const relative of [
+      "docs/architecture/overview.md",
+      "docs/decisions/0000-template.md",
+      "docs/rfcs/0000-template.md",
+      "docs/glossary.md",
+      "docs/development.md",
+    ]) {
+      ensure(context, !fs.existsSync(path.join(project, relative)), `init eagerly created ${relative}`);
+    }
+    const config = kyaml.parse(fs.readFileSync(path.join(project, ".kg", "config.yaml"), "utf8"));
+    ensure(context, config.kind === "kg.config" && config.version === 2, "fresh config is not v2");
+    const before = treeHash(project);
+    installHost(context, project, { docsProfile: "standard" });
+    ensure(context, treeHash(project) === before, "second lazy install changed the host");
+  });
+
+  testCase(context, "non_kg_install_preserves_existing_docs_and_agents", () => {
+    const project = path.join(context.root, "preserve-non-kg");
+    const docsText = "# Human documentation map\n\nKeep these bytes.\n";
+    const agentsText = "# Human project instructions\n\nKeep this preface byte for byte.\n";
+    fs.mkdirSync(path.join(project, "docs"), { recursive: true });
+    fs.writeFileSync(path.join(project, "docs", "README.md"), docsText);
+    fs.writeFileSync(path.join(project, "AGENTS.md"), agentsText);
+    writeJson(path.join(project, "package.json"), { name: "preservation-host" });
+    const first = detectHost(context, project);
+    ensure(context, first.classification === "non_kg_host", "preservation fixture was not non-kg");
+    installHost(context, project, { docsProfile: "standard" });
+    ensure(context, fs.readFileSync(path.join(project, "docs", "README.md"), "utf8") === docsText, "existing docs README changed");
+    const installedAgents = fs.readFileSync(path.join(project, "AGENTS.md"), "utf8");
+    ensure(context, installedAgents.startsWith(agentsText), "existing AGENTS bytes changed");
+    ensure(context, countHeading(installedAgents, "硬规则") === 1, "v2 hard rule section missing");
+    ensure(context, countHeading(installedAgents, "Commands") === 1, "v2 Commands section missing");
+    ensure(context, countHeading(installedAgents, "使用 kg") === 1, "v2 usage section missing");
+    ensure(context, detectHost(context, project).classification === "v2", "non-kg install did not converge to v2");
+  });
+
+  testCase(context, "greenfield_install_preflight_failure_is_zero_write", () => {
+    const project = path.join(context.root, "install-preflight");
+    fs.mkdirSync(project, { recursive: true });
+    fs.writeFileSync(path.join(project, "harness"), "occupied managed path\n");
+    const before = treeHash(project);
+    installHost(context, project, { docsProfile: "standard", expectFailure: true });
+    ensure(context, treeHash(project) === before, "install preflight failure left partial writes");
+    ensure(context, detectHost(context, project).classification === "non_kg_host", "preflight failure changed classification");
+  });
+
+  testCase(context, "v1_missing_two_legacy_skills_routes_to_automatic_repair_plan", () => {
+    const setup = setupMigrationCase(context, "v1-two-skills");
+    for (const name of ["kg-compile", "kg-scan"]) {
+      fs.rmSync(path.join(setup.project, ".agents", "skills", name), { recursive: true, force: true });
+    }
+    const before = treeHash(setup.project);
+    const result = installHost(context, setup.project, { expectFailure: true });
+    const machine = JSON.parse(result.stdout);
+    ensure(context, result.status === 2, "automatic repair route did not use the classification exit");
+    ensure(context, machine.classification === "partial_broken", "repair result lost partial classification");
+    ensure(context, machine.next_action === "generate_repair_plan", "automatic partial did not route to repair plan");
+    ensure(context, machine.problems.every((problem) => problem.recoverability === "automatic"), "repair route became human");
+    ensure(context, treeHash(setup.project) === before, "repair-plan route mutated the v1 host");
+  });
+
   testCase(context, "migration_v1_minimal_preserves_assets", () => {
     const setup = setupMigrationCase(context, "positive");
     const originalTree = treeHash(setup.project);
@@ -427,19 +597,11 @@ function runPart1(context) {
 
   testCase(context, "existing_commands_and_normal_non_main_variants", () => {
     const setup = setupMigrationCase(context, "existing-commands");
-    fs.rmSync(path.join(setup.project, ".agents", "skills", "kg-compile"), { recursive: true, force: true });
-    fs.rmSync(path.join(setup.project, ".agents", "skills", "kg-scan"), { recursive: true, force: true });
     fs.rmSync(path.join(setup.project, "knowledge", "KN-0001-migration-preservation.md"));
-    fs.cpSync(
-      path.join(ROOT, "skills", "kg-docs"),
-      path.join(setup.project, ".agents", "skills", "kg-docs"),
-      { recursive: true },
-    );
     fs.copyFileSync(
       path.join(setup.project, ".kg", "config.yaml"),
       path.join(setup.project, ".kg", "config.v1.bak"),
     );
-    const installedDocsBefore = treeHash(path.join(setup.project, ".agents", "skills", "kg-docs"));
     const commandsAgents = [
       "# Existing Commands fixture",
       "",
@@ -466,11 +628,6 @@ function runPart1(context) {
     fs.writeFileSync(path.join(setup.project, "AGENTS.md"), commandsAgents);
 
     const plan = generateMigrationPlan(context, setup);
-    ensure(
-      context,
-      !plan.operations.some((operation) => operation.path === ".agents/skills/kg-docs"),
-      "source-identical kg-docs was scheduled for destructive replacement",
-    );
     ensure(
       context,
       !plan.operations.some((operation) => operation.path === ".kg/config.v1.bak"),
@@ -505,11 +662,6 @@ function runPart1(context) {
     );
     ensure(context, countHeading(agents, "硬规则") === 1 && countHeading(agents, "使用 kg") === 1, "v2 companion sections missing");
     ensure(context, migrationLineCount(agents) <= 30, "existing Commands fixture exceeds the bounded 30-line budget");
-    ensure(
-      context,
-      treeHash(path.join(setup.project, ".agents", "skills", "kg-docs")) === installedDocsBefore,
-      "preinstalled complete kg-docs changed during migration",
-    );
     ensure(context, fs.readdirSync(path.join(setup.project, "knowledge")).length === 0, "empty knowledge directory was populated");
     ensure(context, fs.existsSync(path.join(setup.project, "CLAUDE.md")), "Claude marker without CLAUDE.md was not wired");
     assertMigrationSkills(context, setup.project);
@@ -798,6 +950,34 @@ function factSourcesFromDocument(text) {
 }
 
 function runPart2(context) {
+  testCase(context, "live_and_check_modes_share_canonical_path_semantics", () => {
+    const canonicalRoot = path.join(context.root, "path-semantics", "artifacts");
+    const declaredAlias = path.join(context.root, "path-semantics", "artifacts-alias");
+    fs.mkdirSync(canonicalRoot, { recursive: true });
+    fs.writeFileSync(path.join(canonicalRoot, "product.json"), "{}\n");
+    fs.symlinkSync(canonicalRoot, declaredAlias, "dir");
+    const envelope = { products: [{ kind: "fixture", path: "product.json" }] };
+    const checkVerdict = host.resolveProductPath(canonicalRoot, envelope.products[0].path, { label: "check product" });
+    const liveVerdict = host.resolveProductPath(declaredAlias, envelope.products[0].path, { label: "live product" });
+    ensure(context, checkVerdict.verdict === liveVerdict.verdict, "live and check acceptance verdicts differ");
+    ensure(context, checkVerdict.canonical === liveVerdict.canonical, "live and check canonical products differ");
+
+    const internal = path.join(canonicalRoot, "internal");
+    fs.mkdirSync(internal);
+    fs.writeFileSync(path.join(internal, "product.json"), "{}\n");
+    fs.symlinkSync(internal, path.join(canonicalRoot, "nested-link"), "dir");
+    const rejected = [];
+    for (const root of [canonicalRoot, declaredAlias]) {
+      try {
+        host.resolveProductPath(root, "nested-link/product.json", { label: "runner product" });
+        rejected.push("accepted");
+      } catch (error) {
+        rejected.push(error.message);
+      }
+    }
+    ensure(context, rejected[0] === rejected[1] && rejected[0].includes("symbolic link"), "symlink differential verdicts differ");
+  });
+
   testCase(context, "positive_inventory_plan_render_chain", () => {
     const setup = setupBootstrapCase(context, "positive");
     const inventory = readJson(setup.inventory);
@@ -1808,6 +1988,30 @@ function runPart4(context) {
 }
 
 function runPart5(context) {
+  testCase(context, "fixture_lint_rejects_all_out_of_range_anchors", () => {
+    runNode(context, FIXTURE_LINT, [], { cwd: ROOT });
+    const fixtureRoot = path.join(context.root, "fixture-lint-negative");
+    const project = path.join(fixtureRoot, "project");
+    fs.mkdirSync(path.join(project, "docs"), { recursive: true });
+    fs.mkdirSync(path.join(project, "harness"), { recursive: true });
+    fs.writeFileSync(path.join(project, "docs", "source.md"), "one line\n");
+    fs.writeFileSync(path.join(project, "harness", "artifact.json"), '{"source_ref":"docs/source.md#L2"}\n');
+    fs.writeFileSync(path.join(project, "harness", "range.json"), '{"source_ref":"docs/source.md#L1-L2"}\n');
+    writeJson(path.join(fixtureRoot, "compile.fixture.json"), {
+      kind: "kg.eval_compile_fixture",
+      version: 1,
+      project_source: project,
+      task: "reject out of range fixture anchors",
+    });
+    const rejected = runNode(context, FIXTURE_LINT, ["--root", fixtureRoot], {
+      cwd: ROOT,
+      expectFailure: true,
+    });
+    ensure(context, rejected.stderr.includes("docs/source.md#L2"), "fixture lint did not name the rejected anchor");
+    ensure(context, rejected.stderr.includes("docs/source.md#L1-L2"), "fixture lint did not reject the range end");
+    ensure(context, rejected.stderr.includes("line"), "fixture lint did not report the line-bound failure");
+  });
+
   function runKickoffGate(name, fixture, env = {}, expectFailure = false) {
     const artifacts = path.join(context.root, name);
     runNode(context, EVAL_KICKOFF, ["--fixture", fixture, "--artifacts", artifacts], {
@@ -2858,6 +3062,12 @@ function runSevenStepChain(context) {
   fs.mkdirSync(project, { recursive: true });
   fs.mkdirSync(artifacts, { recursive: true });
   fs.cpSync(path.join(BOOTSTRAP_FIXTURE, "host"), project, { recursive: true });
+  // The bootstrap fixture carries mixed-case .kg exclusion probes. Under the
+  // version 2 host classifier those are migration residuals, so this separate
+  // end-to-end install fixture removes them before the init step. Part 2 keeps
+  // the exclusion probes and their assertions.
+  fs.rmSync(path.join(project, ".KG"), { recursive: true, force: true });
+  fs.rmSync(path.join(project, "mixed", ".kG"), { recursive: true, force: true });
   fs.cpSync(
     path.join(COMPILE_FIXTURE, "host", "docs", "accepted-compile-contract.md"),
     path.join(project, "docs", "accepted-compile-contract.md"),
@@ -3247,7 +3457,7 @@ function runPart7(context) {
         JSON.stringify({
           detection_mode: "deterministic",
           artifact_id: "HAR-COMPILE-NOTES",
-          source_ref: "docs/accepted-compile-contract.md#L15",
+          source_ref: "docs/accepted-compile-contract.md#L14",
           issue: "missing_source",
           severity: "high",
         }),

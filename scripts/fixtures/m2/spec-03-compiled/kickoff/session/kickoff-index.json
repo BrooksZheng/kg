@@ -1,7 +1,7 @@
 {
   "kind": "kg.kickoff_context_index",
   "version": 1,
-  "project_root": "/private/tmp/c9-r24r/g3f/workspace/project",
+  "project_root": "scripts/fixtures/m2/spec-03-compiled/project",
   "task": "让 compile 通过路径别名或产物 symlink 更新整个 runbook",
   "entries": [
     {
@@ -83,7 +83,7 @@
         "KN-0002"
       ],
       "source_refs": [
-        "docs/accepted-compile-contract.md#L15"
+        "docs/accepted-compile-contract.md#L14"
       ]
     }
   ],

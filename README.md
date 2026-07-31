@@ -109,17 +109,18 @@ kg's skill dirs are self-contained, so the standard
 # 1. from the host repo root, install the available skills into .agents/skills/
 npx skills add brookszheng/kg
 
-# 2. complete wiring and select a project-document baseline
+# 2. classify the host, complete wiring, and select a directory profile
 node .agents/skills/kg-init/scripts/install.mjs \
   --docs-profile standard \
   --project-stage brownfield
 ```
 
 Step 2 is required: the skills CLI only delivers the skill files; the
-`.kg/` pipeline tree, the direct-authoring `docs/` baseline, and platform
-wiring are created by kg-init. It ensures `AGENTS.md` exists and leaves its
-content human-authored. Existing documents are never overwritten. Commit
-everything it created.
+`.kg/` pipeline tree, the direct-authoring directory skeleton, and platform
+wiring are created by kg-init. Detection owns the host classification, while
+`--project-stage` remains a compatibility hint. Init creates only
+`docs/README.md` as document content. Existing documents and human AGENTS
+bytes are preserved. Commit everything it created.
 
 `npx skills add owner/repo` installs from the repo's **default branch**.
 To test a not-yet-merged branch, install from a local checkout instead
@@ -166,15 +167,15 @@ node skills/kg-init/scripts/install.mjs /path/to/host [--copy] \
 
   Updates replace only the skill dirs. Host state under `.kg/`, `knowledge/`,
   `docs/`, `AGENTS.md`, and `.cursorignore` is never touched by the skills
-  CLI. Re-running kg-init never overwrites an existing config, project
-  document, or project instructions.
+  CLI. Re-running kg-init verifies healthy v2 state and may restore missing
+  managed empty directories. It does not refresh config, project documents,
+  project instructions, or skill contents.
 
 - **Symlink install (Option B default)** — `git pull` the plugin checkout;
   hosts pick it up through the symlinks, nothing else to do.
-- **`--copy` install (Option B)** — `git pull` the plugin checkout, then
-  re-run the installer against the host; it destructively refreshes the
-  vendored skill dirs (and refuses to run if source and destination collapse
-  to the same directory).
+- **`--copy` install (Option B)** — use the explicit repair or update workflow
+  when skill contents need refresh. A healthy v2 installer rerun verifies state
+  without refreshing vendored skill dirs.
 
 ## Releasing (maintainers of this repo)
 

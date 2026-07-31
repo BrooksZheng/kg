@@ -14,6 +14,15 @@ export const SKILL_NAMES = [
 ];
 
 const V1_SKILL_NAMES = new Set(["kg-init", "kg-observe", "kg-compile", "kg-scan"]);
+const V2_SKILL_REQUIRED_CLI = {
+  "kg-init": "scripts/migrate-v1.mjs",
+  "kg-observe": "scripts/add-observation.mjs",
+  "kg-compile": "scripts/archive-observations.mjs",
+  "kg-scan": "scripts/scan-inventory.mjs",
+  "kg-kickoff": "scripts/gather-context.mjs",
+  "kg-spec": "scripts/produce-spec.mjs",
+  "kg-docs": "scripts/inventory.mjs",
+};
 const V2_CONFIG_KEYS = ["kind", "version", "observation_threshold", "skills_path"];
 const V1_CONFIG_KEYS = ["observation_threshold", "agents_block_budget_lines", "skills_path"];
 const QUEUE_CATEGORIES = new Set([
@@ -335,6 +344,73 @@ export function migrateAgentsText(original) {
   };
 }
 
+function insertAtSectionEnd(text, heading, addition) {
+  const matches = sectionMatches(text, heading);
+  if (matches.length !== 1) throw new MigrationError(`AGENTS.md must contain exactly one ${heading} section`);
+  const start = matches[0].index + matches[0][0].length;
+  const rest = text.slice(start);
+  const next = /\n## [^\n]+\r?(?:\n|$)/.exec(rest);
+  const end = next ? start + next.index : text.length;
+  const section = text.slice(matches[0].index, end);
+  const separator = section.endsWith("\n\n") ? "" : section.endsWith("\n") ? "\n" : "\n\n";
+  return `${text.slice(0, end)}${separator}${addition}\n${text.slice(end)}`;
+}
+
+function appendBlock(text, block) {
+  const separator = text === "" || text.endsWith("\n\n") ? "" : text.endsWith("\n") ? "\n" : "\n\n";
+  return `${text}${separator}${block}\n`;
+}
+
+export function ensureAgentsV2Text(original) {
+  if (typeof original !== "string") throw new MigrationError("AGENTS.md content must be a string");
+  if (original.includes(BEGIN_MARKER) || original.includes(END_MARKER)) {
+    throw new MigrationError("AGENTS.md contains v1 managed markers and requires migration Phase 0");
+  }
+  let text = original;
+
+  const hardHeadings = sectionMatches(text, "硬规则");
+  if (hardHeadings.length > 1) throw new MigrationError("AGENTS.md has multiple human 硬规则 sections");
+  if (hardHeadings.length === 0) {
+    const commands = sectionMatches(text, "Commands");
+    if (commands.length > 1) throw new MigrationError("AGENTS.md has multiple human Commands sections");
+    if (commands.length === 1) {
+      const index = commands[0].index;
+      const prefix = text.slice(0, index);
+      const separator = prefix === "" || prefix.endsWith("\n\n") ? "" : prefix.endsWith("\n") ? "\n" : "\n\n";
+      text = `${prefix}${separator}${HARD_BLOCK}\n\n${text.slice(index)}`;
+    } else {
+      text = appendBlock(text, HARD_BLOCK);
+    }
+  } else {
+    const hardSection = extractSection(text, hardHeadings[0]);
+    const occurrences = countToken(hardSection, HARD_RULE);
+    if (occurrences > 1) throw new MigrationError("AGENTS.md hard rule appears more than once");
+    if (occurrences === 0) text = insertAtSectionEnd(text, "硬规则", HARD_RULE);
+  }
+
+  const commandHeadings = sectionMatches(text, "Commands");
+  if (commandHeadings.length > 1) throw new MigrationError("AGENTS.md has multiple human Commands sections");
+  const injectedCommands = commandHeadings.length === 0;
+  if (injectedCommands) text = appendBlock(text, COMMANDS_BLOCK);
+  else validateCommandsSection(text, { injected: false });
+
+  const usageHeadings = sectionMatches(text, "使用 kg");
+  if (usageHeadings.length > 1) throw new MigrationError("AGENTS.md has multiple human 使用 kg sections");
+  if (usageHeadings.length === 0) {
+    text = appendBlock(text, USAGE_BLOCK);
+  } else {
+    for (const skill of ["kg-kickoff", "kg-spec", "kg-observe"]) {
+      const section = extractSection(text, sectionMatches(text, "使用 kg")[0]);
+      const occurrences = countToken(section, `\`${skill}\``);
+      if (occurrences > 1) throw new MigrationError(`AGENTS.md 使用 kg section mentions ${skill} more than once`);
+      if (occurrences === 0) text = insertAtSectionEnd(text, "使用 kg", `- \`${skill}\``);
+    }
+  }
+
+  validateAgentsV2(text, { injectedCommands });
+  return { text, injected_commands: injectedCommands, line_count: lineCount(text) };
+}
+
 function parseConfig(file) {
   let value;
   try {
@@ -346,42 +422,401 @@ function parseConfig(file) {
   return value;
 }
 
-export function detectMigration(rootValue) {
-  const declared = path.resolve(rootValue);
-  const canonical = host.assertSafeHostRoot(declared);
-  const configFile = path.join(canonical, ".kg", "config.yaml");
-  if (!fs.existsSync(configFile)) {
-    return {
-      kind: "kg.migration_detection",
-      version: 1,
-      root: { declared, canonical },
-      classification: "unknown",
-      signals: [{ code: "config_missing", path: ".kg/config.yaml" }],
-    };
-  }
-  const config = parseConfig(configFile);
-  const signals = [];
-  let classification = "unknown";
-  if (
+function exactKeySet(value, expected) {
+  return stableJson(Object.keys(value).sort()) === stableJson([...expected].sort());
+}
+
+function validThreshold(value) {
+  return Number.isInteger(value) && value > 0;
+}
+
+function validSkillsPath(value) {
+  return typeof value === "string" && value.trim() !== "";
+}
+
+function isValidV1Config(config) {
+  return (
+    exactKeySet(config, V1_CONFIG_KEYS) &&
     config.kind === undefined &&
     config.version === undefined &&
-    Object.prototype.hasOwnProperty.call(config, "agents_block_budget_lines")
-  ) {
-    classification = "v1";
-    signals.push({ code: "v1_config_without_kind_version", path: ".kg/config.yaml" });
-    signals.push({ code: "v1_agents_budget_present", path: ".kg/config.yaml" });
-  } else if (config.kind === "kg.config" && config.version === 2) {
-    classification = "v2";
-    signals.push({ code: "v2_config_kind_version", path: ".kg/config.yaml" });
-  } else {
-    signals.push({ code: "config_shape_unclassified", path: ".kg/config.yaml" });
+    validThreshold(config.observation_threshold) &&
+    Number.isInteger(config.agents_block_budget_lines) &&
+    config.agents_block_budget_lines > 0 &&
+    validSkillsPath(config.skills_path)
+  );
+}
+
+function isValidV2Config(config) {
+  return (
+    exactKeySet(config, V2_CONFIG_KEYS) &&
+    config.kind === "kg.config" &&
+    config.version === 2 &&
+    validThreshold(config.observation_threshold) &&
+    validSkillsPath(config.skills_path)
+  );
+}
+
+function regularFile(target) {
+  try {
+    return fs.statSync(target).isFile();
+  } catch {
+    return false;
   }
+}
+
+function directory(target) {
+  try {
+    return fs.statSync(target).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+function listKgSkills(root, platform) {
+  const skills = path.join(root, platform, "skills");
+  if (!directory(skills)) return [];
+  return fs
+    .readdirSync(skills, { withFileTypes: true })
+    .filter((entry) => entry.name.startsWith("kg-"))
+    .map((entry) => entry.name)
+    .sort();
+}
+
+function hasCompleteV1Markers(text) {
+  const begins = markerLine(text, BEGIN_MARKER);
+  const ends = markerLine(text, END_MARKER);
+  return begins.length === 1 && ends.length === 1 && begins[0].index < ends[0].index;
+}
+
+function safeProjectInventory(root) {
+  const excludedDirectories = new Set([
+    ".git",
+    ".kg",
+    "node_modules",
+    "vendor",
+    "dist",
+    "build",
+    "coverage",
+    "secrets",
+    "credentials",
+  ]);
+  const sensitiveFiles = [/^\.env(?:\.|$)/i, /^\.npmrc$/i, /\.(?:pem|key|p12|pfx)$/i];
+  const manifests = new Set([
+    "package.json",
+    "Cargo.toml",
+    "go.mod",
+    "pyproject.toml",
+    "pom.xml",
+    "build.gradle",
+    "build.gradle.kts",
+  ]);
+  const sourceExtensions = new Set([".c", ".cc", ".cpp", ".go", ".java", ".js", ".jsx", ".mjs", ".py", ".rs", ".swift", ".ts", ".tsx"]);
+  let count = 0;
+  let bootstrap = false;
+
+  function walk(current, relative) {
+    for (const entry of fs.readdirSync(current, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+      if (entry.isSymbolicLink()) continue;
+      const relativePath = relative === "" ? entry.name : `${relative}/${entry.name}`;
+      if (entry.isDirectory()) {
+        if (!excludedDirectories.has(entry.name.toLowerCase())) walk(path.join(current, entry.name), relativePath);
+        continue;
+      }
+      if (!entry.isFile() || sensitiveFiles.some((pattern) => pattern.test(entry.name))) continue;
+      count += 1;
+      const first = relativePath.split("/")[0];
+      if (
+        manifests.has(entry.name) ||
+        ["src", "app", "lib"].includes(first) ||
+        sourceExtensions.has(path.extname(entry.name).toLowerCase())
+      ) {
+        bootstrap = true;
+      }
+    }
+  }
+
+  walk(root, "");
+  return { count, bootstrap };
+}
+
+function detectionSignal(signals, code, relative) {
+  signals.push({ code, path: relative, observed: true });
+}
+
+function detectionProblem(problems, code, relative, severity, recoverability) {
+  problems.push({ code, path: relative, severity, recoverability });
+}
+
+function hasUnresolvedMigrationState(root, signals, problems) {
+  const candidates = [
+    [".kg/migration/active-plan.json", "active_migration_plan_present"],
+    [".kg/migration/stage", "migration_stage_present"],
+    [".kg/migration/quarantine", "migration_quarantine_present"],
+  ];
+  let unresolved = false;
+  for (const [relative, code] of candidates) {
+    const target = path.join(root, ...relative.split("/"));
+    if (!fs.existsSync(target)) continue;
+    if (directory(target) && fs.readdirSync(target).length === 0) continue;
+    unresolved = true;
+    detectionSignal(signals, code, relative);
+    detectionProblem(problems, "UNRESOLVED_MIGRATION_STATE", relative, "error", "human");
+  }
+  if (fs.existsSync(path.join(root, ".kg", "config.v1.bak"))) {
+    detectionSignal(signals, "migration_backup_present", ".kg/config.v1.bak");
+  }
+  return unresolved;
+}
+
+function v2SkillProblems(root, names, problems) {
+  const actual = new Set(names);
+  const expected = new Set(SKILL_NAMES);
+  for (const name of SKILL_NAMES) {
+    const skillRoot = path.join(root, ".agents", "skills", name);
+    if (!actual.has(name)) {
+      detectionProblem(problems, "V2_SKILL_MISSING", `.agents/skills/${name}`, "error", "automatic");
+      continue;
+    }
+    for (const required of ["SKILL.md", "scripts/lib", "protocol", V2_SKILL_REQUIRED_CLI[name]]) {
+      const target = path.join(skillRoot, ...required.split("/"));
+      const valid = required === "scripts/lib" || required === "protocol" ? directory(target) : regularFile(target);
+      if (!valid) {
+        detectionProblem(
+          problems,
+          "V2_SKILL_NOT_SELF_CONTAINED",
+          `.agents/skills/${name}/${required}`,
+          "error",
+          "automatic",
+        );
+      }
+    }
+  }
+  for (const name of names.filter((candidate) => !expected.has(candidate))) {
+    detectionProblem(problems, "UNKNOWN_KG_SKILL", `.agents/skills/${name}`, "error", "human");
+  }
+}
+
+function claudeWiringProblems(root, names, problems) {
+  const claudeMarker = fs.existsSync(path.join(root, ".claude")) || fs.existsSync(path.join(root, "CLAUDE.md"));
+  if (!claudeMarker) return;
+  const claudeText = regularFile(path.join(root, "CLAUDE.md"))
+    ? fs.readFileSync(path.join(root, "CLAUDE.md"), "utf8")
+    : "";
+  if (!/^@AGENTS\.md[ \t]*$/m.test(claudeText)) {
+    detectionProblem(problems, "CLAUDE_AGENTS_IMPORT_INVALID", "CLAUDE.md", "error", "automatic");
+  }
+  for (const name of names) {
+    const link = path.join(root, ".claude", "skills", name);
+    const agentSkill = path.join(root, ".agents", "skills", name);
+    try {
+      if (!fs.lstatSync(link).isSymbolicLink() || host.canonicalPath(link) !== host.canonicalPath(agentSkill)) {
+        throw new Error("invalid wiring");
+      }
+    } catch {
+      detectionProblem(problems, "CLAUDE_SKILL_WIRING_INVALID", `.claude/skills/${name}`, "error", "automatic");
+    }
+  }
+}
+
+export function detectMigration(rootValue) {
+  const root = host.normalizeRoot(rootValue);
+  const canonical = root.canonical;
+  const signals = [];
+  const problems = [];
+  const configFile = path.join(canonical, ".kg", "config.yaml");
+  const agentsFile = path.join(canonical, "AGENTS.md");
+  const agentSkills = listKgSkills(canonical, ".agents");
+  const claudeSkills = listKgSkills(canonical, ".claude");
+  let config = null;
+  let configCandidate = null;
+
+  const kgRootEntries = fs
+    .readdirSync(canonical, { withFileTypes: true })
+    .filter((entry) => entry.name.toLowerCase() === ".kg");
+  const safeKgState = kgRootEntries.some((entry) => entry.name === ".kg" && entry.isDirectory());
+  for (const entry of kgRootEntries) {
+    if (entry.name === ".kg") {
+      detectionSignal(signals, "kg_state_directory_present", ".kg");
+    } else {
+      detectionSignal(signals, "mixed_case_kg_state_directory_present", entry.name);
+      detectionProblem(problems, "MIXED_CASE_KG_PATH", entry.name, "error", "human");
+    }
+    if (entry.isSymbolicLink()) {
+      detectionProblem(problems, "KG_STATE_PATH_SYMLINK", entry.name, "error", "human");
+    }
+  }
+  if (safeKgState && fs.existsSync(configFile)) {
+    detectionSignal(signals, "config_present", ".kg/config.yaml");
+    try {
+      config = parseConfig(configFile);
+      if (config.kind === "kg.config" || config.version !== undefined) configCandidate = "v2";
+      else if (Object.prototype.hasOwnProperty.call(config, "agents_block_budget_lines")) configCandidate = "v1";
+      else configCandidate = "unknown";
+      detectionSignal(signals, `${configCandidate}_config_shape_present`, ".kg/config.yaml");
+    } catch {
+      detectionProblem(problems, "CONFIG_INVALID_KYAML", ".kg/config.yaml", "error", "human");
+    }
+  }
+  if (agentSkills.length > 0) detectionSignal(signals, "agents_kg_skills_present", ".agents/skills");
+  if (claudeSkills.length > 0) detectionSignal(signals, "claude_kg_skills_present", ".claude/skills");
+  const knowledgePath = path.join(canonical, "knowledge");
+  if (fs.existsSync(knowledgePath) && fs.lstatSync(knowledgePath).isSymbolicLink()) {
+    detectionSignal(signals, "knowledge_path_symlink_present", "knowledge");
+    detectionProblem(problems, "KNOWLEDGE_PATH_SYMLINK", "knowledge", "error", "human");
+  } else if (directory(knowledgePath)) {
+    const entries = fs.readdirSync(knowledgePath).filter((name) => /^KN-.*\.md$/.test(name));
+    if (entries.length > 0) detectionSignal(signals, "knowledge_entries_present", "knowledge");
+  }
+  let agentsText = null;
+  if (regularFile(agentsFile)) {
+    agentsText = fs.readFileSync(agentsFile, "utf8");
+    if (agentsText.includes(BEGIN_MARKER) || agentsText.includes(END_MARKER)) {
+      detectionSignal(signals, "agents_v1_marker_present", "AGENTS.md");
+    }
+  }
+  const cursorignore = path.join(canonical, ".cursorignore");
+  if (regularFile(cursorignore) && fs.readFileSync(cursorignore, "utf8").split(/\r?\n/).some((line) => line.trim() === ".kg/")) {
+    detectionSignal(signals, "kg_ignore_rule_present", ".cursorignore");
+  }
+  const unresolvedMigration = safeKgState ? hasUnresolvedMigrationState(canonical, signals, problems) : false;
+
+  const hasKgSignal = signals.length > 0 || problems.some((problem) => problem.code === "CONFIG_INVALID_KYAML");
+  let healthyV1 = false;
+  let healthyV2 = false;
+
+  if (config && configCandidate === "v1") {
+    if (!isValidV1Config(config)) {
+      detectionProblem(problems, "V1_CONFIG_INVALID", ".kg/config.yaml", "error", "human");
+    }
+    for (const relative of [
+      ".kg/observations",
+      ".kg/observations/processed",
+      ".kg/queue",
+      ".kg/reports",
+      "knowledge",
+      ".agents/skills",
+    ]) {
+      if (!directory(path.join(canonical, ...relative.split("/")))) {
+        detectionProblem(problems, "V1_CORE_DIRECTORY_MISSING", relative, "error", "automatic");
+      }
+    }
+    if (agentsText === null || !hasCompleteV1Markers(agentsText)) {
+      detectionProblem(problems, "V1_MANAGED_MARKERS_INVALID", "AGENTS.md", "error", "human");
+    }
+    const actual = new Set(agentSkills);
+    for (const name of V1_SKILL_NAMES) {
+      if (!actual.has(name)) {
+        detectionProblem(problems, "V1_SKILL_MISSING", `.agents/skills/${name}`, "error", "automatic");
+      }
+    }
+    const platformSkills = [...new Set([...agentSkills, ...claudeSkills])].sort();
+    const v2Only = platformSkills.filter((name) => SKILL_NAMES.includes(name) && !V1_SKILL_NAMES.has(name));
+    if (v2Only.length > 0) {
+      for (const name of v2Only) {
+        const platform = agentSkills.includes(name) ? ".agents" : ".claude";
+        detectionProblem(problems, "MIXED_KG_SKILL_GENERATIONS", `${platform}/skills/${name}`, "error", "human");
+      }
+    }
+    for (const name of platformSkills.filter((candidate) => !SKILL_NAMES.includes(candidate))) {
+      const platform = agentSkills.includes(name) ? ".agents" : ".claude";
+      detectionProblem(problems, "UNKNOWN_KG_SKILL", `${platform}/skills/${name}`, "error", "human");
+    }
+    healthyV1 = isValidV1Config(config) && problems.length === 0 && !unresolvedMigration;
+  } else if (config && configCandidate === "v2") {
+    if (!isValidV2Config(config)) {
+      detectionProblem(problems, "V2_CONFIG_INVALID", ".kg/config.yaml", "error", "human");
+    }
+    v2SkillProblems(canonical, agentSkills, problems);
+    if (agentsText === null) {
+      detectionProblem(problems, "V2_AGENTS_INVALID", "AGENTS.md", "error", "automatic");
+    } else {
+      try {
+        validateAgentsV2(agentsText);
+      } catch {
+        detectionProblem(problems, "V2_AGENTS_INVALID", "AGENTS.md", "error", "human");
+      }
+    }
+    claudeWiringProblems(canonical, SKILL_NAMES, problems);
+    for (const name of claudeSkills.filter((candidate) => !SKILL_NAMES.includes(candidate))) {
+      detectionProblem(problems, "UNKNOWN_KG_SKILL", `.claude/skills/${name}`, "error", "human");
+    }
+    healthyV2 = isValidV2Config(config) && problems.length === 0 && !unresolvedMigration;
+  } else if (hasKgSignal && !problems.some((problem) => problem.code === "CONFIG_INVALID_KYAML")) {
+    detectionProblem(problems, "CONFIG_MISSING_OR_UNCLASSIFIED", ".kg/config.yaml", "error", "human");
+  }
+
+  let classification;
+  let specScenario;
+  let condition;
+  let allowedActions;
+  let requiresHuman;
+  let bootstrapRecommended = false;
+  if (healthyV2) {
+    classification = "v2";
+    specScenario = "v2";
+    condition = "healthy";
+    allowedActions = ["verify"];
+    requiresHuman = false;
+  } else if (healthyV1) {
+    classification = "v1";
+    specScenario = "v1";
+    condition = "healthy";
+    allowedActions = ["migrate"];
+    requiresHuman = false;
+  } else if (hasKgSignal) {
+    const ambiguousCodes = new Set([
+      "MIXED_KG_SKILL_GENERATIONS",
+      "MIXED_CASE_KG_PATH",
+      "UNKNOWN_KG_SKILL",
+      "UNRESOLVED_MIGRATION_STATE",
+      "KG_STATE_PATH_SYMLINK",
+      "KNOWLEDGE_PATH_SYMLINK",
+    ]);
+    const brokenCodes = new Set([
+      "CONFIG_INVALID_KYAML",
+      "V1_CONFIG_INVALID",
+      "V2_CONFIG_INVALID",
+      "V1_MANAGED_MARKERS_INVALID",
+      "V2_AGENTS_INVALID",
+    ]);
+    classification = "partial_broken";
+    condition = problems.some((problem) => ambiguousCodes.has(problem.code))
+      ? "ambiguous"
+      : problems.some((problem) => brokenCodes.has(problem.code))
+        ? "broken"
+        : "partial";
+    specScenario = condition === "ambiguous" ? "ambiguous" : "partial";
+    requiresHuman = problems.some((problem) => problem.recoverability === "human");
+    allowedActions = requiresHuman
+      ? ["request_human"]
+      : unresolvedMigration
+        ? ["repair", "resume"]
+        : ["repair"];
+  } else {
+    const inventory = safeProjectInventory(canonical);
+    classification = inventory.count === 0 ? "greenfield" : "non_kg_host";
+    specScenario = inventory.count === 0 ? "fresh" : "brownfield";
+    condition = "healthy";
+    allowedActions = ["install"];
+    requiresHuman = false;
+    bootstrapRecommended = inventory.count > 0 && inventory.bootstrap;
+    if (inventory.count > 0) detectionSignal(signals, "safe_project_content_present", ".");
+  }
+
+  signals.sort((left, right) => `${left.code}\0${left.path}`.localeCompare(`${right.code}\0${right.path}`));
+  problems.sort((left, right) => `${left.code}\0${left.path}`.localeCompare(`${right.code}\0${right.path}`));
   return {
     kind: "kg.migration_detection",
-    version: 1,
-    root: { declared, canonical },
+    version: 2,
+    root,
     classification,
+    spec_scenario: specScenario,
+    condition,
     signals,
+    problems,
+    allowed_actions: allowedActions,
+    requires_human: requiresHuman,
+    bootstrap_recommended: bootstrapRecommended,
   };
 }
 

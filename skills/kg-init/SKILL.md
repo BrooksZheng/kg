@@ -91,10 +91,16 @@ node .agents/skills/kg-init/scripts/install.mjs \
 
 `host-root` defaults to `$KG_ROOT` or the current directory. A direct script
 call defaults to `--docs-profile none` for upgrade compatibility. The Setup
-interview should pass the selected profile explicitly.
+interview should pass the selected profile explicitly. `--project-stage` is a
+compatibility hint only. Detection owns the host classification.
 
-The installer is idempotent. It never overwrites `.kg/config.yaml`, replaces
-an existing project document, or changes an existing `AGENTS.md`.
+The installer runs the read-only version 2 detector before mutation. A
+greenfield or non-KG host receives the v2 pipeline, the selected directory
+skeleton, and only `docs/README.md` as document content. Existing docs and
+human AGENTS bytes are preserved while missing v2 entry sections are added.
+A v1 host routes to migration Phase 0, a healthy v2 host is verified, and a
+partial host reports the required repair or human action. Reruns are
+idempotent.
 
 ## Installed layout
 
@@ -111,10 +117,8 @@ docs/                      direct-authoring project documents when selected
   architecture/
   decisions/
   rfcs/                    standard profile
-  glossary.md
   standards/               standard profile
-  development.md           standard profile
-AGENTS.md                  human-authored project instructions
+AGENTS.md                  preserved human instructions plus v2 entry sections
 .cursorignore
 .agents/skills/kg-*
 .claude/skills/kg-*        Claude-marker hosts only

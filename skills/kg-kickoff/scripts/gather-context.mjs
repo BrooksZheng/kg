@@ -235,7 +235,11 @@ function writeJson(output, value) {
   fs.writeFileSync(output, `${JSON.stringify(value, null, 2)}\n`);
 }
 
-function runIndex(args, root, output) {
+function declaredValue(value) {
+  return path.isAbsolute(value) ? path.resolve(value) : path.normalize(value).split(path.sep).join("/");
+}
+
+function runIndex(args, root, declaredRoot, output) {
   if (!args.task) fail("--phase index 需要 --task");
   const budget = createBudget(parseBudget(args.budget, DEFAULT_INDEX_BUDGET));
   const { entries: harnessEntries, sourcePaths: harnessSourcePaths } = harnessIndex(root);
@@ -260,7 +264,7 @@ function runIndex(args, root, output) {
   writeJson(output, {
     kind: "kg.kickoff_context_index",
     version: 1,
-    project_root: root,
+    project_root: declaredRoot,
     task: args.task,
     entries,
     harness: harnessEntries,
@@ -269,12 +273,14 @@ function runIndex(args, root, output) {
   console.log(`kg: 索引阶段完成，收录 ${entries.length} 项，使用 ${budget.consumed}/${budget.limit} 字节`);
 }
 
-function runDeep(args, root, output) {
+function runDeep(args, root, declaredRoot, output) {
   if (!args.index) fail("--phase deep 需要 --index");
   if (args.include.length === 0) fail("--phase deep 至少需要一个 --include");
   const index = JSON.parse(fs.readFileSync(path.resolve(args.index), "utf8"));
   if (index.kind !== "kg.kickoff_context_index") fail("--index 不是 kickoff context index");
-  if (path.resolve(index.project_root) !== root) fail("--index 的项目根目录与 --root 不一致");
+  if (host.canonicalPath(path.isAbsolute(index.project_root) ? index.project_root : path.resolve(index.project_root)) !== root) {
+    fail("--index 的项目根目录与 --root 不一致");
+  }
   const indexed = new Map(index.entries.map((entry) => [entry.path, entry]));
   const budget = createBudget(parseBudget(args.budget, DEFAULT_DEEP_BUDGET));
   const documents = [];
@@ -298,8 +304,8 @@ function runDeep(args, root, output) {
   writeJson(output, {
     kind: "kg.kickoff_context",
     version: 1,
-    project_root: root,
-    index_path: path.resolve(args.index),
+    project_root: declaredRoot,
+    index_path: declaredValue(args.index),
     documents,
     budget: budgetReport(budget),
   });
@@ -311,13 +317,12 @@ export function main(argv = process.argv.slice(2)) {
   if (!["index", "deep"].includes(args.phase)) fail("--phase 必须是 index 或 deep");
   if (!args.root) fail("缺少 --root");
   if (!args.output) fail("缺少 --output");
-  const rootInput = path.resolve(args.root);
-  if (!fs.existsSync(rootInput) || !fs.statSync(rootInput).isDirectory()) fail(`项目根目录不存在：${rootInput}`);
-  if (fs.lstatSync(rootInput).isSymbolicLink()) fail(`项目根目录不能是符号链接：${rootInput}`);
-  const root = fs.realpathSync(rootInput);
+  const normalizedRoot = host.normalizeRoot(args.root);
+  const root = normalizedRoot.canonical;
+  const declaredRoot = declaredValue(args.root);
   const output = path.resolve(args.output);
-  if (args.phase === "index") runIndex(args, root, output);
-  else runDeep(args, root, output);
+  if (args.phase === "index") runIndex(args, root, declaredRoot, output);
+  else runDeep(args, root, declaredRoot, output);
 }
 
 function isMain() {
