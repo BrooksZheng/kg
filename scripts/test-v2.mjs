@@ -11,12 +11,13 @@ import * as kyaml from "./lib/kyaml.mjs";
 import * as protocol from "./lib/protocol.mjs";
 import * as harness from "./lib/harness.mjs";
 import * as host from "./lib/host.mjs";
+import { computeMigrationPlanId } from "../skills/kg-init/scripts/migration-lib.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const FIXED_NOW = "2026-07-31T00:00:00Z";
 const MIGRATION_NOW = "2026-07-31T00:00:00.000Z";
 const PARTS = [
-  { number: 1, name: "migration_v1_minimal_preserves_assets", status: "implemented", run: runPart1 },
+  { number: 1, name: "migration_protocol_v2_preserves_and_recovers", status: "implemented", run: runPart1 },
   { number: 2, name: "docs_bootstrap_renders_architecture_draft", status: "implemented", run: runPart2 },
   { number: 3, name: "observe_json_preserves_v1_contract", status: "implemented", run: runPart3 },
   { number: 4, name: "compile_links_observation_kn_and_managed_block", status: "implemented", run: runPart4 },
@@ -55,6 +56,8 @@ const MOCK_KICKOFF_RUNNER = path.join(ROOT, "scripts", "fixtures", "m2", "mock-k
 const BOOTSTRAP_FIXTURE = path.join(ROOT, "scripts", "fixtures", "m2", "bootstrap");
 const OBSERVE_FIXTURE = path.join(ROOT, "scripts", "fixtures", "m2", "observe");
 const MIGRATION_FIXTURE = path.join(ROOT, "scripts", "fixtures", "m2", "migration-v1");
+const MIGRATION_RECOVERY_FIXTURE = path.join(ROOT, "scripts", "fixtures", "m2", "migration-recovery");
+const MIGRATION_CHECKPOINT_DRIVER = path.join(ROOT, "scripts", "kill-migration-at-checkpoint.mjs");
 const COMPILE_FIXTURE = path.join(ROOT, "scripts", "fixtures", "m2", "compile-fixture");
 const KICKOFF_FIXTURES = [
   path.join(ROOT, "scripts", "fixtures", "m1", "kickoff.fixture.yaml"),
@@ -230,6 +233,113 @@ function executeMigration(context, setup, root = setup.project) {
     { cwd: root },
   );
   return JSON.parse(executed.stdout);
+}
+
+function runMigrationAction(context, setup, args, options = {}) {
+  const result = runNode(
+    context,
+    MIGRATION_EXECUTE,
+    ["--root", setup.project, ...args],
+    { cwd: setup.project, expectFailure: options.expectFailure === true },
+  );
+  const stream = result.stdout.trim() ? result.stdout : result.stderr;
+  return { process: result, value: JSON.parse(stream) };
+}
+
+function addInvalidQueueItems(setup) {
+  fs.copyFileSync(
+    path.join(MIGRATION_RECOVERY_FIXTURE, "invalid-format.yaml"),
+    path.join(setup.project, ".kg", "queue", "Q-20260731-002.yaml"),
+  );
+  fs.copyFileSync(
+    path.join(MIGRATION_RECOVERY_FIXTURE, "unmappable-category.yaml"),
+    path.join(setup.project, ".kg", "queue", "Q-20260731-003.yaml"),
+  );
+}
+
+function resolutionForPlan(plan) {
+  return {
+    kind: "kg.migration_resolution",
+    version: 1,
+    plan_id: plan.id,
+    items: plan.quarantine.map((item, index) => ({
+      source_path: item.source_path,
+      source_sha256: item.source_sha256,
+      disposition: index === 0 ? "retain_quarantined" : "convert",
+      ...(index === 0
+        ? {}
+        : {
+            record: {
+              kind: "proposal",
+              category: "project_contract",
+              claim: "Converted during migration recovery testing.",
+              evidence: [{ type: "quote", ref: "migration fixture" }],
+              options: ["accept", "reject"],
+              recommendation: "Review the converted record.",
+              entry: null,
+              source_observations: [],
+            },
+          }),
+    })),
+  };
+}
+
+function replaceStringDeep(value, from, to) {
+  if (typeof value === "string") return value.split(from).join(to);
+  if (Array.isArray(value)) return value.map((item) => replaceStringDeep(item, from, to));
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, replaceStringDeep(item, from, to)]));
+  }
+  return value;
+}
+
+function resealPlan(plan) {
+  const oldId = plan.id;
+  const newId = computeMigrationPlanId(plan);
+  const replaced = replaceStringDeep(plan, oldId, newId);
+  replaced.id = newId;
+  return replaced;
+}
+
+function migrationScaffolding(root) {
+  const found = [];
+  function walk(current, relative) {
+    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+      const rel = relative === "" ? entry.name : `${relative}/${entry.name}`;
+      if (entry.name.startsWith(".kg-migration-")) found.push(rel);
+      if (entry.isDirectory() && !entry.isSymbolicLink()) walk(path.join(current, entry.name), rel);
+    }
+  }
+  walk(root, "");
+  return found.sort();
+}
+
+function runCheckpointDriver(context, setup, checkpoint, childArgs, mode = "kill") {
+  const ready = path.join(setup.artifacts, `${checkpoint}-${mode}.ready`);
+  const release = path.join(setup.artifacts, `${checkpoint}-${mode}.release`);
+  const driven = runNode(
+    context,
+    MIGRATION_CHECKPOINT_DRIVER,
+    [
+      "--checkpoint",
+      checkpoint,
+      "--mode",
+      mode,
+      "--ready",
+      ready,
+      "--release",
+      release,
+      "--cwd",
+      setup.project,
+      "--",
+      MIGRATION_EXECUTE,
+      "--root",
+      setup.project,
+      ...childArgs,
+    ],
+    { cwd: setup.project },
+  );
+  return JSON.parse(driven.stdout);
 }
 
 function detectHost(context, project) {
@@ -462,7 +572,31 @@ function runPart1(context) {
     ensure(context, treeHash(setup.project) === before, "repair-plan route mutated the v1 host");
   });
 
-  testCase(context, "migration_v1_minimal_preserves_assets", () => {
+  testCase(context, "phase0_is_read_only_and_plan_is_outside_host", () => {
+    const setup = setupMigrationCase(context, "phase0-read-only");
+    const before = treeHash(setup.project);
+    const first = generateMigrationPlan(context, setup);
+    ensure(context, treeHash(setup.project) === before, "Phase 0 changed the host tree");
+    ensure(context, host.isOutside(setup.project, setup.plan), "Phase 0 plan was written inside the host");
+    const secondPlan = path.join(setup.artifacts, "migration-plan-second.json");
+    const second = JSON.parse(runNode(
+      context,
+      MIGRATION_EXECUTE,
+      ["--root", setup.project, "--output", secondPlan, "--now", "2026-08-01T00:00:00.000Z"],
+      { cwd: setup.project },
+    ).stdout);
+    ensure(context, first.id === second.id, "generated_at changed the canonical action identity");
+    ensure(context, treeHash(setup.project) === before, "repeated Phase 0 changed the host tree");
+    runNode(
+      context,
+      MIGRATION_EXECUTE,
+      ["--root", setup.project, "--output", path.join(setup.project, "plan.json"), "--now", MIGRATION_NOW],
+      { cwd: setup.project, expectFailure: true },
+    );
+    ensure(context, treeHash(setup.project) === before, "inside-host plan rejection changed the host");
+  });
+
+  testCase(context, "migration_v1_preserves_all_assets", () => {
     const setup = setupMigrationCase(context, "positive");
     const originalTree = treeHash(setup.project);
     const originalConfig = fs.readFileSync(path.join(setup.project, ".kg", "config.yaml"));
@@ -486,14 +620,20 @@ function runPart1(context) {
 
     const plan = generateMigrationPlan(context, setup);
     ensure(context, treeHash(setup.project) === originalTree, "Phase 0 changed the migration fixture tree");
-    ensure(context, plan.kind === "kg.migration_plan" && plan.version === 1, "migration plan kind or version mismatch");
-    ensure(context, plan.detection.classification === "v1", "migration plan did not bind the v1 detection");
-    ensure(context, plan.queue.items.length === 1, "compatible queue item was not represented in the plan");
+    ensure(context, plan.kind === "kg.migration_plan" && plan.version === 2, "migration plan kind or version mismatch");
+    ensure(context, plan.source.classification === "v1", "migration plan did not bind the v1 detection");
+    ensure(context, plan.context.queue_items.length === 1, "compatible queue item was not represented in the plan");
     ensure(
       context,
-      plan.queue.items[0].strategy === "preserve_compatible_v1_record",
+      plan.context.queue_items[0].strategy === "preserve_compatible_v1_record",
       "compatible queue item preservation strategy mismatch",
     );
+    for (const field of ["operations", "preserved", "quarantine", "before_images", "lazy_absent_files"]) {
+      ensure(context, Array.isArray(plan[field]), `migration plan is missing ${field}`);
+    }
+    ensure(context, Array.isArray(plan.recovery.checkpoints), "migration plan is missing recovery checkpoints");
+    ensure(context, Array.isArray(plan.rollback.operations), "migration plan is missing rollback operations");
+    ensure(context, typeof plan.skills_source.digest === "string", "migration plan is missing the skill source digest");
     const operationPaths = plan.operations.map((operation) => operation.path);
     ensure(context, new Set(operationPaths).size === operationPaths.length, "migration plan contains duplicate paths");
     for (const required of [".kg/config.v1.bak", ".kg/config.yaml", "AGENTS.md"]) {
@@ -502,6 +642,9 @@ function runPart1(context) {
     for (const operation of plan.operations) {
       ensure(context, typeof operation.action === "string", `plan action missing for ${operation.path}`);
       ensure(context, typeof operation.preserve === "string", `plan preservation strategy missing for ${operation.path}`);
+      ensure(context, operation.ownership === "migration_plan", `plan ownership missing for ${operation.path}`);
+      ensure(context, operation.recovery?.strategy, `plan recovery strategy missing for ${operation.path}`);
+      ensure(context, operation.rollback?.strategy, `plan rollback strategy missing for ${operation.path}`);
       ensure(context, operation.before?.type, `plan before fingerprint missing for ${operation.path}`);
       ensure(context, operation.after?.type, `plan after fingerprint missing for ${operation.path}`);
     }
@@ -633,7 +776,7 @@ function runPart1(context) {
       !plan.operations.some((operation) => operation.path === ".kg/config.v1.bak"),
       "byte-identical recovery backup was scheduled for replacement",
     );
-    ensure(context, plan.agents.injected_commands === false, "human Commands section was not detected");
+    ensure(context, plan.context.agents_injected_commands === false, "human Commands section was not detected");
     executeMigration(context, setup);
     const agents = fs.readFileSync(path.join(setup.project, "AGENTS.md"), "utf8");
     ensure(context, countHeading(agents, "Commands") === 1, "migration duplicated the human Commands section");
@@ -690,39 +833,69 @@ function runPart1(context) {
     for (const line of humanLines) ensure(context, migrated.includes(line), `long human content was removed: ${line}`);
   });
 
-  testCase(context, "reject_unmappable_queue_items_with_complete_report", () => {
-    const setup = setupMigrationCase(context, "unmappable-queue");
-    fs.writeFileSync(
-      path.join(setup.project, ".kg", "queue", "Q-20260731-002.yaml"),
-      "kind: proposal\ncategory: legacy_unknown\nclaim: unmappable\n",
+  testCase(context, "queue_items_convert_or_enter_quarantine", () => {
+    const setup = setupMigrationCase(context, "quarantine-routing");
+    addInvalidQueueItems(setup);
+    const original = Object.fromEntries(
+      ["Q-20260731-002.yaml", "Q-20260731-003.yaml"].map((name) => [
+        name,
+        fs.readFileSync(path.join(setup.project, ".kg", "queue", name)),
+      ]),
     );
-    fs.writeFileSync(
-      path.join(setup.project, ".kg", "queue", "Q-20260731-003.yaml"),
-      "kind: [unterminated\n",
-    );
-    const before = treeHash(setup.project);
-    const rejected = runNode(
-      context,
-      MIGRATION_EXECUTE,
-      ["--root", setup.project, "--output", setup.plan, "--now", MIGRATION_NOW],
-      { cwd: setup.project, expectFailure: true },
-    );
-    const report = JSON.parse(rejected.stderr);
-    ensure(context, report.kind === "kg.migration_error_report", "queue failure report kind mismatch");
-    ensure(context, report.items.length === 2, "queue failure report did not include every unmappable item");
+    const plan = generateMigrationPlan(context, setup);
+    ensure(context, plan.quarantine.length === 2, "plan did not route every unmappable queue item to quarantine");
     ensure(
       context,
-      JSON.stringify(report.items.map((item) => item.reason).sort()) ===
+      JSON.stringify(plan.quarantine.map((item) => item.reason).sort()) ===
         JSON.stringify(["invalid_format", "unmappable_category"]),
-      "queue failure reasons are incomplete",
+      "quarantine reasons are incomplete",
     );
-    ensure(
-      context,
-      report.items.every((item) => item.recommendation === "M3_quarantine" && item.path.startsWith(".kg/queue/")),
-      "queue failure report omitted path or M3 disposition",
-    );
-    ensure(context, treeHash(setup.project) === before, "queue preflight failure changed the host");
-    ensure(context, !fs.existsSync(path.join(setup.project, ".kg", "config.v1.bak")), "queue failure created a backup");
+    const blocked = runMigrationAction(context, setup, ["--execute", "--plan", setup.plan], { expectFailure: true });
+    ensure(context, blocked.process.status === 2, "quarantine execution did not use exit 2");
+    ensure(context, blocked.value.status === "blocked_on_quarantine", "quarantine execution did not block");
+    ensure(context, blocked.value.requires_human === true, "quarantine execution did not require a human");
+    for (const item of plan.quarantine) {
+      const name = path.posix.basename(item.source_path);
+      ensure(context, !fs.existsSync(path.join(setup.project, item.source_path)), `quarantine source remains: ${item.source_path}`);
+      ensure(
+        context,
+        fs.readFileSync(path.join(setup.project, item.quarantine_path)).equals(original[name]),
+        `quarantine did not preserve original bytes: ${item.source_path}`,
+      );
+    }
+    ensure(context, !fs.existsSync(path.join(setup.project, ".kg", "config.v1.bak")), "blocked quarantine crossed into config writes");
+  });
+
+  testCase(context, "quarantine_requires_complete_human_resolution", () => {
+    const setup = setupMigrationCase(context, "quarantine-resolution");
+    addInvalidQueueItems(setup);
+    const plan = generateMigrationPlan(context, setup);
+    runMigrationAction(context, setup, ["--execute", "--plan", setup.plan], { expectFailure: true });
+    const valid = resolutionForPlan(plan);
+    const invalidVariants = [
+      { name: "incomplete", value: { ...valid, items: valid.items.slice(0, 1) } },
+      { name: "duplicate", value: { ...valid, items: [valid.items[0], valid.items[0]] } },
+      { name: "hash", value: { ...valid, items: valid.items.map((item, index) => index ? item : { ...item, source_sha256: "0".repeat(64) }) } },
+      { name: "disposition", value: { ...valid, items: valid.items.map((item, index) => index ? item : { ...item, disposition: "discard" }) } },
+      { name: "plan", value: { ...valid, plan_id: "MIG-000000000000000000000000" } },
+      { name: "unknown-field", value: { ...valid, unexpected: true } },
+    ];
+    for (const variant of invalidVariants) {
+      const file = path.join(setup.artifacts, `resolution-${variant.name}.json`);
+      writeJson(file, variant.value);
+      const before = treeHash(setup.project);
+      runMigrationAction(context, setup, ["--resolve", file, "--plan", setup.plan], { expectFailure: true });
+      ensure(context, treeHash(setup.project) === before, `invalid ${variant.name} resolution changed the host`);
+    }
+    const resolutionFile = path.join(setup.artifacts, "resolution-valid.json");
+    writeJson(resolutionFile, valid);
+    const completed = runMigrationAction(context, setup, ["--resolve", resolutionFile, "--plan", setup.plan]);
+    ensure(context, completed.value.status === "complete", "complete resolution did not finish migration");
+    ensure(context, detectHost(context, setup.project).classification === "v2", "resolved quarantine did not converge to v2");
+    const stable = treeHash(setup.project);
+    const repeated = runMigrationAction(context, setup, ["--resolve", resolutionFile, "--plan", setup.plan]);
+    ensure(context, repeated.value.status === "complete", "repeated resolution did not remain complete");
+    ensure(context, treeHash(setup.project) === stable, "repeated resolution changed the terminal tree");
   });
 
   testCase(context, "reject_malformed_managed_markers_and_commands", () => {
@@ -823,26 +996,34 @@ function runPart1(context) {
     ensure(context, !fs.existsSync(path.join(drift.project, ".kg", "config.v1.bak")), "input drift created a backup");
   });
 
-  testCase(context, "reject_incomplete_skill_source_pre_mutation", () => {
+  testCase(context, "rejects_incomplete_skill_source_pre_mutation", () => {
     const setup = setupMigrationCase(context, "bad-source");
     const before = treeHash(setup.project);
-
-    // Create a temporary skills source missing scripts/lib/ in one skill
-    const badSource = path.join(setup.caseRoot, "bad-skills");
-    fs.cpSync(path.join(ROOT, "skills"), badSource, { recursive: true });
-    fs.rmSync(path.join(badSource, "kg-observe", "scripts", "lib"), { recursive: true, force: true });
-
-    runNode(
-      context,
-      MIGRATION_EXECUTE,
-      ["--root", setup.project, "--output", setup.plan, "--skills-source", badSource, "--now", MIGRATION_NOW],
-      { cwd: setup.project, expectFailure: true },
-    );
-    ensure(context, treeHash(setup.project) === before, "incomplete skill source failure changed the host");
+    const missing = {
+      "kg-init": "SKILL.md",
+      "kg-observe": "scripts/lib",
+      "kg-compile": "protocol",
+      "kg-scan": "scripts/_lib.mjs",
+      "kg-kickoff": "scripts/gather-context.mjs",
+      "kg-spec": "scripts/produce-spec.mjs",
+      "kg-docs": "scripts/inventory.mjs",
+    };
+    for (const [name, relative] of Object.entries(missing)) {
+      const badSource = path.join(setup.caseRoot, `bad-skills-${name}`);
+      fs.cpSync(path.join(ROOT, "skills"), badSource, { recursive: true });
+      fs.rmSync(path.join(badSource, name, ...relative.split("/")), { recursive: true, force: true });
+      runNode(
+        context,
+        MIGRATION_EXECUTE,
+        ["--root", setup.project, "--output", path.join(setup.artifacts, `${name}.json`), "--skills-source", badSource, "--now", MIGRATION_NOW],
+        { cwd: setup.project, expectFailure: true },
+      );
+      ensure(context, treeHash(setup.project) === before, `incomplete ${name} source changed the host`);
+    }
     ensure(context, !fs.existsSync(path.join(setup.project, ".kg", "config.v1.bak")), "incomplete source failure created a backup");
   });
 
-  testCase(context, "cleanup_orphan_stage_directories_from_prior_plan", () => {
+  testCase(context, "plan_owns_and_cleans_orphan_scaffolding", () => {
     const setup = setupMigrationCase(context, "orphan-cleanup");
 
     // Plant fake orphan stage/backup with a synthetic plan ID that will
@@ -867,7 +1048,10 @@ function runPart1(context) {
 
     // The removal is a plan-time decision, so the plan must claim the
     // scaffolding and the preserved set must not also claim it.
-    const claimed = plan.orphans.map((orphan) => orphan.path).sort();
+    const claimed = plan.operations
+      .filter((operation) => operation.action === "remove_internal_scaffolding")
+      .map((operation) => operation.path)
+      .sort();
     ensure(
       context,
       JSON.stringify(claimed) === expectedOrphans,
@@ -904,6 +1088,310 @@ function runPart1(context) {
       second.cleaned_orphans.length === 0,
       `re-run re-reported cleanup; got ${JSON.stringify(second.cleaned_orphans)}`,
     );
+  });
+
+  testCase(context, "sealed_internal_plan_recovers_lost_external_plan", () => {
+    const setup = setupMigrationCase(context, "sealed-plan-recovery");
+    const plan = generateMigrationPlan(context, setup);
+    const killed = runCheckpointDriver(context, setup, "after_sealed_plan", ["--execute", "--plan", setup.plan]);
+    ensure(context, killed.signal === "SIGKILL", "sealed-plan checkpoint did not receive SIGKILL");
+    fs.rmSync(setup.plan, { force: true });
+    const recovered = runMigrationAction(context, setup, ["--execute"]);
+    ensure(context, recovered.value.plan_id === plan.id, "recovery did not use the sealed plan id");
+    ensure(context, recovered.value.status === "complete", "sealed internal plan did not complete");
+    ensure(context, detectHost(context, setup.project).classification === "v2", "sealed-plan recovery did not reach v2");
+
+    const repaired = setupMigrationCase(context, "sealed-plan-repaired-from-external");
+    const repairedPlan = generateMigrationPlan(context, repaired);
+    runCheckpointDriver(context, repaired, "after_sealed_plan", ["--execute", "--plan", repaired.plan]);
+    fs.writeFileSync(
+      path.join(repaired.project, ".kg", "migration", "plans", `${repairedPlan.id}.json`),
+      "{corrupt sealed plan\n",
+    );
+    const repairedResult = runMigrationAction(context, repaired, ["--execute", "--plan", repaired.plan]);
+    ensure(context, repairedResult.value.status === "complete", "valid external plan did not repair the damaged internal copy");
+  });
+
+  testCase(context, "rollback_restores_verified_v1_before_images", () => {
+    const setup = setupMigrationCase(context, "rollback-positive");
+    const original = treeHash(setup.project);
+    const plan = generateMigrationPlan(context, setup);
+    executeMigration(context, setup);
+    const rolledBack = runMigrationAction(context, setup, ["--rollback", "--plan", setup.plan]);
+    ensure(context, rolledBack.value.status === "clean_v1", "rollback did not report clean v1");
+    ensure(context, treeHash(setup.project) === original, "rollback did not restore the original v1 tree");
+    const stable = treeHash(setup.project);
+    const repeated = runMigrationAction(context, setup, ["--rollback", "--plan", setup.plan]);
+    ensure(context, repeated.value.restored.length === 0 && repeated.value.deleted.length === 0, "rollback rerun was not idempotent");
+    ensure(context, treeHash(setup.project) === stable, "rollback rerun changed clean v1");
+
+    const corrupt = setupMigrationCase(context, "rollback-corrupt-image");
+    const corruptPlan = generateMigrationPlan(context, corrupt);
+    executeMigration(context, corrupt);
+    const agentsImage = corruptPlan.before_images.find((item) => item.target_path === "AGENTS.md");
+    fs.writeFileSync(path.join(corrupt.project, agentsImage.image_path), "corrupt before image\n");
+    const beforeFailure = treeHash(corrupt.project);
+    const rejected = runMigrationAction(context, corrupt, ["--rollback", "--plan", corrupt.plan], { expectFailure: true });
+    ensure(context, rejected.value.code === "corrupt_before_image", "corrupt before image did not enter manual recovery");
+    ensure(context, treeHash(corrupt.project) === beforeFailure, "corrupt before image failure changed the host");
+
+    const unowned = setupMigrationCase(context, "rollback-unowned-created-directory-content");
+    generateMigrationPlan(context, unowned);
+    executeMigration(context, unowned);
+    fs.writeFileSync(path.join(unowned.project, "docs", "specs", "human.md"), "human content\n");
+    const unownedTree = treeHash(unowned.project);
+    const unownedRejected = runMigrationAction(
+      context,
+      unowned,
+      ["--rollback", "--plan", unowned.plan],
+      { expectFailure: true },
+    );
+    ensure(context, unownedRejected.value.code === "rollback_created_directory_not_empty", "rollback accepted unowned content");
+    ensure(context, treeHash(unowned.project) === unownedTree, "rollback removed content before full preflight");
+    ensure(context, plan.rollback.operations.length === plan.operations.length + plan.quarantine.length, "rollback manifest is not closed");
+  });
+
+  testCase(context, "rejects_preserved_operation_ownership_overlap", () => {
+    const setup = setupMigrationCase(context, "ownership-overlap");
+    const plan = generateMigrationPlan(context, setup);
+    const config = plan.operations.find((operation) => operation.path === ".kg/config.yaml");
+    plan.preserved.push({
+      path: config.path,
+      fingerprint: config.before,
+      strategy: "forged_overlap",
+    });
+    const forged = resealPlan(plan);
+    writeJson(setup.plan, forged);
+    const before = treeHash(setup.project);
+    const rejected = runMigrationAction(context, setup, ["--execute", "--plan", setup.plan], { expectFailure: true });
+    ensure(context, rejected.value.message.includes("overlaps"), "ownership overlap was not identified");
+    ensure(context, treeHash(setup.project) === before, "ownership overlap rejection changed the host");
+  });
+
+  testCase(context, "rejects_drift_unknown_skills_and_corrupt_backups", () => {
+    const drift = setupMigrationCase(context, "named-target-drift");
+    generateMigrationPlan(context, drift);
+    fs.appendFileSync(path.join(drift.project, "AGENTS.md"), "Human edit after planning.\n");
+    const driftTree = treeHash(drift.project);
+    const drifted = runMigrationAction(context, drift, ["--execute", "--plan", drift.plan], { expectFailure: true });
+    ensure(
+      context,
+      ["preserved_drift", "target_drifted", "migration_failed"].includes(drifted.value.code) &&
+        /drift|changed/i.test(drifted.value.message),
+      "target drift was not rejected",
+    );
+    ensure(context, treeHash(drift.project) === driftTree, "target drift rejection changed the host");
+
+    const unknown = setupMigrationCase(context, "named-unknown-skill");
+    fs.mkdirSync(path.join(unknown.project, ".agents", "skills", "kg-unknown"));
+    fs.writeFileSync(path.join(unknown.project, ".agents", "skills", "kg-unknown", "SKILL.md"), "unknown\n");
+    const unknownTree = treeHash(unknown.project);
+    runNode(
+      context,
+      MIGRATION_EXECUTE,
+      ["--root", unknown.project, "--output", unknown.plan, "--now", MIGRATION_NOW],
+      { cwd: unknown.project, expectFailure: true },
+    );
+    ensure(context, treeHash(unknown.project) === unknownTree, "unknown skill rejection changed the host");
+
+    const backup = setupMigrationCase(context, "named-corrupt-backup");
+    fs.writeFileSync(path.join(backup.project, ".kg", "config.v1.bak"), "corrupt backup\n");
+    const backupTree = treeHash(backup.project);
+    runNode(
+      context,
+      MIGRATION_EXECUTE,
+      ["--root", backup.project, "--output", backup.plan, "--now", MIGRATION_NOW],
+      { cwd: backup.project, expectFailure: true },
+    );
+    ensure(context, treeHash(backup.project) === backupTree, "corrupt backup rejection changed the host");
+
+    const midflight = setupMigrationCase(context, "named-midflight-drift");
+    generateMigrationPlan(context, midflight);
+    runCheckpointDriver(context, midflight, "after_config_write", ["--execute", "--plan", midflight.plan]);
+    fs.writeFileSync(path.join(midflight.project, ".kg", "config.yaml"), "human mid-migration edit\n");
+    const midflightTree = treeHash(midflight.project);
+    const midflightRejected = runMigrationAction(
+      context,
+      midflight,
+      ["--execute", "--plan", midflight.plan],
+      { expectFailure: true },
+    );
+    ensure(context, midflightRejected.value.status === "manual_recovery_required", "midflight drift did not enter manual recovery");
+    ensure(context, treeHash(midflight.project) === midflightTree, "midflight drift rejection changed the host");
+
+    const scaffolding = setupMigrationCase(context, "named-unknown-scaffolding");
+    const scaffoldingPlan = generateMigrationPlan(context, scaffolding);
+    runCheckpointDriver(context, scaffolding, "after_sealed_plan", ["--execute", "--plan", scaffolding.plan]);
+    const unknownStage = path.join(scaffolding.project, ".agents", "skills", ".kg-migration-stage-MIG-unknown-kg-init");
+    fs.mkdirSync(unknownStage);
+    fs.writeFileSync(path.join(unknownStage, "sentinel.txt"), "unknown stage\n");
+    const extraPlan = path.join(
+      scaffolding.project,
+      ".kg",
+      "migration",
+      "plans",
+      "MIG-000000000000000000000000.json",
+    );
+    fs.copyFileSync(
+      path.join(scaffolding.project, ".kg", "migration", "plans", `${scaffoldingPlan.id}.json`),
+      extraPlan,
+    );
+    const scaffoldingTree = treeHash(scaffolding.project);
+    const scaffoldingRejected = runMigrationAction(
+      context,
+      scaffolding,
+      ["--execute", "--plan", scaffolding.plan],
+      { expectFailure: true },
+    );
+    ensure(
+      context,
+      ["multiple_active_plans", "unknown_migration_scaffolding"].includes(scaffoldingRejected.value.code),
+      "unknown active scaffolding did not enter manual recovery",
+    );
+    ensure(context, treeHash(scaffolding.project) === scaffoldingTree, "unknown scaffolding rejection changed the host");
+  });
+
+  testCase(context, "phase2_recomputes_outputs_and_rejects_self_consistent_lies", () => {
+    const setup = setupMigrationCase(context, "phase2-self-consistent-lie");
+    const original = treeHash(setup.project);
+    const plan = generateMigrationPlan(context, setup);
+    const agents = plan.operations.find((operation) => operation.path === "AGENTS.md");
+    const plannedText = Buffer.from(agents.content_base64, "base64").toString("utf8");
+    const lieText = plannedText.slice(plannedText.indexOf("## 硬规则"));
+    const lieBytes = Buffer.from(lieText);
+    agents.content_base64 = lieBytes.toString("base64");
+    agents.after = {
+      type: "file",
+      size: lieBytes.length,
+      sha256: crypto.createHash("sha256").update(lieBytes).digest("hex"),
+    };
+    const rollback = plan.rollback.operations.find((operation) => operation.path === "AGENTS.md");
+    rollback.expected_current = agents.after;
+    const forged = resealPlan(plan);
+    writeJson(setup.plan, forged);
+    const rejected = runMigrationAction(context, setup, ["--execute", "--plan", setup.plan], { expectFailure: true });
+    ensure(context, rejected.value.message.includes("recomputed AGENTS.md"), "Phase 2 accepted a self-consistent AGENTS lie");
+    ensure(context, fs.existsSync(path.join(setup.project, ".kg", "migration", "active-plan.json")), "Phase 2 failure lost recovery state");
+    const rolledBack = runMigrationAction(context, setup, ["--rollback", "--plan", setup.plan]);
+    ensure(context, rolledBack.value.status === "clean_v1", "Phase 2 failure did not support verified rollback");
+    ensure(context, treeHash(setup.project) === original, "Phase 2 failure rollback did not restore v1");
+  });
+
+  testCase(context, "kill_matrix_converges_at_every_checkpoint", () => {
+    const checkpoints = [
+      { name: "before_sealed_plan", deleteExternal: true },
+      { name: "after_sealed_plan", deleteExternal: true },
+      { name: "after_before_images", deleteExternal: true },
+      { name: "during_quarantine_move", quarantine: true },
+      { name: "after_quarantine_manifest", quarantine: true, resolve: true },
+      { name: "during_skill_replace", deleteExternal: true },
+      { name: "after_skill_replace", deleteExternal: true },
+      { name: "after_config_write" },
+      { name: "after_agents_write" },
+      { name: "before_phase2_commit", deleteExternal: true },
+    ];
+    for (const checkpointCase of checkpoints) {
+      const setup = setupMigrationCase(context, `kill-${checkpointCase.name}`);
+      if (checkpointCase.quarantine) addInvalidQueueItems(setup);
+      let plan = generateMigrationPlan(context, setup);
+      const killed = runCheckpointDriver(context, setup, checkpointCase.name, ["--execute", "--plan", setup.plan]);
+      ensure(context, killed.ready === checkpointCase.name && killed.signal === "SIGKILL", `${checkpointCase.name} was not killed at confirmation`);
+      for (const relative of migrationScaffolding(setup.project)) {
+        ensure(context, relative.includes(plan.id), `${checkpointCase.name} left scaffolding outside the active plan: ${relative}`);
+      }
+      if (checkpointCase.deleteExternal) fs.rmSync(setup.plan, { force: true });
+
+      let recoveryArgs;
+      let expectedStatus;
+      if (checkpointCase.name === "before_sealed_plan") {
+        ensure(context, detectHost(context, setup.project).classification === "v1", "early kill crossed the v1 boundary");
+        plan = generateMigrationPlan(context, setup);
+        recoveryArgs = ["--execute", "--plan", setup.plan];
+        expectedStatus = "complete";
+      } else if (checkpointCase.resolve) {
+        const resolutionFile = path.join(setup.artifacts, `${checkpointCase.name}-resolution.json`);
+        writeJson(resolutionFile, resolutionForPlan(plan));
+        recoveryArgs = ["--resolve", resolutionFile, "--plan", setup.plan];
+        expectedStatus = "complete";
+      } else if (checkpointCase.quarantine) {
+        recoveryArgs = ["--execute", "--plan", setup.plan];
+        expectedStatus = "blocked_on_quarantine";
+      } else {
+        recoveryArgs = checkpointCase.deleteExternal ? ["--execute"] : ["--execute", "--plan", setup.plan];
+        expectedStatus = "complete";
+      }
+      const recovered = runMigrationAction(context, setup, recoveryArgs, { expectFailure: expectedStatus === "blocked_on_quarantine" });
+      ensure(context, recovered.value.status === expectedStatus, `${checkpointCase.name} recovered to ${recovered.value.status}`);
+      if (checkpointCase.name === "during_skill_replace") {
+        ensure(
+          context,
+          recovered.value.actions.some((action) => action.initial_state === "resume"),
+          "skill interruption did not expose the resume state",
+        );
+      }
+      if (expectedStatus === "blocked_on_quarantine") {
+        ensure(context, recovered.value.actions.some((action) => action.state === "blocked"), "quarantine did not expose blocked state");
+      }
+      const stable = treeHash(setup.project);
+      const repeated = runMigrationAction(context, setup, recoveryArgs, { expectFailure: expectedStatus === "blocked_on_quarantine" });
+      ensure(context, repeated.value.status === expectedStatus, `${checkpointCase.name} idempotent rerun changed status`);
+      ensure(context, treeHash(setup.project) === stable, `${checkpointCase.name} idempotent rerun changed the tree`);
+      ensure(context, migrationScaffolding(setup.project).length === 0, `${checkpointCase.name} recovery left migration scaffolding`);
+    }
+
+    const rollback = setupMigrationCase(context, "kill-during-rollback");
+    const rollbackOriginal = treeHash(rollback.project);
+    generateMigrationPlan(context, rollback);
+    executeMigration(context, rollback);
+    const rollbackKilled = runCheckpointDriver(
+      context,
+      rollback,
+      "during_rollback_restore",
+      ["--rollback", "--plan", rollback.plan],
+    );
+    ensure(context, rollbackKilled.signal === "SIGKILL", "rollback checkpoint did not receive SIGKILL");
+    const rollbackRecovered = runMigrationAction(context, rollback, ["--rollback", "--plan", rollback.plan]);
+    ensure(context, rollbackRecovered.value.status === "clean_v1", "rollback checkpoint did not recover to clean v1");
+    ensure(context, treeHash(rollback.project) === rollbackOriginal, "rollback checkpoint did not restore the v1 tree");
+    const rollbackStable = treeHash(rollback.project);
+    runMigrationAction(context, rollback, ["--rollback", "--plan", rollback.plan]);
+    ensure(context, treeHash(rollback.project) === rollbackStable, "rollback checkpoint rerun changed clean v1");
+
+    const corrupt = setupMigrationCase(context, "kill-double-plan-corruption");
+    const corruptPlan = generateMigrationPlan(context, corrupt);
+    runCheckpointDriver(context, corrupt, "after_config_write", ["--execute", "--plan", corrupt.plan]);
+    fs.writeFileSync(corrupt.plan, "{corrupt external plan\n");
+    fs.writeFileSync(
+      path.join(corrupt.project, ".kg", "migration", "plans", `${corruptPlan.id}.json`),
+      "{corrupt internal plan\n",
+    );
+    const corruptTree = treeHash(corrupt.project);
+    const manual = runMigrationAction(context, corrupt, ["--execute"], { expectFailure: true });
+    ensure(context, manual.value.status === "manual_recovery_required", "double plan corruption did not enter manual recovery");
+    ensure(context, treeHash(corrupt.project) === corruptTree, "double plan corruption failure changed the host");
+
+    const missing = setupMigrationCase(context, "kill-both-plans-missing");
+    const missingPlan = generateMigrationPlan(context, missing);
+    runCheckpointDriver(context, missing, "after_config_write", ["--execute", "--plan", missing.plan]);
+    fs.rmSync(missing.plan, { force: true });
+    fs.rmSync(path.join(missing.project, ".kg", "migration", "plans", `${missingPlan.id}.json`), { force: true });
+    const missingTree = treeHash(missing.project);
+    const missingManual = runMigrationAction(context, missing, ["--execute"], { expectFailure: true });
+    ensure(context, missingManual.value.status === "manual_recovery_required", "missing plans after the v1 boundary did not enter manual recovery");
+    ensure(context, treeHash(missing.project) === missingTree, "missing plan failure changed the host");
+
+    const seam = setupMigrationCase(context, "checkpoint-seam-equivalence");
+    generateMigrationPlan(context, seam);
+    const nonexistentReady = path.join(seam.artifacts, "unset-seam.ready");
+    const normalResult = executeMigration(context, seam);
+    ensure(context, normalResult.status === "complete" && !fs.existsSync(nonexistentReady), "unset seam paused or emitted a ready signal");
+    const normalTree = treeHash(seam.project);
+    fs.rmSync(seam.project, { recursive: true, force: true });
+    cloneMigrationProject(seam.project);
+    generateMigrationPlan(context, seam);
+    const released = runCheckpointDriver(context, seam, "after_config_write", ["--execute", "--plan", seam.plan], "release");
+    ensure(context, JSON.parse(released.stdout).status === "complete", "released seam did not complete");
+    ensure(context, treeHash(seam.project) === normalTree, "released seam changed the terminal tree");
   });
 }
 
