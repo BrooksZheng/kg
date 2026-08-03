@@ -92,17 +92,19 @@ fs.writeFileSync(file, `---\n${kyaml.stringify(frontmatter)}---\n${body.startsWi
 // Merge back-pointer: the survivor records which entry it absorbed.
 if (survivorFile) {
   const survivor = protocol.splitFrontmatter(fs.readFileSync(survivorFile, "utf8"));
-  if (!survivor.frontmatter.supersedes) {
-    survivor.frontmatter.supersedes = frontmatter.id;
+  const existingSupersedes = survivor.frontmatter.supersedes === null || survivor.frontmatter.supersedes === undefined
+    ? []
+    : Array.isArray(survivor.frontmatter.supersedes)
+      ? survivor.frontmatter.supersedes
+      : [survivor.frontmatter.supersedes];
+  const mergedSupersedes = [...new Set([...existingSupersedes, frontmatter.id])].sort((a, b) => a.localeCompare(b));
+  if (mergedSupersedes.length > existingSupersedes.length) {
+    survivor.frontmatter.supersedes = mergedSupersedes.length === 1 ? mergedSupersedes[0] : mergedSupersedes;
     fs.writeFileSync(
       survivorFile,
       `---\n${kyaml.stringify(survivor.frontmatter)}---\n${survivor.body.startsWith("\n") ? survivor.body : "\n" + survivor.body}`,
     );
     console.log(`kg: ${supersededBy}: supersedes set to ${frontmatter.id}`);
-  } else if (survivor.frontmatter.supersedes !== frontmatter.id) {
-    console.log(
-      `kg: WARNING — ${supersededBy} already supersedes ${survivor.frontmatter.supersedes}; record the additional merge of ${frontmatter.id} in the survivor's body`,
-    );
   }
 }
 

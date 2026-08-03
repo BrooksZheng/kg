@@ -12,7 +12,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { kyaml, protocol, host, harness, compilePlan, inverseMap } from "./_lib.mjs";
+import { kyaml, protocol, host, harness, compilePlan, inverseMap, proposal } from "./_lib.mjs";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const ADD_ENTRY = path.join(SCRIPT_DIR, "add-entry.mjs");
@@ -171,6 +171,582 @@ function renderQueueRecord(id, now, queue, observationId) {
   });
 }
 
+function canonicalList(values) {
+  return [...new Set((values ?? []).filter((value) => value !== null && value !== undefined).map(String))].sort((a, b) => a.localeCompare(b));
+}
+
+function canonicalEvidence(values) {
+  const seen = new Set();
+  return [...(values ?? [])]
+    .filter((value) => value && typeof value.type === "string" && typeof value.ref === "string")
+    .map((value) => ({ type: value.type, ref: value.ref }))
+    .filter((value) => {
+      const key = `${value.type}\u0000${value.ref}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .sort((a, b) => `${a.type}\u0000${a.ref}`.localeCompare(`${b.type}\u0000${b.ref}`));
+}
+
+function canonicalScope(left, right) {
+  return {
+    paths: canonicalList([...(left?.paths ?? []), ...(right?.paths ?? [])]),
+    domains: canonicalList([...(left?.domains ?? []), ...(right?.domains ?? [])]),
+  };
+}
+
+function knowledgeFile(root, id) {
+  const files = host.listFiles(host.kgPaths(root).knowledge, ".md").filter((file) => {
+    const name = path.basename(file);
+    return name === `${id}.md` || name.startsWith(`${id}-`);
+  });
+  if (files.length !== 1) fail(`knowledge id ${id} must resolve to exactly one file`);
+  const file = files[0];
+  const parsed = protocol.splitFrontmatter(fs.readFileSync(file, "utf8"));
+  if (parsed.frontmatter.id !== id) fail(`knowledge frontmatter id does not match ${id}`);
+  const errors = protocol.validateRecord(parsed.frontmatter, protocol.loadKnowledgeSchema());
+  if (errors.length || parsed.body.trim() === "") fail(`knowledge ${id} is invalid: ${errors.join("; ") || "body is empty"}`);
+  return {
+    id,
+    file,
+    path: portableRelative(root, file),
+    text: fs.readFileSync(file, "utf8"),
+    frontmatter: parsed.frontmatter,
+    body: parsed.body,
+  };
+}
+
+function canonicalKnowledge(record) {
+  const out = {};
+  for (const field of protocol.loadKnowledgeSchema().field_order) {
+    if (record[field] !== undefined) out[field] = record[field];
+  }
+  return out;
+}
+
+function renderKnowledgeCanonical(record, body, preserveBytes = false) {
+  const canonical = canonicalKnowledge(record);
+  const errors = protocol.validateRecord(canonical, protocol.loadKnowledgeSchema());
+  if (errors.length) fail(`prepared knowledge entry is invalid: ${errors.join("; ")}`);
+  const renderedBody = preserveBytes ? body : `${body.trim()}\n`;
+  return `---\n${kyaml.stringify(canonical)}---\n${renderedBody.startsWith("\n") ? renderedBody : `\n${renderedBody}`}`;
+}
+
+function operationWrite(root, relative, expectedText, beforeSha256 = null) {
+  const file = path.resolve(root, ...String(relative).split("/"));
+  if (host.isOutside(root, file)) fail(`compile transaction write escapes host root: ${relative}`);
+  return {
+    path: String(relative).split(path.sep).join("/"),
+    before_sha256: beforeSha256,
+    expected_text: expectedText,
+  };
+}
+
+function currentHumanLoggedUpdate(root, id) {
+  const paths = host.kgPaths(root);
+  const actions = [];
+  for (const action of host.readRoundActions(paths)) {
+    if (action.actor === "human" && action.action === "update" && action.entry === id) actions.push(action);
+  }
+  for (const file of host.listFiles(paths.reports, ".json")) {
+    if (!path.basename(file).startsWith("COMPILE-")) continue;
+    try {
+      const report = JSON.parse(fs.readFileSync(file, "utf8"));
+      for (const action of report.actions ?? []) {
+        if (action.actor === "human" && action.target_kn_id === id && action.result_reason === "human_logged_update") {
+          actions.push({ ...action, at: action.action_at ?? report.generated_at });
+        }
+      }
+    } catch {
+      // An unrelated malformed historical report is handled by report validation.
+    }
+  }
+  const compileTimes = [];
+  for (const file of host.listFiles(paths.reports, ".json")) {
+    if (!path.basename(file).startsWith("COMPILE-")) continue;
+    try {
+      const report = JSON.parse(fs.readFileSync(file, "utf8"));
+      if ((report.actions ?? []).some((action) => action.actor === "compile" && action.target_kn_id === id && action.disposition === "update")) {
+        compileTimes.push(new Date(report.generated_at).getTime());
+      }
+    } catch {
+      // Ignore unrelated reports here; the active compile still validates its inputs.
+    }
+  }
+  const lastCompile = compileTimes.length ? Math.max(...compileTimes) : -Infinity;
+  return actions
+    .filter((action) => Number.isFinite(new Date(action.at).getTime()) && new Date(action.at).getTime() > lastCompile)
+    .sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
+}
+
+function proposalBundle(root, { carrierType, targetPath, targetBytes, candidateBytes, sourceKnIds, sourceRefs, extension }) {
+  const targetSha = targetBytes === null ? null : `sha256:${sha256(targetBytes)}`;
+  const candidateSha = `sha256:${sha256(candidateBytes)}`;
+  const base = sha256(Buffer.from(JSON.stringify({
+    carrier_type: carrierType,
+    target_path: targetPath,
+    target_sha256: targetSha,
+    candidate_sha256: candidateSha,
+    source_kn_ids: canonicalList(sourceKnIds),
+    source_refs: canonicalList(sourceRefs),
+  }), "utf8")).slice(0, 16);
+  const bundle = `docs/proposals/compile-${base}`;
+  const candidatePath = `${bundle}/candidate.${extension}`;
+  const manifestPath = `${bundle}/manifest.json`;
+  const manifest = {
+    kind: "kg.carrier_proposal",
+    version: 1,
+    proposal_id: "compile-pending",
+    carrier_type: carrierType,
+    target_path: targetPath,
+    target_sha256: targetSha,
+    candidate_path: candidatePath,
+    candidate_sha256: candidateSha,
+    source_kn_ids: canonicalList(sourceKnIds),
+    source_refs: canonicalList(sourceRefs),
+    generator_version: "kg-compile/4.2.0",
+    status: "proposed",
+  };
+  manifest.proposal_id = `compile-${proposal.proposalManifestDigest(manifest).slice(0, 16)}`;
+  const manifestText = proposal.renderProposalManifest(manifest);
+  return {
+    manifest,
+    proposalId: manifest.proposal_id,
+    candidatePath,
+    writes: [
+      operationWrite(root, candidatePath, candidateBytes.toString("utf8")),
+      operationWrite(root, manifestPath, manifestText),
+    ],
+  };
+}
+
+function renderedMachineContent(sourceIds, content) {
+  const text = String(content);
+  const markers = canonicalList(sourceIds).filter((id) => !text.includes(`<!-- kg:source ${id} -->`));
+  return `${markers.map((id) => `<!-- kg:source ${id} -->`).join("\n")}${markers.length ? "\n" : ""}${text.trim()}`;
+}
+
+function validateMatrixRegion(artifact) {
+  const region = protocol.loadRouting().ownership_update_matrix?.[artifact.ownership]?.[artifact.update_policy];
+  if (region === "none") fail(`compile carrier has no compile-owned region: ${artifact.artifact_id}`);
+  if (region === "reject" || region === undefined) {
+    fail(`compile carrier ownership/update_policy is rejected: ${artifact.artifact_id}`);
+  }
+  return region;
+}
+
+function prepareCarrierMutation(root, request, now) {
+  const artifact = request.artifact;
+  const region = validateMatrixRegion(artifact);
+  const sidecarFile = harness.resolveCompileInput(root, artifact.sidecar_path).full;
+  const targetFile = harness.resolveCompileInput(root, artifact.target_path).full;
+  const sidecar = harness.readHarnessSidecar(root, sidecarFile);
+  harness.validateHarnessReferences(root, sidecar);
+  const targetBytes = fs.readFileSync(targetFile);
+  const targetText = targetBytes.toString("utf8");
+  const sourceIds = canonicalList([...(sidecar.source_kn_ids ?? []), ...request.sourceIds]);
+  const writes = [];
+  let updatedSidecar = { ...sidecar, source_kn_ids: sourceIds };
+  let carrierRef;
+
+  const effectivePolicy = request.forceProposal ? "proposal_only" : artifact.update_policy;
+  if (effectivePolicy === "automatic") {
+    if (artifact.type !== "markdown_document") fail(`automatic carrier updates require Markdown markers: ${artifact.artifact_id}`);
+    const machineContent = renderedMachineContent(sourceIds, request.content);
+    const beforeBlock = harness.inspectCarrier(targetBytes, artifact.artifact_id, artifact.ownership);
+    const afterText = artifact.ownership === "managed"
+      ? harness.replaceManagedBlock(targetBytes, artifact.artifact_id, machineContent)
+      : harness.replaceCoManagedMachineSegment(targetBytes, artifact.artifact_id, machineContent);
+    const afterBlock = harness.inspectCarrier(Buffer.from(afterText, "utf8"), artifact.artifact_id, artifact.ownership);
+    harness.assertTransactionByteFence(beforeBlock, afterBlock);
+    updatedSidecar = {
+      ...updatedSidecar,
+      content_hash: afterBlock.contentHash,
+      machine_segment_hash: afterBlock.machine_segment_hash,
+      human_segment_hash: afterBlock.human_segment_hash,
+      outside_hash: afterBlock.outside_hash,
+      generator_version: "kg-compile/4.2.0",
+      last_verified: now.toISOString().slice(0, 10),
+    };
+    writes.push(operationWrite(root, artifact.target_path, afterText, artifact.target_sha256));
+    carrierRef = inverseMap.carrierRefForSidecar(updatedSidecar, { root });
+  } else {
+    let candidateBytes;
+    if (artifact.type === "markdown_document" && artifact.ownership !== "human" && region !== "whole_target") {
+      const machineContent = renderedMachineContent(sourceIds, request.content);
+      const candidateText = artifact.ownership === "managed"
+        ? harness.replaceManagedBlock(targetBytes, artifact.artifact_id, machineContent)
+        : harness.replaceCoManagedMachineSegment(targetBytes, artifact.artifact_id, machineContent);
+      candidateBytes = Buffer.from(candidateText, "utf8");
+    } else {
+      candidateBytes = Buffer.from(String(request.content), "utf8");
+    }
+    const bundle = proposalBundle(root, {
+      carrierType: artifact.type,
+      targetPath: artifact.target_path,
+      targetBytes,
+      candidateBytes,
+      sourceKnIds: sourceIds,
+      sourceRefs: artifact.source_refs,
+      extension: artifact.type === "markdown_document" ? "md" : "mjs",
+    });
+    updatedSidecar = {
+      ...updatedSidecar,
+      status: "proposed",
+      proposal_id: bundle.proposalId,
+      candidate_path: bundle.candidatePath,
+      generator_version: "kg-compile/4.2.0",
+      last_verified: now.toISOString().slice(0, 10),
+      update_policy: "proposal_only",
+    };
+    writes.push(...bundle.writes);
+    carrierRef = inverseMap.carrierRefForSidecar(updatedSidecar, { root });
+  }
+  writes.push(operationWrite(root, artifact.sidecar_path, harness.renderHarnessSidecar(updatedSidecar), artifact.sha256));
+  return { writes, sourceIds, carrierRef, updatedSidecar };
+}
+
+function transitionRecord(record, toState, { regret = null, supersededBy = null } = {}) {
+  const lifecycle = protocol.loadLifecycle();
+  const from = record.lifecycle;
+  if (!lifecycle.states.includes(toState)) fail(`unknown lifecycle state: ${toState}`);
+  const allowed = (lifecycle.transitions[from] ?? "").split("|").filter(Boolean);
+  if (!allowed.includes(toState)) fail(`illegal transition ${from} -> ${toState} for ${record.id}`);
+  if (lifecycle.regret_required_on_enter.includes(toState) && !(regret && regret.trim())) {
+    fail(`transition to ${toState} requires a regret: ${record.id}`);
+  }
+  if (toState === "archived" && lifecycle.archive_from_live_requires_reason.includes(from) && !supersededBy && !(regret && regret.trim())) {
+    fail(`archiving ${record.id} requires a regret or survivor`);
+  }
+  return {
+    ...record,
+    lifecycle: toState,
+    ...(regret ? { regret: regret.trim() } : {}),
+    ...(supersededBy ? { superseded_by: supersededBy } : {}),
+  };
+}
+
+function renderPromotionQueue(id, now, item, entryId) {
+  return kyaml.stringify({
+    id,
+    at: now.toISOString().replace(/\.\d{3}Z$/, "Z"),
+    kind: "promotion",
+    category: item.knowledge.category,
+    claim: item.knowledge.claim,
+    evidence: item.knowledge.body ? [{ type: "quote", ref: `candidate ${entryId}` }] : [{ type: "quote", ref: item.observation_id }],
+    options: ["accept candidate", "reject candidate"],
+    recommendation: "Keep the candidate inactive until a human ruling is recorded.",
+    entry: entryId,
+    source_observations: [item.observation_id],
+    resolution: "pending",
+    resolution_note: null,
+  });
+}
+
+function buildV2Report(planDigest, contextDigest, now, operations, humanActions) {
+  const results = { add: [], update: [], merge: [], demote: [], retire: [], candidate: [], no_change: [] };
+  const actions = [];
+  for (const operation of operations) {
+    const actionId = `ACT-${sha256(Buffer.from(`${operation.observation_id}:${operation.disposition}:${operation.observation_sha256}`, "utf8")).slice(0, 16)}`;
+    const action = {
+      action_id: actionId,
+      observation_id: operation.observation_id,
+      disposition: operation.disposition,
+      actor: "compile",
+      update_scope: operation.update_scope,
+      body_action: operation.body_action ?? "preserved",
+      source_observation_sha256: operation.observation_sha256,
+      target_kn_id: operation.target_kn_id ?? operation.kn_id ?? null,
+      artifact_id: operation.artifact_id ?? null,
+      result_reason: operation.result_reason,
+      actions: operation.action_names,
+      action_at: now.toISOString(),
+    };
+    results[operation.disposition].push(action);
+    actions.push(action);
+  }
+  for (const human of humanActions) {
+    const target = knowledgeFile(planDigest.root, human.entry);
+    const action = {
+      action_id: `ACT-${sha256(Buffer.from(`human:${human.entry}:${human.at}`, "utf8")).slice(0, 16)}`,
+      observation_id: `human:${human.entry}`,
+      disposition: "update",
+      actor: "human",
+      update_scope: "full",
+      body_action: "updated",
+      source_observation_sha256: sha256(Buffer.from(target.text, "utf8")),
+      target_kn_id: human.entry,
+      artifact_id: null,
+      result_reason: "human_logged_update",
+      actions: ["human_logged_update"],
+      action_at: human.at,
+    };
+    actions.push(action);
+  }
+  return {
+    kind: "kg.compile_report",
+    version: 2,
+    plan_digest: planDigest.value,
+    context_digest: contextDigest,
+    generated_at: now.toISOString(),
+    known_limitations: KNOWN_LIMITATIONS,
+    results,
+    actions,
+    archives: operations.map((operation) => ({ observation_id: operation.observation_id, arguments: operation.archive_args })),
+  };
+}
+
+function buildFreshJournalV2(root, context, plan, planDigest, now) {
+  const paths = host.kgPaths(root);
+  validateCurrentInverseMap(root);
+  const observationInputs = new Map(context.observations.map((input) => [input.id, input]));
+  const artifactInputs = new Map(context.artifacts.map((input) => [input.artifact_id, input]));
+  const sortedItems = compilePlan.sortPlanItems(plan.items);
+  const firstKnId = host.nextKnowledgeId(paths);
+  const queueIds = nextQueueIds(paths, sortedItems.filter((item) => item.disposition === "candidate").length, now);
+  let knOffset = 0;
+  let queueOffset = 0;
+  const observations = new Map();
+  for (const item of sortedItems) {
+    const input = observationInputs.get(item.observation_id);
+    if (!input) fail(`plan observation was not present in compile context: ${item.observation_id}`);
+    const observation = readObservation(root, input);
+    if (!fs.existsSync(observation.pending)) fail(`fresh compile preflight requires a pending observation: ${item.observation_id}`);
+    if (fs.existsSync(observation.processed)) fail(`processed observation target already exists: ${item.observation_id}`);
+    observations.set(item.observation_id, { input, record: observation.record });
+  }
+
+  const itemPlans = sortedItems.map((item) => {
+    const targetId = item.target_kn_id ?? null;
+    const knId = ["add", "candidate"].includes(item.disposition)
+      ? incrementKnId(firstKnId, knOffset++)
+      : targetId;
+    if (["update", "merge", "demote", "retire"].includes(item.disposition)) knowledgeFile(root, targetId);
+    const op = {
+      protocol_version: 2,
+      observation_id: item.observation_id,
+      observation_path: observations.get(item.observation_id).input.path,
+      observation_sha256: observations.get(item.observation_id).input.sha256,
+      disposition: item.disposition,
+      update_scope: item.update_scope,
+      body_action: item.body_action ?? "preserved",
+      target_kn_id: targetId,
+      kn_id: ["add", "update", "candidate"].includes(item.disposition) ? knId : null,
+      artifact_id: item.carrier?.artifact_id ?? null,
+      result_reason: item.reason ?? `${item.disposition} applied by protocol-driven compile transaction`,
+      action_names: [],
+      writes: [],
+      archive_args: [],
+    };
+    return { item, observation: observations.get(item.observation_id).record, knId, op };
+  });
+
+  const carrierRequests = new Map();
+  for (const planItem of itemPlans) {
+    if (!["add", "update", "candidate"].includes(planItem.item.disposition)) continue;
+    const artifact = artifactInputs.get(planItem.item.carrier.artifact_id);
+    if (!artifact) fail(`carrier artifact was not present in compile context: ${planItem.item.carrier.artifact_id}`);
+    const request = carrierRequests.get(artifact.artifact_id) ?? {
+      artifact,
+      sourceIds: new Set(),
+      content: planItem.item.carrier.content,
+      items: [],
+      forceProposal: false,
+    };
+    request.sourceIds.add(planItem.knId);
+    request.content = planItem.item.carrier.content;
+    request.forceProposal ||= planItem.item.disposition === "candidate";
+    request.items.push(planItem);
+    carrierRequests.set(artifact.artifact_id, request);
+  }
+  const carrierPlans = new Map();
+  for (const [artifactId, request] of carrierRequests) {
+    const prepared = prepareCarrierMutation(root, { ...request, sourceIds: [...request.sourceIds] }, now);
+    carrierPlans.set(artifactId, { ...prepared, request });
+  }
+
+  const desired = new Map();
+  const ownerByKn = new Map();
+  const proposalWritesByOp = new Map();
+  for (const planItem of itemPlans) {
+    const { item, observation, knId, op } = planItem;
+    const artifactPlan = item.carrier ? carrierPlans.get(item.carrier.artifact_id) : null;
+    const carrierRef = artifactPlan?.carrierRef ?? null;
+    if (item.disposition === "add" || item.disposition === "candidate") {
+      const route = protocol.loadRouting().categories[item.knowledge.category];
+      if (!route) fail(`knowledge category is not routed: ${item.knowledge.category}`);
+      const record = {
+        id: knId,
+        claim: item.knowledge.claim,
+        category: item.knowledge.category,
+        scope: item.knowledge.scope,
+        evidence: canonicalEvidence([{ type: "observation", ref: item.observation_id }]),
+        authority: item.knowledge.authority,
+        confidence: item.knowledge.confidence,
+        lifecycle: item.disposition === "candidate" || route.autonomy === "human_review" ? "candidate" : "active",
+        supersedes: null,
+        last_verified: now.toISOString().slice(0, 10),
+        regret: null,
+        source_obs_ids: [item.observation_id],
+        carrier_refs: carrierRef ? [carrierRef] : [],
+      };
+      desired.set(knId, { record, body: item.knowledge.body, preserve: false, owner: op });
+      ownerByKn.set(knId, op);
+      op.action_names.push(item.disposition === "candidate" ? "create_candidate" : "create_kn");
+      if (item.disposition === "candidate") {
+        const queueId = queueIds[queueOffset++];
+        op.queue = { id: queueId, path: `.kg/queue/${queueId}.yaml`, expected_text: renderPromotionQueue(queueId, now, item, knId) };
+        op.action_names.push("create_promotion_queue");
+        op.archive_args = ["--observation", item.observation_id, "--compiled-to-kn", knId];
+      } else {
+        op.archive_args = ["--observation", item.observation_id, "--compiled-to-kn", knId];
+      }
+    } else if (item.disposition === "update") {
+      const existing = knowledgeFile(root, knId);
+      if (existing.frontmatter.claim !== item.knowledge.claim) fail(`update target claim does not match ${knId}; use add or merge for a new claim`);
+      const humanActions = currentHumanLoggedUpdate(root, knId);
+      const preserveBody = humanActions.length > 0;
+      const nextRecord = {
+        ...existing.frontmatter,
+        scope: canonicalScope(existing.frontmatter.scope, item.knowledge.scope),
+        evidence: canonicalEvidence([...(existing.frontmatter.evidence ?? []), ...(observation.evidence ?? [])]),
+        last_verified: now.toISOString().slice(0, 10),
+        source_obs_ids: canonicalList([...(existing.frontmatter.source_obs_ids ?? []), item.observation_id]),
+        carrier_refs: canonicalList(existing.frontmatter.carrier_refs ?? []),
+      };
+      if (!preserveBody) {
+        nextRecord.authority = item.knowledge.authority;
+        nextRecord.confidence = item.knowledge.confidence;
+        op.result_reason = "compile_update";
+        op.body_action = item.body_action ?? "updated";
+        op.update_scope = item.update_scope;
+      } else {
+        op.body_action = "preserved";
+        op.update_scope = "evidence_scope_refresh";
+        op.result_reason = "human_logged_update; compile_update preserved the current body";
+        if (item.knowledge.body.trim() !== existing.body.trim()) {
+          const bodyProposal = proposalBundle(root, {
+            carrierType: "markdown_document",
+            targetPath: existing.path,
+            targetBytes: Buffer.from(existing.text, "utf8"),
+            candidateBytes: Buffer.from(renderKnowledgeCanonical(nextRecord, item.knowledge.body, false), "utf8"),
+            sourceKnIds: [knId],
+            sourceRefs: [item.observation_id],
+            extension: "md",
+          });
+          op.writes.push(...bodyProposal.writes);
+          op.action_names.push("propose_body_update");
+        }
+      }
+      desired.set(knId, { record: nextRecord, body: preserveBody ? existing.body : item.knowledge.body, preserve: preserveBody, owner: op });
+      ownerByKn.set(knId, op);
+      op.action_names.push("update_knowledge");
+      op.archive_args = ["--observation", item.observation_id, "--compiled-to-kn", knId];
+    } else if (item.disposition === "merge") {
+      const survivor = knowledgeFile(root, knId);
+      const losers = item.merge?.loser_ids ?? item.merge?.losers ?? item.merge?.entries;
+      if (!Array.isArray(losers) || losers.length === 0) fail(`merge ${knId} requires merge.loser_ids`);
+      const loserRecords = losers.map((id) => knowledgeFile(root, id));
+      let merged = { ...survivor.frontmatter };
+      for (const loser of loserRecords) {
+        merged.evidence = canonicalEvidence([...(merged.evidence ?? []), ...(loser.frontmatter.evidence ?? [])]);
+        merged.scope = canonicalScope(merged.scope, loser.frontmatter.scope);
+        merged.source_obs_ids = canonicalList([...(merged.source_obs_ids ?? []), ...(loser.frontmatter.source_obs_ids ?? [])]);
+        merged.carrier_refs = canonicalList([...(merged.carrier_refs ?? []), ...(loser.frontmatter.carrier_refs ?? [])]);
+      }
+      merged.evidence = canonicalEvidence([...(merged.evidence ?? []), ...(observation.evidence ?? [])]);
+      merged.source_obs_ids = canonicalList([...(merged.source_obs_ids ?? []), item.observation_id]);
+      const prior = merged.supersedes === null || merged.supersedes === undefined ? [] : Array.isArray(merged.supersedes) ? merged.supersedes : [merged.supersedes];
+      merged.supersedes = canonicalList([...prior, ...losers]);
+      desired.set(knId, { record: merged, body: survivor.body, preserve: true, owner: op });
+      ownerByKn.set(knId, op);
+      op.action_names.push("merge_survivor");
+      for (const loser of loserRecords) {
+        const archived = transitionRecord(loser.frontmatter, "archived", { supersededBy: knId });
+        desired.set(loser.id, { record: archived, body: loser.body, preserve: true, owner: op });
+        ownerByKn.set(loser.id, op);
+        op.action_names.push("archive_merge_loser");
+      }
+      op.archive_args = ["--observation", item.observation_id, "--verdict", "no_change"];
+    } else if (["demote", "retire"].includes(item.disposition)) {
+      const existing = knowledgeFile(root, knId);
+      const targetState = item.disposition === "demote" ? "deprecated" : "archived";
+      const updated = transitionRecord(existing.frontmatter, targetState, { regret: item.regret });
+      desired.set(knId, { record: updated, body: existing.body, preserve: true, owner: op });
+      ownerByKn.set(knId, op);
+      op.action_names.push(item.disposition);
+      op.archive_args = ["--observation", item.observation_id, "--verdict", "no_change"];
+    } else {
+      op.action_names.push("no_change");
+      op.archive_args = ["--observation", item.observation_id, "--verdict", "no_change"];
+    }
+  }
+
+  for (const carrierPlan of carrierPlans.values()) {
+    for (const knId of carrierPlan.sourceIds) {
+      const current = desired.get(knId) ?? (() => {
+        const entry = knowledgeFile(root, knId);
+        return { record: { ...entry.frontmatter }, body: entry.body, preserve: true, owner: null };
+      })();
+      current.record.carrier_refs = canonicalList([...(current.record.carrier_refs ?? []), carrierPlan.carrierRef]);
+      desired.set(knId, current);
+    }
+  }
+
+  const operations = itemPlans.map(({ op }) => op);
+  const firstCarrierOp = operations.find((operation) => operation.artifact_id !== null) ?? operations[0];
+  for (const [id, value] of desired) {
+    const existingFile = host.listFiles(paths.knowledge, ".md").find((candidate) => {
+      const name = path.basename(candidate);
+      return name === `${id}.md` || name.startsWith(`${id}-`);
+    });
+    const existing = existingFile ? knowledgeFile(root, id) : null;
+    const target = existing ? existing.path : portableRelative(root, path.join(paths.knowledge, host.knowledgeFilename(id, value.record.claim)));
+    const before = existing?.text ?? null;
+    const write = operationWrite(root, target, renderKnowledgeCanonical(value.record, value.body, value.preserve), before === null ? null : sha256(Buffer.from(before, "utf8")));
+    const owner = value.owner ?? firstCarrierOp;
+    owner.writes.push(write);
+  }
+  for (const [artifactId, carrierPlan] of carrierPlans) {
+    const owner = carrierPlan.request.items[0].op;
+    owner.artifact_id = artifactId;
+    owner.writes.push(...carrierPlan.writes);
+    owner.action_names.push(carrierPlan.updatedSidecar.status === "proposed" ? "write_proposal_bundle" : "update_carrier");
+  }
+  for (const op of operations) {
+    if (op.queue) {
+      op.writes.push(operationWrite(root, op.queue.path, op.queue.expected_text));
+      op.action_names.push("write_queue");
+    }
+    const mergedWrites = new Map();
+    for (const write of op.writes) {
+      const previous = mergedWrites.get(write.path);
+      if (previous && previous.expected_text !== write.expected_text) fail(`compile transaction has conflicting writes for ${write.path}`);
+      if (!previous) mergedWrites.set(write.path, write);
+    }
+    op.writes = [...mergedWrites.values()].sort((a, b) => a.path.localeCompare(b.path));
+    if (op.action_names.length === 0) op.action_names.push("archive_observation");
+  }
+  const humanByEntry = new Map();
+  for (const planItem of itemPlans) {
+    if (planItem.item.disposition === "update") humanByEntry.set(planItem.knId, currentHumanLoggedUpdate(root, planItem.knId));
+  }
+  const humanActions = [...humanByEntry.values()].flat();
+  const report = buildV2Report({ value: planDigest, root }, context.context_digest, now, operations, humanActions);
+  const journal = {
+    kind: "kg.compile_transaction",
+    version: 2,
+    plan_digest: planDigest,
+    context_digest: context.context_digest,
+    generated_at: now.toISOString(),
+    report_path: portableRelative(root, reportPathFor(paths, planDigest)),
+    operations,
+    report,
+  };
+  return { ...journal, journal_digest: sha256(Buffer.from(JSON.stringify(journal), "utf8")) };
+}
+
 function reportPathFor(paths, planDigest) {
   return path.join(paths.reports, `COMPILE-${planDigest.slice(0, 16)}.json`);
 }
@@ -257,7 +833,7 @@ function buildReport(planDigest, contextDigest, now, operations) {
 
 function buildFreshJournal(root, context, plan, planDigest, now) {
   if (plan.version === 2) {
-    fail("compile plan version 2 parsed successfully; update/merge/candidate apply is deferred to R4.2-R4.4");
+    return buildFreshJournalV2(root, context, plan, planDigest, now);
   }
   const paths = host.kgPaths(root);
   validateCurrentInverseMap(root);
@@ -302,6 +878,10 @@ function buildFreshJournal(root, context, plan, planDigest, now) {
       if (usedArtifacts.has(artifact.artifact_id)) fail(`carrier artifact is repeated: ${artifact.artifact_id}`);
       usedArtifacts.add(artifact.artifact_id);
       const policyRegion = protocol.loadRouting().ownership_update_matrix?.[artifact.ownership]?.[artifact.update_policy];
+      if (policyRegion === "none") fail(`compile carrier has no compile-owned region: ${artifact.artifact_id}`);
+      if (policyRegion === "reject" || policyRegion === undefined) {
+        fail(`compile carrier ownership/update_policy is rejected: ${artifact.artifact_id}`);
+      }
       if (policyRegion !== "machine_block") fail(`compile carrier policy is not an automatic managed block: ${artifact.artifact_id}`);
       const sidecarFile = harness.resolveCompileInput(root, artifact.sidecar_path).full;
       const targetFile = harness.resolveCompileInput(root, artifact.target_path).full;
@@ -504,7 +1084,51 @@ function processedExpected(operation) {
   return { pending: inputPath, processed: `.kg/observations/processed/${operation.observation_id}.yaml` };
 }
 
+function operationWriteFile(root, relative) {
+  const file = path.resolve(root, ...String(relative).split("/"));
+  if (host.isOutside(root, file)) fail(`compile transaction path escapes host root: ${relative}`);
+  return file;
+}
+
+function validateV2WriteState(root, write) {
+  const file = operationWriteFile(root, write.path);
+  if (!fs.existsSync(file)) {
+    if (write.before_sha256 !== null) fail(`v2 transaction target disappeared: ${write.path}`);
+    return "baseline-missing";
+  }
+  if (!fs.statSync(file).isFile() || fs.lstatSync(file).isSymbolicLink()) fail(`v2 transaction target is unsafe: ${write.path}`);
+  const text = fs.readFileSync(file, "utf8");
+  if (text === write.expected_text) return "expected";
+  if (write.before_sha256 !== null && sha256(Buffer.from(text, "utf8")) === write.before_sha256) return "baseline";
+  fail(`v2 transaction target differs from both baseline and expected output: ${write.path}`);
+}
+
+function validateV2OperationState(root, operation, { final }) {
+  const inputPath = operationWriteFile(root, operation.observation_path);
+  const processed = operationWriteFile(root, `.kg/observations/processed/${operation.observation_id}.yaml`);
+  if (final) {
+    if (fs.existsSync(inputPath)) fail(`pending observation remains after compile: ${operation.observation_id}`);
+    if (!fs.existsSync(processed)) fail(`processed observation missing after compile: ${operation.observation_id}`);
+    const processedRecord = kyaml.parse(fs.readFileSync(processed, "utf8"));
+    if (operation.kn_id && processedRecord.compiled_to_kn !== operation.kn_id) {
+      fail(`processed observation KN link mismatch: ${operation.observation_id}`);
+    }
+    if (!operation.kn_id && processedRecord.compiled_to_kn !== undefined && processedRecord.compiled_to_kn !== null) {
+      fail(`no-KN v2 action unexpectedly wrote compiled_to_kn: ${operation.observation_id}`);
+    }
+  } else if (fs.existsSync(inputPath)) {
+    if (sha256(fs.readFileSync(inputPath)) !== operation.observation_sha256) fail(`pending observation changed: ${operation.observation_id}`);
+  } else if (!fs.existsSync(processed)) {
+    fail(`v2 observation is neither pending nor processed: ${operation.observation_id}`);
+  }
+  for (const write of operation.writes) validateV2WriteState(root, write);
+}
+
 function validateOperationState(root, operation, { final }) {
+  if (operation.protocol_version === 2) {
+    validateV2OperationState(root, operation, { final });
+    return;
+  }
   const state = processedExpected(operation);
   const pending = path.join(root, ...state.pending.split("/"));
   const processed = path.join(root, ...state.processed.split("/"));
@@ -594,22 +1218,30 @@ function preflightWritable(root, journal) {
   const paths = host.kgPaths(root);
   const directories = new Set([paths.processed, paths.reports]);
   for (const operation of journal.operations) {
+    if (operation.protocol_version === 2) {
+      for (const write of operation.writes) directories.add(path.dirname(operationWriteFile(root, write.path)));
+    }
     if (operation.kn) directories.add(paths.knowledge);
     if (operation.queue) directories.add(paths.queue);
     if (operation.carrier) directories.add(path.dirname(path.join(root, ...operation.carrier.path.split("/"))));
     if (operation.sidecar) directories.add(path.dirname(path.join(root, ...operation.sidecar.path.split("/"))));
   }
   for (const directory of directories) {
-    if (!fs.existsSync(directory) || !fs.statSync(directory).isDirectory()) {
-      fail(`required compile output directory is missing: ${portableRelative(root, directory)}`);
+    let probe = directory;
+    while (!fs.existsSync(probe)) {
+      const parent = path.dirname(probe);
+      if (parent === probe) fail(`required compile output directory has no writable ancestor: ${portableRelative(root, directory)}`);
+      probe = parent;
     }
-    fs.accessSync(directory, fs.constants.R_OK | fs.constants.W_OK);
+    if (!fs.statSync(probe).isDirectory() || fs.lstatSync(probe).isSymbolicLink()) {
+      fail(`required compile output directory is unsafe: ${portableRelative(root, probe)}`);
+    }
+    fs.accessSync(probe, fs.constants.R_OK | fs.constants.W_OK);
   }
   if (process.env.KG_COMPILE_FAIL_PREFLIGHT === "kn_write") fail("injected KN write preflight failure");
   if (process.env.KG_COMPILE_FAIL_PREFLIGHT === "carrier_write") fail("injected carrier write preflight failure");
   const reportFile = path.join(root, ...journal.report_path.split("/"));
   if (fs.existsSync(reportFile)) fail(`compile report already exists without a valid completed transaction: ${journal.report_path}`);
-  if (fs.existsSync(host.roundLogFile(paths))) fail("stale compile round action log exists; resolve it before applying a new plan");
 }
 
 function applyJournal(root, journal, now) {
@@ -617,7 +1249,14 @@ function applyJournal(root, journal, now) {
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "kg-compile-apply-"));
   try {
     for (const operation of journal.operations) {
-      if (operation.result_type === "publish_kn_and_carrier") {
+      if (operation.protocol_version === 2) {
+        for (const write of operation.writes) {
+          const file = operationWriteFile(root, write.path);
+          if (validateV2WriteState(root, write) === "expected") continue;
+          atomicWrite(file, write.expected_text);
+          if (process.env.KG_COMPILE_FAIL_AFTER === "v2_write") fail("injected failure after v2 write");
+        }
+      } else if (operation.result_type === "publish_kn_and_carrier") {
         const knFile = path.join(root, ...operation.kn.path.split("/"));
         if (!fs.existsSync(knFile)) {
           const draft = path.join(scratch, `${operation.kn.id}.md`);

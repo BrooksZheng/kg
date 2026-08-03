@@ -31,6 +31,7 @@ const CONTEXT_FIELDS = [
 const INPUT_FIELDS = ["id", "path", "sha256"];
 const ARTIFACT_FIELDS = [
   "artifact_id",
+  "type",
   "sidecar_path",
   "target_path",
   "ownership",
@@ -433,7 +434,8 @@ export function validateHarnessReferences(root, record) {
   const routing = protocol.loadRouting();
   const matrix = routing.ownership_update_matrix?.[record.ownership];
   if (!matrix) throw new Error(`harness ownership is not in protocol: ${record.ownership}`);
-  if (matrix[record.update_policy] === undefined || matrix[record.update_policy] === "reject") {
+  const region = matrix[record.update_policy];
+  if (region === undefined || region === "reject") {
     throw new Error(`harness ownership/update_policy combination is rejected: ${record.ownership}/${record.update_policy}`);
   }
   for (const ref of record.source_refs) {
@@ -478,7 +480,7 @@ function loadArtifact(root, file) {
   validateHarnessReferences(root, record);
   const target = host.resolveSafeRelative(root, record.path);
   let block = null;
-  if (record.type === "markdown_document") {
+  if (record.type === "markdown_document" && record.ownership !== "human") {
     if (path.extname(target.full).toLowerCase() !== ".md") {
       throw new Error(`Markdown harness target must be Markdown: ${record.path}`);
     }
@@ -498,6 +500,7 @@ function loadArtifact(root, file) {
   }
   return {
     artifact_id: record.artifact_id,
+    type: record.type,
     sidecar_path: portableRelative(root, file),
     target_path: target.relative,
     ownership: record.ownership,

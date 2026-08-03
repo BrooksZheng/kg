@@ -68,12 +68,12 @@ The plan top level is exactly `kind`, `version`, and `items`.
   `claim`, `evidence`, `options`, and `recommendation`.
 - `no_change` has `observation_id`, `result_type`, and `reason`.
 
-M2 publication supports one auto-tier `project_knowledge` observation to one
-active KN and one `ownership: managed`, `update_policy: automatic` Markdown
-block. Queue-only and no-change observations may share the plan. Update,
-merge, conflict mutation, candidate publication, co-managed or human targets,
-and skill or script proposals remain deferred. Do not approximate those paths
-with direct writes.
+The legacy v1 input still supports one auto-tier `project_knowledge`
+observation to one active KN and one managed automatic Markdown block. Version
+2 plans additionally support update, merge, demote, retire, candidate,
+co-managed carriers, and content-addressed proposals. Human-owned targets
+with a zero compile-owned region fail preflight with the artifact id. Human
+review candidates remain inactive until their promotion queue item is ruled.
 
 The apply script calls `archive-observations.mjs` once per completed
 observation and records the exact arguments in the machine report. The report
@@ -183,8 +183,12 @@ conflict) go through `transition-entry.mjs` — it machine-validates against
 `protocol/lifecycle.yaml`: `--regret` is required on demotion, and archiving
 from a live state (candidate/active/conflicted) requires `--superseded-by`
 (merge — the survivor's `supersedes` back-pointer is written for you) OR
-`--regret` (direct retire). If it rejects a transition, the transition is
-illegal; fix the plan, not the validator.
+  `--regret` (direct retire). If it rejects a transition, the transition is
+  illegal; fix the plan, not the validator.
+
+Queue rulings go through `resolve-queue-item.mjs <Q-id> <accepted|rejected>`.
+The writer rejects duplicate keys, unknown fields, and second rulings, then
+rebuilds the record in the queue protocol field order.
 
 Apply pending human rulings at the start of publishing: for each `.kg/queue/`
 item whose `resolution` is no longer `pending`, execute the ruling

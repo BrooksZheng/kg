@@ -68,7 +68,7 @@ function checkMap(obj, specs, prefix, errors, ctx) {
   for (const [key, spec] of Object.entries(specs)) {
     const label = `${prefix}${key}`;
     const value = obj[key];
-    if (value === undefined || (value === null && spec.type !== "string_or_null" && spec.type !== "map")) {
+    if (value === undefined || (value === null && !["string_or_null", "string_or_list_or_null", "map"].includes(spec.type))) {
       if (spec.required) errors.push(`${label}: required field is missing`);
       continue;
     }
@@ -90,6 +90,18 @@ function checkValue(value, spec, fieldKey, label, errors, ctx) {
       }
       if (spec.pattern && !new RegExp(spec.pattern).test(value)) {
         errors.push(`${label}: \`${value}\` does not match ${spec.pattern}`);
+      }
+      return;
+    }
+    case "string_or_list_or_null": {
+      if (value === null) return;
+      const values = Array.isArray(value) ? value : [value];
+      if (values.length === 0 || !values.every((item) => typeof item === "string" && item.trim() !== "")) {
+        errors.push(`${label}: must be a knowledge id string, list, or null`);
+        return;
+      }
+      if (spec.pattern && !values.every((item) => new RegExp(spec.pattern).test(item))) {
+        errors.push(`${label}: contains an invalid value`);
       }
       return;
     }
@@ -314,6 +326,22 @@ if (isMain()) {
       if (kn.fields?.[field]?.type !== "string_list" || kn.fields?.[field]?.required !== false) {
         problems.push(`knowledge: optional v2 trace field \`${field}\` missing`);
       }
+    }
+    const regions = new Set(["machine_block", "machine_segment", "whole_target", "none", "reject"]);
+    for (const ownership of ["managed", "co_managed", "human"]) {
+      const matrix = routing.ownership_update_matrix?.[ownership];
+      for (const policy of ["automatic", "proposal_only", "human_only"]) {
+        if (!regions.has(matrix?.[policy])) problems.push(`routing: invalid ownership matrix cell ${ownership}/${policy}`);
+      }
+    }
+    if (routing.ownership_update_matrix?.human?.proposal_only !== "whole_target") {
+      problems.push("routing: human/proposal_only must name whole_target");
+    }
+    if (routing.ownership_update_matrix?.human?.human_only !== "none") {
+      problems.push("routing: human/human_only must name none");
+    }
+    if (JSON.stringify(routing).includes("whole_target_proposal")) {
+      problems.push("routing: whole_target_proposal is not a region value");
     }
   }
   const routingForShape = routing;

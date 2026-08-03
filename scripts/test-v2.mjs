@@ -49,6 +49,7 @@ const SYNC_VENDORED = path.join(ROOT, "scripts", "sync-vendored.mjs");
 const EVAL_BOOTSTRAP = path.join(ROOT, "scripts", "eval-bootstrap.mjs");
 const COMPILE_CONTEXT = path.join(ROOT, "skills", "kg-compile", "scripts", "compile.mjs");
 const COMPILE_APPLY = path.join(ROOT, "skills", "kg-compile", "scripts", "apply-compile-plan.mjs");
+const RESOLVE_QUEUE = path.join(ROOT, "skills", "kg-compile", "scripts", "resolve-queue-item.mjs");
 const EVAL_COMPILE = path.join(ROOT, "scripts", "eval-compile.mjs");
 const EVAL_KICKOFF = path.join(ROOT, "scripts", "eval-kickoff.mjs");
 const EVAL_SPEC = path.join(ROOT, "scripts", "eval-spec.mjs");
@@ -2933,7 +2934,7 @@ function runPart4(context) {
     ensure(context, Object.keys(routing.disposition_rank).length === routing.actions.length, "protocol rank coverage is incomplete");
   });
 
-  testCase(context, "compile_v2_update_shape_reaches_preflight_without_mutation", () => {
+  testCase(context, "compile_update_preserves_human_authored_body", () => {
     const setup = setupCompileCase(context, "v2-update-preflight", "publish-plan.json", "OBS-20260731-101");
     writeJson(setup.plan, {
       kind: "kg.compile_plan",
@@ -2961,10 +2962,310 @@ function runPart4(context) {
         },
       ],
     });
+    const entry = path.join(setup.project, "knowledge", "KN-0001-existing-compile-baseline.md");
+    mutatePlan(setup, (plan) => {
+      plan.items[0].knowledge.claim = "The existing ledger already covers this fixture observation.";
+      plan.items[0].knowledge.body = "## Compile refresh\n\nThe compile input proposes a refreshed explanation.";
+    });
+    fs.appendFileSync(entry, "\n\nHuman-authored body that compile must preserve.\n");
+    runNode(
+      context,
+      path.join(ROOT, "skills", "kg-compile", "scripts", "log-update.mjs"),
+      ["KN-0001"],
+      { cwd: setup.project, env: { KG_ROOT: setup.project } },
+    );
+    const humanContext = path.join(setup.artifacts, "human-compile-context.json");
+    runNode(
+      context,
+      COMPILE_CONTEXT,
+      ["--root", setup.project, "--output", humanContext, "--now", "2026-07-31T02:00:00Z"],
+      { cwd: setup.project, env: { KG_ROOT: setup.project } },
+    );
+    setup.context = humanContext;
+    applyCompile(context, setup);
+    const updated = readKnowledge(entry);
+    ensure(context, updated.body.includes("Human-authored body that compile must preserve."), "compile update overwrote human-authored body");
+    const reports = compileReports(setup.project);
+    const report = readJson(path.join(setup.project, ".kg", "reports", reports[0]));
+    ensure(context, report.actions.some((action) => action.actor === "human" && action.result_reason === "human_logged_update"), "report omitted human_logged_update provenance");
+    ensure(context, report.actions.some((action) => action.actor === "compile" && action.body_action === "preserved"), "report omitted preserved compile_update provenance");
+  });
+
+  testCase(context, "human_owned_carrier_grants_compile_no_region", () => {
+    const setup = setupCompileCase(context, "human-owned-no-region", "publish-plan.json", "OBS-20260731-101");
+    const sidecar = path.join(setup.project, "harness", "artifacts", "HAR-COMPILE-NOTES.yaml");
+    fs.writeFileSync(
+      sidecar,
+      fs.readFileSync(sidecar, "utf8").replace("ownership: managed", "ownership: human").replace("update_policy: automatic", "update_policy: human_only"),
+    );
+    writeJson(setup.plan, {
+      kind: "kg.compile_plan",
+      version: 2,
+      items: [{
+        observation_id: "OBS-20260731-101",
+        disposition: "update",
+        actor: "compile",
+        update_scope: "full",
+        body_action: "updated",
+        target_kn_id: "KN-0001",
+        knowledge: {
+          claim: "The existing ledger already covers this fixture observation.",
+          category: "project_knowledge",
+          scope: { paths: ["knowledge/**"] },
+          authority: "verified_runtime_behavior",
+          confidence: 1,
+          body: "## Candidate\n\nThis body must not be written.",
+        },
+        carrier: { artifact_id: "HAR-COMPILE-NOTES", content: "This target must not be written." },
+      }],
+    });
+    const humanContext = path.join(setup.artifacts, "human-context.json");
+    runNode(context, COMPILE_CONTEXT, ["--root", setup.project, "--output", humanContext, "--now", FIXED_NOW], {
+      cwd: setup.project,
+      env: { KG_ROOT: setup.project },
+    });
+    setup.context = humanContext;
     const before = treeHash(setup.project);
     const rejected = applyCompile(context, setup, { expectFailure: true });
-    ensure(context, rejected.stderr.includes("version 2 parsed successfully"), "v2 deferred preflight reason was not reported");
-    ensure(context, treeHash(setup.project) === before, "v2 deferred update preflight changed host state");
+    ensure(context, rejected.stderr.includes("HAR-COMPILE-NOTES") && rejected.stderr.includes("no compile-owned region"), "human_only rejection did not name its artifact");
+    ensure(context, treeHash(setup.project) === before, "human_only preflight changed the host");
+  });
+
+  testCase(context, "compile_updates_co_managed_machine_segment_only", () => {
+    const setup = setupCompileCase(context, "co-managed-update", "publish-plan.json", "OBS-20260731-101");
+    const target = path.join(setup.project, "docs", "runbooks", "compile-notes.md");
+    const original = fs.readFileSync(target, "utf8");
+    const coManaged = original
+      .replace("<!-- kg:managed HAR-COMPILE-NOTES begin -->\n<!-- kg:managed HAR-COMPILE-NOTES end -->", [
+        "<!-- kg:co-managed HAR-COMPILE-NOTES human begin -->",
+        "Human segment owned by the document author.",
+        "<!-- kg:co-managed HAR-COMPILE-NOTES human end -->",
+        "<!-- kg:co-managed HAR-COMPILE-NOTES machine begin -->",
+        "<!-- kg:co-managed HAR-COMPILE-NOTES machine end -->",
+      ].join("\n"));
+    fs.writeFileSync(target, coManaged);
+    const block = harness.inspectCoManagedBlock(coManaged, "HAR-COMPILE-NOTES");
+    const sidecar = path.join(setup.project, "harness", "artifacts", "HAR-COMPILE-NOTES.yaml");
+    const sidecarRecord = readKyaml(sidecar);
+    sidecarRecord.ownership = "co_managed";
+    sidecarRecord.content_hash = block.contentHash;
+    sidecarRecord.machine_segment_hash = block.machine_segment_hash;
+    sidecarRecord.human_segment_hash = block.human_segment_hash;
+    sidecarRecord.outside_hash = block.outside_hash;
+    fs.writeFileSync(sidecar, kyaml.stringify(sidecarRecord));
+    writeJson(setup.plan, {
+      kind: "kg.compile_plan",
+      version: 2,
+      items: [{
+        observation_id: "OBS-20260731-101",
+        disposition: "update",
+        actor: "compile",
+        update_scope: "full",
+        body_action: "updated",
+        target_kn_id: "KN-0001",
+        knowledge: {
+          claim: "The existing ledger already covers this fixture observation.",
+          category: "project_knowledge",
+          scope: { paths: ["knowledge/**"] },
+          authority: "verified_runtime_behavior",
+          confidence: 1,
+          body: "## Co-managed refresh\n\nThe machine segment is refreshed.",
+        },
+        carrier: { artifact_id: "HAR-COMPILE-NOTES", content: "Machine segment v2." },
+      }],
+    });
+    const updatedContext = path.join(setup.artifacts, "co-managed-context.json");
+    runNode(context, COMPILE_CONTEXT, ["--root", setup.project, "--output", updatedContext, "--now", FIXED_NOW], {
+      cwd: setup.project,
+      env: { KG_ROOT: setup.project },
+    });
+    setup.context = updatedContext;
+    applyCompile(context, setup);
+    const after = harness.inspectCoManagedBlock(fs.readFileSync(target, "utf8"), "HAR-COMPILE-NOTES");
+    ensure(context, after.humanBytes.equals(block.humanBytes), "co-managed update changed human segment bytes");
+    ensure(context, after.prefixBytes.equals(block.prefixBytes) && after.suffixBytes.equals(block.suffixBytes), "co-managed update changed outside bytes");
+    ensure(context, after.rawContent.includes("Machine segment v2."), "co-managed machine segment did not update");
+  });
+
+  testCase(context, "compile_candidate_writes_promotion_queue_without_activation", () => {
+    const setup = setupCompileCase(context, "candidate-positive", "publish-plan.json", "OBS-20260731-101");
+    writeJson(setup.plan, {
+      kind: "kg.compile_plan",
+      version: 2,
+      items: [{
+        observation_id: "OBS-20260731-101",
+        disposition: "candidate",
+        actor: "compile",
+        update_scope: "proposal_only",
+        body_action: "proposal",
+        knowledge: {
+          claim: "Compile candidates require a human promotion ruling.",
+          category: "project_contract",
+          scope: { paths: ["docs/runbooks/**"] },
+          authority: "formal_decision",
+          confidence: 1,
+          body: "## Candidate\n\nThis contract waits for a human ruling.",
+        },
+        carrier: { artifact_id: "HAR-COMPILE-NOTES", content: "Candidate carrier content." },
+        queue: {
+          claim: "Promote the compile candidate?",
+          evidence: [{ type: "quote", ref: "R4.2 candidate fixture" }],
+          options: ["accept", "reject"],
+          recommendation: "Keep the candidate pending until reviewed.",
+        },
+      }],
+    });
+    const target = path.join(setup.project, "docs", "runbooks", "compile-notes.md");
+    const targetBefore = fileHash(target);
+    applyCompile(context, setup);
+    const candidate = path.join(setup.project, "knowledge", knowledgeFiles(setup.project).find((name) => name.startsWith("KN-0002-")));
+    ensure(context, fs.existsSync(candidate), "candidate KN was not written");
+    ensure(context, readKnowledge(candidate).frontmatter.lifecycle === "candidate", "candidate became active");
+    ensure(context, fileHash(target) === targetBefore, "candidate changed its target carrier");
+    const queueFiles = listYaml(path.join(setup.project, ".kg", "queue"));
+    ensure(context, queueFiles.length === 1, "candidate did not create one promotion queue item");
+    const queue = readKyaml(path.join(setup.project, ".kg", "queue", queueFiles[0]));
+    ensure(context, queue.kind === "promotion" && queue.entry === "KN-0002" && queue.resolution === "pending", "promotion queue binding is invalid");
+    const proposalFiles = fs.readdirSync(path.join(setup.project, "docs", "proposals"));
+    ensure(context, proposalFiles.some((name) => name.startsWith("compile-")), "candidate proposal bundle is missing");
+    ensure(context, readKyaml(path.join(setup.project, "harness", "artifacts", "HAR-COMPILE-NOTES.yaml")).status === "proposed", "candidate sidecar was not marked proposed");
+  });
+
+  testCase(context, "compile_merges_existing_kns_with_lifecycle_backlinks", () => {
+    const setup = setupCompileCase(context, "merge-positive", "publish-plan.json", "OBS-20260731-101");
+    const loser = {
+      id: "KN-0002",
+      claim: "The duplicate fixture claim is obsolete.",
+      category: "project_knowledge",
+      scope: { paths: ["knowledge/**"] },
+      evidence: [{ type: "test", ref: "merge fixture" }],
+      authority: "verified_runtime_behavior",
+      confidence: 1,
+      lifecycle: "active",
+      supersedes: null,
+      last_verified: "2026-07-31",
+      regret: null,
+      source_obs_ids: [],
+      carrier_refs: [],
+    };
+    fs.writeFileSync(path.join(setup.project, "knowledge", "KN-0002-duplicate-fixture-claim.md"), `---\n${kyaml.stringify(loser)}---\n\n## Obsolete\n\nThis entry is absorbed by the survivor.\n`);
+    writeJson(setup.plan, {
+      kind: "kg.compile_plan",
+      version: 2,
+      items: [{
+        observation_id: "OBS-20260731-101",
+        disposition: "merge",
+        actor: "compile",
+        update_scope: "full",
+        target_kn_id: "KN-0001",
+        merge: { loser_ids: ["KN-0002"] },
+        reason: "The duplicate claim is absorbed by the existing survivor.",
+      }],
+    });
+    const updatedContext = path.join(setup.artifacts, "merge-context.json");
+    runNode(context, COMPILE_CONTEXT, ["--root", setup.project, "--output", updatedContext, "--now", FIXED_NOW], {
+      cwd: setup.project,
+      env: { KG_ROOT: setup.project },
+    });
+    setup.context = updatedContext;
+    applyCompile(context, setup);
+    const survivor = readKnowledge(path.join(setup.project, "knowledge", "KN-0001-existing-compile-baseline.md")).frontmatter;
+    const archived = readKnowledge(path.join(setup.project, "knowledge", "KN-0002-duplicate-fixture-claim.md")).frontmatter;
+    ensure(context, archived.lifecycle === "archived" && archived.superseded_by === "KN-0001", "merge loser lifecycle backlink is missing");
+    ensure(context, (Array.isArray(survivor.supersedes) ? survivor.supersedes : [survivor.supersedes]).includes("KN-0002"), "merge survivor backlink is missing");
+    const report = readJson(path.join(setup.project, ".kg", "reports", compileReports(setup.project)[0]));
+    ensure(context, report.actions.some((action) => action.disposition === "merge"), "merge action was not reported");
+  });
+
+  testCase(context, "compile_same_carrier_is_aggregated_once_per_plan", () => {
+    const setup = setupCompileCase(context, "aggregated-carrier", "publish-plan.json", "OBS-20260731-101");
+    const firstObservation = readKyaml(path.join(setup.project, ".kg", "observations", "OBS-20260731-101.yaml"));
+    const secondObservation = { ...firstObservation, id: "OBS-20260731-104", claim: "A second carrier claim is published in the same plan." };
+    fs.writeFileSync(path.join(setup.project, ".kg", "observations", "OBS-20260731-104.yaml"), kyaml.stringify(secondObservation));
+    writeJson(setup.plan, {
+      kind: "kg.compile_plan",
+      version: 2,
+      items: [
+        {
+          observation_id: "OBS-20260731-101",
+          disposition: "add",
+          actor: "compile",
+          update_scope: "full",
+          body_action: "updated",
+          knowledge: {
+            claim: "The first aggregated carrier claim is published.",
+            category: "project_knowledge",
+            scope: { paths: ["docs/runbooks/**"] },
+            authority: "verified_runtime_behavior",
+            confidence: 1,
+            body: "## First\n\nThe first claim is published.",
+          },
+          carrier: { artifact_id: "HAR-COMPILE-NOTES", content: "First machine claim." },
+        },
+        {
+          observation_id: "OBS-20260731-104",
+          disposition: "add",
+          actor: "compile",
+          update_scope: "full",
+          body_action: "updated",
+          knowledge: {
+            claim: "The second aggregated carrier claim is published.",
+            category: "project_knowledge",
+            scope: { paths: ["docs/runbooks/**"] },
+            authority: "verified_runtime_behavior",
+            confidence: 1,
+            body: "## Second\n\nThe second claim is published.",
+          },
+          carrier: { artifact_id: "HAR-COMPILE-NOTES", content: "Second machine claim." },
+        },
+      ],
+    });
+    const updatedContext = path.join(setup.artifacts, "aggregate-context.json");
+    runNode(context, COMPILE_CONTEXT, ["--root", setup.project, "--output", updatedContext, "--now", FIXED_NOW], {
+      cwd: setup.project,
+      env: { KG_ROOT: setup.project },
+    });
+    setup.context = updatedContext;
+    applyCompile(context, setup);
+    const sidecar = readKyaml(path.join(setup.project, "harness", "artifacts", "HAR-COMPILE-NOTES.yaml"));
+    ensure(context, JSON.stringify(sidecar.source_kn_ids) === JSON.stringify(["KN-0002", "KN-0003"]), "aggregated sidecar source ids are not canonical");
+    const targetText = fs.readFileSync(path.join(setup.project, "docs", "runbooks", "compile-notes.md"), "utf8");
+    ensure(context, targetText.includes("<!-- kg:source KN-0002 -->") && targetText.includes("<!-- kg:source KN-0003 -->"), "aggregated carrier lost one source marker");
+    const entries = knowledgeFiles(setup.project).filter((name) => name.startsWith("KN-0002-") || name.startsWith("KN-0003-"));
+    ensure(context, entries.length === 2, "aggregated carrier did not create two KN entries");
+    const report = readJson(path.join(setup.project, ".kg", "reports", compileReports(setup.project)[0]));
+    ensure(context, report.actions.filter((action) => action.artifact_id === "HAR-COMPILE-NOTES").length === 2, "aggregated report lost one logical action");
+  });
+
+  testCase(context, "queue_resolution_writer_rejects_duplicate_and_double_ruling", () => {
+    const setup = setupCompileCase(context, "queue-resolution", "queue-plan.json", "OBS-20260731-102");
+    applyCompile(context, setup);
+    const queuePath = path.join(setup.project, ".kg", "queue", listYaml(path.join(setup.project, ".kg", "queue"))[0]);
+    runNode(context, RESOLVE_QUEUE, [queuePath, "accepted", "--note", "accepted by the fixture ruling"], {
+      cwd: setup.project,
+      env: { KG_ROOT: setup.project },
+    });
+    const resolved = readKyaml(queuePath);
+    ensure(context, resolved.resolution === "accepted" && resolved.resolution_note === "accepted by the fixture ruling", "queue ruling was not canonicalized");
+    const second = runNode(context, RESOLVE_QUEUE, [queuePath, "rejected"], {
+      cwd: setup.project,
+      env: { KG_ROOT: setup.project },
+      expectFailure: true,
+    });
+    ensure(context, second.stderr.includes("double ruling"), "double ruling was not rejected");
+
+    const duplicate = setupCompileCase(context, "queue-duplicate", "queue-plan.json", "OBS-20260731-102");
+    applyCompile(context, duplicate);
+    const duplicatePath = path.join(duplicate.project, ".kg", "queue", listYaml(path.join(duplicate.project, ".kg", "queue"))[0]);
+    fs.appendFileSync(duplicatePath, "resolution_note: null\n");
+    const invalidHash = fileHash(duplicatePath);
+    const rejected = runNode(context, RESOLVE_QUEUE, [duplicatePath, "accepted"], {
+      cwd: duplicate.project,
+      env: { KG_ROOT: duplicate.project },
+      expectFailure: true,
+    });
+    ensure(context, rejected.stderr.includes("duplicate key"), "duplicate resolution_note was not rejected");
+    ensure(context, fileHash(duplicatePath) === invalidHash, "duplicate-key rejection changed the invalid queue input");
   });
 
   testCase(context, "proposal_manifest_parser_recomputes_content_address_and_target_hash", () => {

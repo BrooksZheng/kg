@@ -21,7 +21,14 @@ for (const id of ids) {
   if (!files.some((f) => path.basename(f).startsWith(`${id}-`) || path.basename(f) === `${id}.md`)) {
     host.fail(`no knowledge entry found for \`${id}\` in ${paths.knowledge}`);
   }
-  host.appendRoundAction(paths, { action: "update", entry: id });
+  host.appendRoundAction(paths, {
+    action: "update",
+    entry: id,
+    actor: "human",
+    provenance: "human_logged_update",
+    update_scope: "full",
+    body_action: "updated",
+  });
   console.log(`kg: logged update of ${id}`);
 }
 console.log("kg: run validate-knowledge.mjs to confirm the edited entries still conform.");

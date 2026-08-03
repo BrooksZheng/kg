@@ -39,6 +39,7 @@ action_field_order:
   - artifact_id
   - result_reason
   - actions
+  - action_at
 
 action_fields:
   action_id: { type: string, required: true }
@@ -52,3 +53,4 @@ action_fields:
   artifact_id: { type: string_or_null, required: true, pattern: "^HAR-[A-Z0-9][A-Z0-9._-]*$" }
   result_reason: { type: string, required: true }
   actions: { type: string_list, required: true }
+  action_at: { type: timestamp, required: true }

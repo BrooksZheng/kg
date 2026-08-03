@@ -7,6 +7,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import * as host from "./lib/host.mjs";
+import { auditR42 } from "./lib/eval-r42.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const COMPILE_SOURCE = path.join(ROOT, "skills", "kg-compile");
@@ -245,7 +246,7 @@ function main() {
       `先运行 ${compileScript}，把 compile context 写到 ${contextPath}。` +
       "逐一读取 context 声明的 pending observations、全部 knowledge entries、accepted documents、harness sidecars 和目标文档。" +
       `用非 shell 文件写入工具把严格 JSON 的 kg.compile_plan 提交到 ${planPath}。` +
-      "plan 必须为每条 observation 显式选择 publish_kn_and_carrier、queue_only 或 no_change，且不得提交 ID、时间、hash、状态、输出路径或脚本职责字段。" +
+      "R4.2 update、merge、ownership、proposal 任务必须提交 version 2 plan，并按 protocol 选择 add、update、merge、demote、retire、candidate 或 no_change；其他任务使用 version 1 的 publish_kn_and_carrier、queue_only 或 no_change。plan 不得提交 ID、时间、hash、状态、输出路径或脚本职责字段。" +
       `最后真正运行 ${applyScript}，消费 context 和 plan。` +
       "在 products 中登记 kg.compile_context、kg.compile_plan 和 kg.compile_report，并返回 Runner Contract 1.1 的完整证据。",
     project_root: projectRoot,
@@ -317,12 +318,18 @@ function main() {
 
   if (contextFile && planFile && reportFile) {
     try {
+      const plan = JSON.parse(fs.readFileSync(planFile, "utf8"));
       const report = JSON.parse(fs.readFileSync(reportFile, "utf8"));
-      for (const type of ["publish_kn_and_carrier", "queue_only", "no_change"]) {
-        if (report.results?.[type]?.length !== 1) throw new Error(`compile report result group ${type} must contain one item`);
-      }
-      if (!Array.isArray(report.known_limitations) || report.known_limitations.length !== 1) {
-        throw new Error("compile report known_limitations is missing");
+      if (plan.version === 2) {
+        const audit = auditR42({ root: projectRoot, context, report, plan, prompt: request.prompt, routingFile: path.join(ROOT, "protocol", "routing.yaml") });
+        result.failures.deterministic_validation.push(...audit.failures);
+      } else {
+        for (const type of ["publish_kn_and_carrier", "queue_only", "no_change"]) {
+          if (report.results?.[type]?.length !== 1) throw new Error(`compile report result group ${type} must contain one item`);
+        }
+        if (!Array.isArray(report.known_limitations) || report.known_limitations.length !== 1) {
+          throw new Error("compile report known_limitations is missing");
+        }
       }
       if (fs.readdirSync(path.join(projectRoot, ".kg", "observations")).some((name) => name.endsWith(".yaml"))) {
         throw new Error("pending observations remain after G-D compile");
@@ -330,7 +337,7 @@ function main() {
       const processed = fs
         .readdirSync(path.join(projectRoot, ".kg", "observations", "processed"))
         .filter((name) => name.endsWith(".yaml"));
-      if (processed.length !== 3) throw new Error("G-D processed observation count mismatch");
+      if (processed.length !== context.observations.length) throw new Error("G-D processed observation count mismatch");
       const check = runNode(
         applyScript,
         ["--check", "--root", projectRoot, "--context", contextFile, "--plan", planFile],

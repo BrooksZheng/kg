@@ -1,0 +1,6 @@
+{
+  "kind": "kg.eval_compile_fixture",
+  "version": 1,
+  "project_source": "scripts/fixtures/m4/compile-update-ownership/host",
+  "task": "Run an R4.2 compile session. Read the complete compile context and its declared inputs, submit a strict version 2 plan through a non-shell file tool, and apply it. Update the existing claim without changing its identity, preserve the logged human-authored body, refresh a co-managed machine segment while preserving human and outside bytes, and route the human-owned proposal-only carrier through a candidate and promotion queue. Leave candidate knowledge inactive and leave every proposal target unchanged. Do not invent IDs, timestamps, hashes, paths, or lifecycle fields. Return the required compile products and evidence envelope."
+}

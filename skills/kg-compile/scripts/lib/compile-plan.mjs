@@ -1,5 +1,5 @@
 // Protocol-driven compile-plan parser. It validates both the M2 legacy input
-// and the R4 action/disposition shape without applying deferred transactions.
+// and the R4 action/disposition shape used by compile transactions.
 
 import * as protocol from "./protocol.mjs";
 

@@ -76,7 +76,7 @@ export function parseCarrierRef(ref, { root } = {}) {
 
 export function carrierRefForSidecar(record, { root } = {}) {
   const routing = protocol.loadRouting();
-  const carrierPath = record.ownership === "human" || record.type !== "markdown_document"
+  const carrierPath = record.status === "proposed" || record.update_policy === "proposal_only" || record.ownership === "human" || record.type !== "markdown_document"
     ? record.candidate_path ?? record.path
     : record.path;
   const canonicalPath = safeRelative(carrierPath, "carrier path", root);
@@ -145,6 +145,7 @@ export function validateInverseMap({ knowledgeEntries = [], carriers = [], root 
     carrierById.set(carrier.artifact_id, carrier);
     const sourceIds = carrier.source_kn_ids ?? [];
     if (new Set(sourceIds).size !== sourceIds.length) findings.push(issue({ side: "carrier", artifact_id: carrier.artifact_id, issue: "duplicate_source_kn_id" }));
+    if (sourceIds.length === 0 && carrier.ownership === "human" && carrier.proposal_id === null) continue;
     let ref;
     try {
       ref = carrierRefForSidecar(carrier, { root });

@@ -74,8 +74,8 @@ ownership_update_matrix:
     human_only: reject
   human:
     automatic: reject
-    proposal_only: whole_target_proposal
-    human_only: whole_target
+    proposal_only: whole_target
+    human_only: none
 
 carrier_ref_suffixes:
   managed: "kg:managed"

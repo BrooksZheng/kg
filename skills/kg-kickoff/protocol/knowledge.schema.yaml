@@ -30,7 +30,7 @@ fields:
   authority: { type: enum, required: true, values: "user_explicit_constraint|verified_runtime_behavior|machine_constraint|current_code_and_schema|formal_decision|project_knowledge|past_task_conclusion|agent_inference|external_general_knowledge" }
   confidence: { type: float, required: true, min: 0, max: 1 }
   lifecycle: { type: enum, required: true, values: "candidate|active|deprecated|archived|rejected|conflicted" }
-  supersedes: { type: string_or_null, required: true, pattern: "^KN-[0-9]{4}$" }
+  supersedes: { type: string_or_list_or_null, required: true, pattern: "^KN-[0-9]{4}$" }
   superseded_by: { type: string_or_null, required: false, pattern: "^KN-[0-9]{4}$" }
   last_verified: { type: date, required: true }
   # Must be filled when the entry is demoted/retired as wrong or harmful:

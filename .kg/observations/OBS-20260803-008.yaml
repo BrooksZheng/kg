@@ -1,0 +1,13 @@
+id: OBS-20260803-008
+at: 2026-08-03T18:00:00Z
+source: task_outcome
+claim: "R4.2 carrier routing must keep the ownership region in the matrix and derive write behavior from update_policy, with human_only represented as a valid zero-region configuration."
+context:
+  task: "R4.2 D66 repair and compile update ownership proposal work"
+  paths:
+    - protocol/routing.yaml
+    - skills/kg-compile/scripts/apply-compile-plan.mjs
+evidence:
+  - { type: test, ref: "node scripts/test-v2.mjs --part 4 human_owned_carrier_grants_compile_no_region" }
+  - { type: diff, ref: "R4.2 D66 matrix and dispatcher changes" }
+urgency: batch
