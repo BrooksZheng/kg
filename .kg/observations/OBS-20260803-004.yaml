@@ -1,0 +1,12 @@
+id: OBS-20260803-004
+at: 2026-08-03T05:53:29Z
+source: task_outcome
+claim: "A real-agent gate that fails before the first tool call is an environment verdict, not a product verdict; the correct handling is to attribute it to the runner adapter, leave the oracle untouched, and let a different environment rerun the same fresh session."
+context:
+  task: "kg-v2-refactor M3 R3.3 and R3.4 real gates"
+  paths:
+    - scripts/eval-bootstrap.mjs
+    - .mission/kg-v2-refactor/tools/kg-eval-runner.py
+evidence:
+  - { type: log, ref: "R3.3 D65 and R3.4: three attempt-01 sessions died at provider ENOTFOUND with zero tool events; the generator reported 5/6 rather than declaring closure, and both gates passed first try on a networked host (G-B3 246s, G-B4 210s) with no oracle or product change" }
+urgency: batch

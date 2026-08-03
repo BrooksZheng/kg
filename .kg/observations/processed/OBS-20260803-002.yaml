@@ -9,3 +9,4 @@ evidence:
   - { type: diff, ref: "skills/kg-docs/scripts/bootstrap.mjs proposal target hash checks and final preflight" }
   - { type: test, ref: "Part 2 proposal_rejects_target_drift and proposal_rerun_is_idempotent_and_target_is_unchanged" }
 urgency: batch
+compiled_to_kn: KN-0023

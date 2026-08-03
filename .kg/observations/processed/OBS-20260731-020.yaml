@@ -10,3 +10,4 @@ context:
 evidence:
   - { type: test, ref: "test-v2 Part 1 rollback_restores_verified_v1_before_images: rollback-positive exposed and then closed the unowned harness parent" }
 urgency: batch
+compiled_to_kn: KN-0031

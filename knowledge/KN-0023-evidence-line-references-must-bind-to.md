@@ -8,14 +8,16 @@ scope:
     - skills/kg-docs/scripts/bootstrap.mjs
 evidence:
   - { type: observation, ref: OBS-20260731-001 }
+  - { type: observation, ref: OBS-20260803-002 }
   - { type: test, ref: "node scripts/test-v2.mjs --part 2 case reject_source_drift_after_inventory" }
+  - { type: test, ref: "node scripts/test-v2.mjs --part 2 case proposal_rejects_target_drift" }
 authority: machine_constraint
 confidence: 0.95
 lifecycle: active
 supersedes: null
-last_verified: 2026-07-31
+last_verified: 2026-08-03
 regret: null
-source_obs_ids: [OBS-20260731-001]
+source_obs_ids: [OBS-20260731-001, OBS-20260803-002]
 carrier_refs: []
 ---
 
@@ -31,3 +33,10 @@ evidence anchor (bootstrap renderer, plan validator) recomputes the hash
 immediately before writing output and refuses on mismatch. Apply the same
 snapshot-binding rule to any future pipeline that carries line-anchored
 evidence across steps.
+
+The same binding governs a **mutable target**, not just a source: a
+content-addressed proposal derives its identity partly from the target's
+hash, so the target must be revalidated twice — once while preparing the
+candidate, and again immediately before mutation. One check alone leaves a
+time-of-check-to-time-of-use window in which an old plan would happily
+attach its candidate to a target that has since changed.

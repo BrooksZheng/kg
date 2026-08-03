@@ -11,3 +11,4 @@ context:
 evidence:
   - { type: test, ref: "live_and_check_modes_share_canonical_path_semantics and D56 saved-oracle regeneration" }
 urgency: batch
+compiled_to_kn: KN-0030

@@ -11,3 +11,4 @@ context:
 evidence:
   - { type: test, ref: "test-v2 Part 1 kill_matrix_converges_at_every_checkpoint verifies eleven SIGKILL checkpoints plus unset versus released seam tree equality" }
 urgency: batch
+compiled_to_kn: KN-0032

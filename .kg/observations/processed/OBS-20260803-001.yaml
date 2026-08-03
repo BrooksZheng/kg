@@ -11,3 +11,4 @@ context:
 evidence:
   - { type: test, ref: "Part 2 kn0016_host_code_never_executes forged .env inventory record" }
 urgency: batch
+compiled_to_kn: KN-0033

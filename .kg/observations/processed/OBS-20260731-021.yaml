@@ -10,3 +10,4 @@ context:
 evidence:
   - { type: test, ref: "test-v2 Part 1 migration_v1_preserves_all_assets mixed-state resume changed the result file until terminal state was separated from CLI diagnostics" }
 urgency: batch
+compiled_to_kn: KN-0024

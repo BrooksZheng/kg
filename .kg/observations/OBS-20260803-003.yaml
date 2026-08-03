@@ -1,0 +1,10 @@
+id: OBS-20260803-003
+at: 2026-08-03T05:53:29Z
+source: task_outcome
+claim: "Queue rulings have no writer script, so recording a resolution means hand-editing the ledger YAML — which produced a duplicate resolution_note key on the first attempt because the template already carries the null placeholder."
+context:
+  task: "post-M3 batch compile"
+  paths: [.kg/queue/, .agents/skills/kg-compile/scripts/]
+evidence:
+  - { type: log, ref: "2026-08-03 compile round: appending resolution/resolution_note to Q-20260803-001 emitted a second resolution_note key alongside the template's resolution_note: null, requiring a manual repair pass" }
+urgency: batch
