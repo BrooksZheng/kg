@@ -24,3 +24,6 @@ export const host = await import(new URL("host.mjs", libUrl).href);
 export const documentAnchor = await import(new URL("document-anchor.mjs", libUrl).href);
 export const repository = await import(new URL("repository.mjs", libUrl).href);
 export const harness = await import(new URL("harness.mjs", libUrl).href);
+export const compilePlan = await import(new URL("compile-plan.mjs", libUrl).href);
+export const inverseMap = await import(new URL("inverse-map.mjs", libUrl).href);
+export const proposal = await import(new URL("proposal.mjs", libUrl).href);

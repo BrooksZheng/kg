@@ -8,6 +8,15 @@ import * as host from "./host.mjs";
 import * as kyaml from "./kyaml.mjs";
 import * as protocol from "./protocol.mjs";
 
+export {
+  canonicalProposalManifest,
+  parseProposalManifest,
+  proposalManifestAsKyaml,
+  proposalManifestDigest,
+  renderProposalManifest,
+} from "./proposal.mjs";
+export { assertInverseMap, carrierRefForSidecar, parseCarrierRef, validateInverseMap } from "./inverse-map.mjs";
+
 const CONTEXT_FIELDS = [
   "kind",
   "version",
@@ -27,13 +36,27 @@ const ARTIFACT_FIELDS = [
   "ownership",
   "update_policy",
   "content_hash",
+  "machine_segment_hash",
+  "human_segment_hash",
+  "outside_hash",
+  "source_kn_ids",
+  "source_refs",
+  "proposal_id",
+  "candidate_path",
+  "human_hash_state",
   "sha256",
   "target_sha256",
 ];
 const MANAGED_MARKER_RE = /<!-- kg:managed (HAR-[A-Z0-9][A-Z0-9._-]*) (begin|end) -->/g;
+const CO_MANAGED_MARKER_RE = /<!-- kg:co-managed (HAR-[A-Z0-9][A-Z0-9._-]*) (human|machine) (begin|end) -->/g;
+export const OUTSIDE_HASH_SEPARATOR = Buffer.from("\n<kg:managed-content>\n", "utf8");
 
 export function sha256(value) {
   return crypto.createHash("sha256").update(value).digest("hex");
+}
+
+export function rawHash(value) {
+  return `sha256:${sha256(Buffer.isBuffer(value) ? value : Buffer.from(String(value), "utf8"))}`;
 }
 
 export function contentHash(content) {
@@ -61,14 +84,99 @@ export function managedMarkers(artifactId) {
   };
 }
 
+function documentBuffer(documentText) {
+  return Buffer.isBuffer(documentText) ? Buffer.from(documentText) : Buffer.from(String(documentText), "utf8");
+}
+
+function markerLine(bytes, index, text) {
+  const lineStart = index === 0 ? 0 : bytes.lastIndexOf(0x0a, index - 1) + 1;
+  if (!bytes.subarray(lineStart, index).equals(Buffer.alloc(0))) {
+    throw new Error(`marker must occupy its own line: ${text}`);
+  }
+  const after = index + Buffer.byteLength(text, "utf8");
+  if (bytes[after] === 0x0d && bytes[after + 1] === 0x0a) {
+    return { lineStart, lineEnd: after + 2, newline: Buffer.from("\r\n") };
+  }
+  if (bytes[after] === 0x0a) {
+    return { lineStart, lineEnd: after + 1, newline: Buffer.from("\n") };
+  }
+  if (after === bytes.length) return { lineStart, lineEnd: after, newline: Buffer.alloc(0) };
+  throw new Error(`marker must occupy its own line: ${text}`);
+}
+
+function findMarkers(bytes, expression, sideFromMatch = (match) => match[2]) {
+  const text = bytes.toString("latin1");
+  return [...text.matchAll(expression)].map((match) => {
+    const marker = {
+      artifactId: match[1],
+      side: sideFromMatch(match),
+      index: match.index,
+      text: match[0],
+    };
+    return { ...marker, ...markerLine(bytes, marker.index, marker.text) };
+  });
+}
+
+function segmentHashes(bytes, prefixBytes, machineBytes, suffixBytes, humanBytes = null) {
+  const outsideBytes = Buffer.concat([prefixBytes, OUTSIDE_HASH_SEPARATOR, suffixBytes]);
+  return {
+    prefix_sha256: rawHash(prefixBytes),
+    suffix_sha256: rawHash(suffixBytes),
+    outsideHash: sha256(outsideBytes),
+    outside_hash: rawHash(outsideBytes),
+    machineSegmentHash: rawHash(machineBytes),
+    machine_segment_hash: rawHash(machineBytes),
+    humanSegmentHash: humanBytes === null ? null : rawHash(humanBytes),
+    human_segment_hash: humanBytes === null ? null : rawHash(humanBytes),
+  };
+}
+
+function inspectedCarrier({ bytes, artifactId, mode, begin, end, humanBegin, humanEnd, machineBegin, machineEnd }) {
+  const machineStart = machineBegin.lineEnd;
+  const machineEndOffset = machineEnd.index;
+  const prefixBytes = bytes.subarray(0, machineStart);
+  const machineBytes = bytes.subarray(machineStart, machineEndOffset);
+  const suffixBytes = bytes.subarray(machineEndOffset);
+  const humanBytes = mode === "co_managed" ? bytes.subarray(humanBegin.lineEnd, humanEnd.index) : null;
+  const hashes = segmentHashes(bytes, prefixBytes, machineBytes, suffixBytes, humanBytes);
+  const rawContent = machineBytes.toString("utf8");
+  const canonicalContent = normalizeManagedContent(rawContent);
+  return {
+    artifactId,
+    ownership: mode,
+    begin,
+    end,
+    humanBegin,
+    humanEnd,
+    machineBegin,
+    machineEnd,
+    rawContent,
+    canonicalContent,
+    contentHash: contentHash(canonicalContent),
+    machineSegmentHash: hashes.machineSegmentHash,
+    machine_segment_hash: hashes.machine_segment_hash,
+    humanSegmentHash: hashes.humanSegmentHash,
+    human_segment_hash: hashes.human_segment_hash,
+    outsideHash: hashes.outsideHash,
+    outside_hash: hashes.outside_hash,
+    prefixSha256: hashes.prefix_sha256,
+    suffixSha256: hashes.suffix_sha256,
+    prefix_sha256: hashes.prefix_sha256,
+    suffix_sha256: hashes.suffix_sha256,
+    prefixBytes: Buffer.from(prefixBytes),
+    machineBytes: Buffer.from(machineBytes),
+    suffixBytes: Buffer.from(suffixBytes),
+    humanBytes: humanBytes === null ? null : Buffer.from(humanBytes),
+    machineStartOffset: machineStart,
+    machineEndOffset,
+    prefix: prefixBytes.toString("utf8"),
+    suffix: suffixBytes.toString("utf8"),
+  };
+}
+
 export function inspectManagedBlock(documentText, artifactId) {
-  const text = String(documentText).replaceAll("\r\n", "\n").replaceAll("\r", "\n");
-  const markers = [...text.matchAll(MANAGED_MARKER_RE)].map((match) => ({
-    artifactId: match[1],
-    side: match[2],
-    index: match.index,
-    text: match[0],
-  }));
+  const bytes = documentBuffer(documentText);
+  const markers = findMarkers(bytes, MANAGED_MARKER_RE);
   const own = markers.filter((marker) => marker.artifactId === artifactId);
   if (own.length === 0) {
     const found = [...new Set(markers.map((marker) => marker.artifactId))];
@@ -90,30 +198,109 @@ export function inspectManagedBlock(documentText, artifactId) {
   const begin = own.find((marker) => marker.side === "begin");
   const end = own.find((marker) => marker.side === "end");
   if (begin.index >= end.index) throw new Error(`managed markers are nested or out of order for ${artifactId}`);
-  const innerStart = begin.index + begin.text.length;
-  const rawBetween = text.slice(innerStart, end.index);
-  if (!rawBetween.startsWith("\n") || !rawBetween.endsWith("\n")) {
-    throw new Error(`managed markers for ${artifactId} must each occupy their own line`);
-  }
-  const rawContent = rawBetween.slice(1, -1);
-  const canonicalContent = normalizeManagedContent(rawContent);
-  return {
+  return inspectedCarrier({
+    bytes,
     artifactId,
+    mode: "managed",
     begin,
     end,
-    rawContent,
-    canonicalContent,
-    contentHash: contentHash(canonicalContent),
-    prefix: text.slice(0, innerStart + 1),
-    suffix: text.slice(end.index),
-    outsideHash: sha256(Buffer.from(`${text.slice(0, innerStart)}\n<kg:managed-content>\n${text.slice(end.index)}`, "utf8")),
-  };
+    machineBegin: begin,
+    machineEnd: end,
+  });
 }
 
 export function replaceManagedBlock(documentText, artifactId, content) {
   const inspected = inspectManagedBlock(documentText, artifactId);
-  return `${inspected.prefix}${normalizeManagedContent(content)}${inspected.suffix}`;
+  return Buffer.concat([
+    inspected.prefixBytes,
+    Buffer.from(normalizeManagedContent(content), "utf8"),
+    inspected.suffixBytes,
+  ]).toString("utf8");
 }
+
+export function inspectCoManagedBlock(documentText, artifactId) {
+  const bytes = documentBuffer(documentText);
+  const markers = findMarkers(bytes, CO_MANAGED_MARKER_RE, (match) => `${match[2]} ${match[3]}`);
+  const own = markers.filter((marker) => marker.artifactId === artifactId);
+  if (own.length === 0) {
+    const found = [...new Set(markers.map((marker) => marker.artifactId))];
+    throw new Error(
+      found.length
+        ? `co-managed marker artifact id mismatch for ${artifactId}; found ${found.join(", ")}`
+        : `co-managed markers missing for ${artifactId}`,
+    );
+  }
+  if (own.length !== 4) {
+    throw new Error(`co-managed marker pair must contain exactly four markers for ${artifactId}; found ${own.length}`);
+  }
+  for (const segment of ["human", "machine"]) {
+    if (own.filter((marker) => marker.side === `${segment} begin`).length !== 1) {
+      throw new Error(`co-managed ${segment} begin marker must appear exactly once for ${artifactId}`);
+    }
+    if (own.filter((marker) => marker.side === `${segment} end`).length !== 1) {
+      throw new Error(`co-managed ${segment} end marker must appear exactly once for ${artifactId}`);
+    }
+  }
+  const ordered = [...own].sort((a, b) => a.index - b.index);
+  const expected = ["human begin", "human end", "machine begin", "machine end"];
+  if (JSON.stringify(ordered.map((marker) => marker.side)) !== JSON.stringify(expected)) {
+    throw new Error(`co-managed markers are crossed or out of order for ${artifactId}`);
+  }
+  const humanBegin = own.find((marker) => marker.side === "human begin");
+  const humanEnd = own.find((marker) => marker.side === "human end");
+  const machineBegin = own.find((marker) => marker.side === "machine begin");
+  const machineEnd = own.find((marker) => marker.side === "machine end");
+  return inspectedCarrier({
+    bytes,
+    artifactId,
+    mode: "co_managed",
+    begin: humanBegin,
+    end: machineEnd,
+    humanBegin,
+    humanEnd,
+    machineBegin,
+    machineEnd,
+  });
+}
+
+export function replaceCoManagedMachineSegment(documentText, artifactId, content) {
+  const inspected = inspectCoManagedBlock(documentText, artifactId);
+  return Buffer.concat([
+    inspected.prefixBytes,
+    Buffer.from(normalizeManagedContent(content), "utf8"),
+    inspected.suffixBytes,
+  ]).toString("utf8");
+}
+
+export function inspectCarrier(documentText, artifactId, ownership) {
+  if (ownership === "managed") return inspectManagedBlock(documentText, artifactId);
+  if (ownership === "co_managed") return inspectCoManagedBlock(documentText, artifactId);
+  throw new Error(`carrier ownership has no Markdown marker parser: ${ownership}`);
+}
+
+export function humanSegmentHashState(storedHash, observedHash) {
+  if (storedHash === null || storedHash === undefined) return "refresh";
+  return storedHash === observedHash ? "unchanged" : "refresh";
+}
+
+export function assertTransactionByteFence(before, after) {
+  if (!before.prefixBytes.equals(after.prefixBytes)) throw new Error("carrier prefix bytes changed during transaction");
+  if (!before.suffixBytes.equals(after.suffixBytes)) throw new Error("carrier suffix bytes changed during transaction");
+  if (before.humanBytes !== null || after.humanBytes !== null) {
+    if (before.humanBytes === null || after.humanBytes === null || !before.humanBytes.equals(after.humanBytes)) {
+      throw new Error("co-managed human segment bytes changed during transaction");
+    }
+  }
+  if (before.outside_hash !== after.outside_hash) throw new Error("carrier outside hash changed during transaction");
+  return {
+    prefix_sha256: after.prefix_sha256,
+    suffix_sha256: after.suffix_sha256,
+    outside_hash: after.outside_hash,
+    human_segment_hash: after.human_segment_hash,
+  };
+}
+
+export const assertByteFence = assertTransactionByteFence;
 
 function assertPlainObject(value, label) {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
@@ -243,6 +430,12 @@ function resolveSourceRef(root, ref) {
 }
 
 export function validateHarnessReferences(root, record) {
+  const routing = protocol.loadRouting();
+  const matrix = routing.ownership_update_matrix?.[record.ownership];
+  if (!matrix) throw new Error(`harness ownership is not in protocol: ${record.ownership}`);
+  if (matrix[record.update_policy] === undefined || matrix[record.update_policy] === "reject") {
+    throw new Error(`harness ownership/update_policy combination is rejected: ${record.ownership}/${record.update_policy}`);
+  }
   for (const ref of record.source_refs) {
     try {
       resolveSourceRef(root, ref);
@@ -262,6 +455,11 @@ export function canonicalHarnessRecord(record) {
     source_kn_ids: record.source_kn_ids,
     source_refs: record.source_refs,
     content_hash: record.content_hash,
+    machine_segment_hash: record.machine_segment_hash,
+    human_segment_hash: record.human_segment_hash,
+    outside_hash: record.outside_hash,
+    proposal_id: record.proposal_id,
+    candidate_path: record.candidate_path,
     generator_version: record.generator_version,
     last_verified: record.last_verified,
     update_policy: record.update_policy,
@@ -279,15 +477,24 @@ function loadArtifact(root, file) {
   const record = readHarnessSidecar(root, file);
   validateHarnessReferences(root, record);
   const target = host.resolveSafeRelative(root, record.path);
-  if (path.extname(target.full).toLowerCase() !== ".md") {
-    throw new Error(`M2 harness target must be Markdown: ${record.path}`);
-  }
-  const targetText = fs.readFileSync(target.full, "utf8");
-  const block = inspectManagedBlock(targetText, record.artifact_id);
-  if (block.contentHash !== record.content_hash) {
-    throw new Error(
-      `harness content_hash mismatch for ${record.artifact_id}: sidecar ${record.content_hash}, block ${block.contentHash}`,
-    );
+  let block = null;
+  if (record.type === "markdown_document") {
+    if (path.extname(target.full).toLowerCase() !== ".md") {
+      throw new Error(`Markdown harness target must be Markdown: ${record.path}`);
+    }
+    const targetBytes = fs.readFileSync(target.full);
+    block = inspectCarrier(targetBytes, record.artifact_id, record.ownership);
+    if (block.contentHash !== record.content_hash) {
+      throw new Error(
+        `harness content_hash mismatch for ${record.artifact_id}: sidecar ${record.content_hash}, block ${block.contentHash}`,
+      );
+    }
+    if (block.machine_segment_hash !== record.machine_segment_hash) {
+      throw new Error(`harness machine_segment_hash mismatch for ${record.artifact_id}`);
+    }
+    if (block.outside_hash !== record.outside_hash) {
+      throw new Error(`harness outside_hash mismatch for ${record.artifact_id}`);
+    }
   }
   return {
     artifact_id: record.artifact_id,
@@ -296,8 +503,16 @@ function loadArtifact(root, file) {
     ownership: record.ownership,
     update_policy: record.update_policy,
     content_hash: record.content_hash,
+    machine_segment_hash: record.machine_segment_hash,
+    human_segment_hash: record.human_segment_hash,
+    outside_hash: record.outside_hash,
+    source_kn_ids: record.source_kn_ids,
+    source_refs: record.source_refs,
+    proposal_id: record.proposal_id,
+    candidate_path: record.candidate_path,
     sha256: sha256(fs.readFileSync(file)),
     target_sha256: sha256(fs.readFileSync(target.full)),
+    human_hash_state: block ? humanSegmentHashState(record.human_segment_hash, block.human_segment_hash) : "unavailable",
   };
 }
 
@@ -362,6 +577,9 @@ export function validateCompileContext(context) {
     assertExactFields(item, ARTIFACT_FIELDS, `compile context artifacts[${index}]`);
     if (!/^HAR-/.test(item.artifact_id) || !/^[a-f0-9]{64}$/.test(item.sha256) || !/^[a-f0-9]{64}$/.test(item.target_sha256)) {
       throw new Error(`compile context artifacts[${index}] is invalid`);
+    }
+    if (!["unchanged", "refresh", "unavailable"].includes(item.human_hash_state)) {
+      throw new Error(`compile context artifacts[${index}].human_hash_state is invalid`);
     }
   }
   if (!/^[a-f0-9]{64}$/.test(context.context_digest) || digestContext(context) !== context.context_digest) {

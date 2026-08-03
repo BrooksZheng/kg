@@ -1,0 +1,51 @@
+# kg protocol: compiler plan shape.
+# Version 1 is accepted only as an explicitly legacy input. Version 2 is the
+# protocol shape for action/disposition, actor, and update-scope provenance.
+
+kind: kg.compile_plan_schema
+version: 2
+legacy_versions: [1]
+
+field_order:
+  - kind
+  - version
+  - items
+
+fields:
+  kind: { type: enum, required: true, values: "kg.compile_plan" }
+  version: { type: integer, required: true, values: "1|2" }
+  items: { type: map_list, required: true, min_items: 1 }
+  items[].observation_id: { type: string, required: true, pattern: "^OBS-[0-9]{8}-[0-9]{3}$" }
+  items[].result_type: { type: string, required: false }
+  items[].disposition: { type: string, required: false }
+  items[].actor: { type: string, required: false }
+  items[].update_scope: { type: string, required: false }
+  items[].body_action: { type: string, required: false }
+  items[].target_kn_id: { type: string, required: false, pattern: "^KN-[0-9]{4}$" }
+  items[].knowledge: { type: map, required: false }
+  items[].carrier: { type: map, required: false }
+  items[].queue: { type: map, required: false }
+  items[].merge: { type: map, required: false }
+  items[].regret: { type: string, required: false }
+  items[].reason: { type: string, required: false }
+
+dispositions: [add, update, merge, demote, retire, candidate, no_change]
+actors: [compile, human]
+update_scopes: [full, evidence_scope_refresh, proposal_only]
+body_actions: [updated, preserved, proposal]
+
+# Exact item fields are encoded as pipe-separated strings because KYAML inline
+# maps cannot contain lists. A parser must select the row for the disposition.
+item_fields:
+  add: "observation_id|disposition|actor|update_scope|body_action|knowledge|carrier"
+  update: "observation_id|disposition|actor|update_scope|body_action|target_kn_id|knowledge|carrier"
+  merge: "observation_id|disposition|actor|update_scope|target_kn_id|merge|reason"
+  demote: "observation_id|disposition|actor|update_scope|target_kn_id|regret"
+  retire: "observation_id|disposition|actor|update_scope|target_kn_id|regret"
+  candidate: "observation_id|disposition|actor|update_scope|body_action|knowledge|carrier|queue"
+  no_change: "observation_id|disposition|actor|update_scope|reason"
+
+legacy_item_fields:
+  publish_kn_and_carrier: "observation_id|result_type|knowledge|carrier"
+  queue_only: "observation_id|result_type|queue"
+  no_change: "observation_id|result_type|reason"

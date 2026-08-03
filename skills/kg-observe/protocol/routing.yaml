@@ -49,6 +49,42 @@ always_human_review:
   - "publishing a script proposal"
   - "changing a human-owned document"
 
-actions: [add, update, merge, demote, retire]
+# The disposition table is the only rank authority. Writers read this map;
+# they do not carry a second rank table.
+actions: [add, update, merge, demote, retire, candidate, no_change]
+disposition_rank:
+  add: 10
+  update: 20
+  merge: 30
+  demote: 40
+  retire: 50
+  candidate: 60
+  no_change: 70
+
+# Matrix cells name the compile-owned region. `reject` is a hard preflight
+# result. This is the ownership/update-policy authority for every carrier.
+ownership_update_matrix:
+  managed:
+    automatic: machine_block
+    proposal_only: machine_block
+    human_only: reject
+  co_managed:
+    automatic: machine_segment
+    proposal_only: machine_segment
+    human_only: reject
+  human:
+    automatic: reject
+    proposal_only: whole_target_proposal
+    human_only: whole_target
+
+carrier_ref_suffixes:
+  managed: "kg:managed"
+  co_managed_machine: "kg:co_managed:machine"
+  proposal: "kg:proposal"
+
+plan_update_scopes: [full, evidence_scope_refresh, proposal_only]
+plan_body_actions: [updated, preserved, proposal]
+plan_actors: [compile, human]
+plan_sort_key: "disposition_rank|observation_id|target_kn_id|artifact_id"
 queue_resolutions: [pending, accepted, rejected]
 subtraction_duty: true

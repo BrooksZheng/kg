@@ -10,6 +10,9 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import * as kyaml from "./lib/kyaml.mjs";
 import * as protocol from "./lib/protocol.mjs";
 import * as harness from "./lib/harness.mjs";
+import * as compilePlan from "./lib/compile-plan.mjs";
+import * as inverseMap from "./lib/inverse-map.mjs";
+import * as proposal from "./lib/proposal.mjs";
 import * as host from "./lib/host.mjs";
 import {
   relativeProductPath as normalizeRunnerProjectProduct,
@@ -2827,6 +2830,183 @@ function outsideArtifactBlock(text, artifactId) {
 }
 
 function runPart4(context) {
+  testCase(context, "human_edit_between_sessions_is_refresh_not_tamper", () => {
+    const document = [
+      "title\r\n",
+      "<!-- kg:co-managed HAR-REFRESH human begin -->\r\n",
+      "human bytes v1\r\n",
+      "<!-- kg:co-managed HAR-REFRESH human end -->\r\n",
+      "<!-- kg:co-managed HAR-REFRESH machine begin -->\r\n",
+      "machine bytes v1\r\n",
+      "<!-- kg:co-managed HAR-REFRESH machine end -->\r\n",
+      "tail\r\n",
+    ].join("");
+    const first = harness.inspectCoManagedBlock(Buffer.from(document, "utf8"), "HAR-REFRESH");
+    const secondDocument = document.replace("human bytes v1", "human bytes v2");
+    const second = harness.inspectCoManagedBlock(Buffer.from(secondDocument, "utf8"), "HAR-REFRESH");
+    ensure(context, first.human_segment_hash !== second.human_segment_hash, "human edit did not change the observed hash");
+    ensure(context, harness.humanSegmentHashState(first.human_segment_hash, second.human_segment_hash) === "refresh", "cross-session human edit was not classified as refresh");
+    const applied = harness.replaceCoManagedMachineSegment(secondDocument, "HAR-REFRESH", "machine bytes v2");
+    const after = harness.inspectCoManagedBlock(Buffer.from(applied, "utf8"), "HAR-REFRESH");
+    harness.assertTransactionByteFence(second, after);
+    ensure(context, after.human_segment_hash === second.human_segment_hash, "refresh did not persist the new human hash observation");
+    ensure(context, after.humanBytes.equals(second.humanBytes), "human bytes changed during the second transaction");
+  });
+
+  testCase(context, "managed_and_co_managed_parsers_reject_marker_corruption_and_preserve_crlf_bytes", () => {
+    const managed = "head\r\n<!-- kg:managed HAR-CRLF begin -->\r\nold\r\n<!-- kg:managed HAR-CRLF end -->\r\ntail\r\n";
+    const inspected = harness.inspectManagedBlock(Buffer.from(managed, "utf8"), "HAR-CRLF");
+    const updated = harness.replaceManagedBlock(Buffer.from(managed, "utf8"), "HAR-CRLF", "new");
+    const updatedBytes = Buffer.from(updated, "utf8");
+    const updatedInspection = harness.inspectManagedBlock(updatedBytes, "HAR-CRLF");
+    ensure(context, updatedBytes.subarray(0, inspected.machineStartOffset).equals(inspected.prefixBytes), "managed prefix bytes changed under CRLF input");
+    ensure(context, updatedInspection.suffixBytes.equals(inspected.suffixBytes), "managed suffix bytes changed under CRLF input");
+    harness.assertTransactionByteFence(inspected, updatedInspection);
+
+    const co = [
+      "<!-- kg:co-managed HAR-CORRUPT human begin -->\n",
+      "human\n",
+      "<!-- kg:co-managed HAR-CORRUPT human end -->\n",
+      "<!-- kg:co-managed HAR-CORRUPT machine begin -->\n",
+      "machine\n",
+      "<!-- kg:co-managed HAR-CORRUPT machine end -->\n",
+    ].join("");
+    const variants = [
+      ["missing", co.replace("<!-- kg:co-managed HAR-CORRUPT human end -->\n", "")],
+      ["duplicate", co.replace("<!-- kg:co-managed HAR-CORRUPT human begin -->", "<!-- kg:co-managed HAR-CORRUPT human begin -->\n<!-- kg:co-managed HAR-CORRUPT human begin -->")],
+      ["crossed", co.replace("<!-- kg:co-managed HAR-CORRUPT machine begin -->\n", "<!-- kg:co-managed HAR-CORRUPT machine begin -->\n").replace("<!-- kg:co-managed HAR-CORRUPT human end -->\n", "<!-- kg:co-managed HAR-CORRUPT human end -->\n")],
+    ];
+    const crossed = [
+      "<!-- kg:co-managed HAR-CORRUPT human begin -->\n",
+      "human\n",
+      "<!-- kg:co-managed HAR-CORRUPT machine begin -->\n",
+      "machine\n",
+      "<!-- kg:co-managed HAR-CORRUPT human end -->\n",
+      "<!-- kg:co-managed HAR-CORRUPT machine end -->\n",
+    ].join("");
+    variants[2][1] = crossed;
+    for (const [name, value] of variants) {
+      let rejected = false;
+      try {
+        harness.inspectCoManagedBlock(value, "HAR-CORRUPT");
+      } catch {
+        rejected = true;
+      }
+      ensure(context, rejected, `${name} co-managed marker corruption was accepted`);
+    }
+  });
+
+  testCase(context, "inverse_map_and_protocol_rank_are_deterministic", () => {
+    const routing = protocol.loadRouting();
+    const carrier = {
+      artifact_id: "HAR-INVERSE",
+      type: "markdown_document",
+      path: "docs/runbooks/inverse.md",
+      ownership: "managed",
+      status: "active",
+      source_kn_ids: ["KN-0001"],
+      source_refs: [],
+      content_hash: "sha256:" + "0".repeat(64),
+      machine_segment_hash: "sha256:" + "0".repeat(64),
+      human_segment_hash: null,
+      outside_hash: "sha256:" + "0".repeat(64),
+      proposal_id: null,
+      candidate_path: null,
+      generator_version: "test",
+      last_verified: "2026-08-03",
+      update_policy: "automatic",
+    };
+    const knowledge = {
+      id: "KN-0001",
+      lifecycle: "active",
+      carrier_refs: ["HAR-INVERSE@docs/runbooks/inverse.md#" + routing.carrier_ref_suffixes.managed],
+    };
+    const valid = inverseMap.validateInverseMap({ knowledgeEntries: [knowledge], carriers: [carrier] });
+    ensure(context, valid.ok && valid.findings.length === 0, "valid inverse map did not close deterministically");
+    const broken = inverseMap.validateInverseMap({ knowledgeEntries: [{ ...knowledge, carrier_refs: [] }], carriers: [carrier] });
+    ensure(context, !broken.ok && broken.findings.some((finding) => finding.issue === "inverse_missing_knowledge_ref"), "one-sided inverse reference was not an error");
+    const ordered = compilePlan.sortPlanItems([
+      { observation_id: "OBS-20260803-002", disposition: "no_change" },
+      { observation_id: "OBS-20260803-001", disposition: "add" },
+    ]);
+    ensure(context, ordered[0].disposition === "add", "plan sort did not read protocol disposition_rank");
+    ensure(context, Object.keys(routing.disposition_rank).length === routing.actions.length, "protocol rank coverage is incomplete");
+  });
+
+  testCase(context, "compile_v2_update_shape_reaches_preflight_without_mutation", () => {
+    const setup = setupCompileCase(context, "v2-update-preflight", "publish-plan.json", "OBS-20260731-101");
+    writeJson(setup.plan, {
+      kind: "kg.compile_plan",
+      version: 2,
+      items: [
+        {
+          observation_id: "OBS-20260731-101",
+          disposition: "update",
+          actor: "compile",
+          update_scope: "evidence_scope_refresh",
+          body_action: "preserved",
+          target_kn_id: "KN-0001",
+          knowledge: {
+            claim: "Compile-managed runbooks must preserve human text outside their managed block.",
+            category: "project_knowledge",
+            scope: { paths: ["docs/runbooks/**"] },
+            authority: "verified_runtime_behavior",
+            confidence: 1,
+            body: "## Preserved\n\nThe human-authored body remains unchanged.",
+          },
+          carrier: {
+            artifact_id: "HAR-COMPILE-NOTES",
+            content: "The machine segment refresh is deferred to R4.2.",
+          },
+        },
+      ],
+    });
+    const before = treeHash(setup.project);
+    const rejected = applyCompile(context, setup, { expectFailure: true });
+    ensure(context, rejected.stderr.includes("version 2 parsed successfully"), "v2 deferred preflight reason was not reported");
+    ensure(context, treeHash(setup.project) === before, "v2 deferred update preflight changed host state");
+  });
+
+  testCase(context, "proposal_manifest_parser_recomputes_content_address_and_target_hash", () => {
+    const caseRoot = path.join(context.root, "r41-proposal-manifest");
+    const project = path.join(caseRoot, "project");
+    fs.mkdirSync(path.join(project, ".kg"), { recursive: true });
+    fs.mkdirSync(path.join(project, "docs", "proposals", "compile-test"), { recursive: true });
+    const target = path.join(project, "docs", "runbook.md");
+    const candidate = path.join(project, "docs", "proposals", "compile-test", "candidate.md");
+    fs.writeFileSync(target, "human target\n");
+    fs.writeFileSync(candidate, "proposal candidate\n");
+    const hash = (file) => "sha256:" + crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex");
+    const manifest = {
+      kind: "kg.carrier_proposal",
+      version: 1,
+      proposal_id: "compile-placeholder",
+      carrier_type: "markdown_document",
+      target_path: "docs/runbook.md",
+      target_sha256: hash(target),
+      candidate_path: "docs/proposals/compile-test/candidate.md",
+      candidate_sha256: hash(candidate),
+      source_kn_ids: ["KN-0001"],
+      source_refs: ["docs/source.md#L1"],
+      generator_version: "test",
+      status: "proposed",
+    };
+    manifest.proposal_id = `compile-${proposal.proposalManifestDigest(manifest).slice(0, 16)}`;
+    const manifestFile = path.join(caseRoot, "manifest.json");
+    writeJson(manifestFile, manifest);
+    const parsed = proposal.parseProposalManifest(manifestFile, { root: project });
+    ensure(context, parsed.manifest.proposal_id === manifest.proposal_id, "proposal manifest identity was not recomputed");
+    fs.appendFileSync(target, "drift\n");
+    let rejected = false;
+    try {
+      proposal.parseProposalManifest(manifestFile, { root: project });
+    } catch {
+      rejected = true;
+    }
+    ensure(context, rejected, "proposal target drift was accepted");
+    ensure(context, host.canonicalPath("/tmp") === host.canonicalPath("/private/tmp"), "path alias probe is unavailable");
+  });
+
   testCase(context, "compile_links_observation_kn_and_managed_block", () => {
     const setup = setupCompileCase(
       context,
@@ -3101,13 +3281,14 @@ function runPart4(context) {
         plan: path.join(artifacts, "plan.json"),
       };
       fs.copyFileSync(path.join(COMPILE_FIXTURE, "publish-plan.json"), setup.plan);
+      const before = treeHash(project);
       runNode(
         context,
         COMPILE_CONTEXT,
         ["--root", project, "--output", setup.context, "--now", "2026-07-31T02:00:00Z"],
-        { cwd: project, env: { KG_ROOT: project } },
+        { cwd: project, env: { KG_ROOT: project }, expectFailure: true },
       );
-      assertCompileFailurePreservesHost(context, setup);
+      ensure(context, treeHash(project) === before, `${ownership} parser rejection changed host state`);
     }
 
     const markerVariants = {

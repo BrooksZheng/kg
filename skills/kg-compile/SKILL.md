@@ -18,6 +18,27 @@ Read first: `protocol/routing.yaml` (verdict + categories + autonomy),
 (legal transitions). Scripts live in `skills/kg-compile/scripts/`; run them
 with `node <script>.mjs` from anywhere inside the host repo.
 
+## R4 carrier fence and action provenance
+
+Read `protocol/harness.schema.yaml`, `protocol/compile-plan.schema.yaml`,
+`protocol/compile-report.schema.yaml`, and `protocol/proposal-manifest.schema.yaml`
+before producing a plan. The protocol owns marker syntax, carrier references,
+ownership/update-policy compatibility, and `disposition_rank` ordering.
+
+`human_segment_hash` has two deliberately separate meanings:
+
+- Within one transaction, preflight records the raw human bytes and apply must
+  compare those bytes again. Any difference fails the whole item.
+- Across sessions, the sidecar value is only the last observed human-segment
+  hash. A disk value that differs from it is a normal refresh. The parser must
+  report the new observation and must never classify it as tamper.
+
+Compile update actions carry `actor`, `update_scope`, and `body_action` in the
+plan/report shape. When a human-authored body edit is detected, the future
+update transaction uses `update_scope: evidence_scope_refresh` and
+`body_action: preserved`; R4.1 defines this shape and its preflight parser,
+while the mutation path remains deferred to R4.2.
+
 ## M2 deterministic plan/apply path
 
 This section overrides the older per-record publishing instructions below for

@@ -11,7 +11,7 @@
 #     supersedes another entry, the extra merge is recorded in its body).
 
 kind: kg.knowledge_entry
-version: 1
+version: 2
 
 id_format: KN-NNNN
 file_pattern: "knowledge/KN-NNNN-<slug>.md"
@@ -37,4 +37,22 @@ fields:
   # what damage did the bad knowledge cause (RFC D6 "knowledge regret").
   regret: { type: string_or_null, required: true }
   source_obs_ids: { type: string_list, required: false }
+  # Canonical carrier references are rebuilt from the carrier side during
+  # compile preflight. A v1 entry may omit this field for migration safety.
   carrier_refs: { type: string_list, required: false }
+
+field_order:
+  - id
+  - claim
+  - category
+  - scope
+  - evidence
+  - authority
+  - confidence
+  - lifecycle
+  - supersedes
+  - superseded_by
+  - last_verified
+  - regret
+  - source_obs_ids
+  - carrier_refs

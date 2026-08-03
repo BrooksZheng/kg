@@ -3,7 +3,36 @@
 # preserve their traceability to knowledge entries and source evidence.
 
 kind: kg.harness_artifact
-version: 2
+version: 3
+
+# The field order is the writer contract. New sidecars always emit these
+# fields in this order. The nullable human hash is required on disk so a
+# managed artifact records that it has no human segment.
+field_order:
+  - artifact_id
+  - type
+  - path
+  - ownership
+  - status
+  - source_kn_ids
+  - source_refs
+  - content_hash
+  - machine_segment_hash
+  - human_segment_hash
+  - outside_hash
+  - proposal_id
+  - candidate_path
+  - generator_version
+  - last_verified
+  - update_policy
+
+marker_syntax:
+  managed_begin: "<!-- kg:managed {artifact_id} begin -->"
+  managed_end: "<!-- kg:managed {artifact_id} end -->"
+  co_managed_human_begin: "<!-- kg:co-managed {artifact_id} human begin -->"
+  co_managed_human_end: "<!-- kg:co-managed {artifact_id} human end -->"
+  co_managed_machine_begin: "<!-- kg:co-managed {artifact_id} machine begin -->"
+  co_managed_machine_end: "<!-- kg:co-managed {artifact_id} machine end -->"
 
 fields:
   artifact_id: { type: string, required: true, pattern: "^HAR-[A-Z0-9][A-Z0-9._-]*$" }
@@ -14,6 +43,14 @@ fields:
   source_kn_ids: { type: string_list, required: true }
   source_refs: { type: string_list, required: true }
   content_hash: { type: string, required: true, pattern: "^sha256:[a-f0-9]{64}$" }
+  machine_segment_hash: { type: string, required: true, pattern: "^sha256:[a-f0-9]{64}$" }
+  # This is the last observed human-segment hash. It is informational across
+  # sessions. A changed value means refresh, never tamper. The transaction
+  # preflight compares raw human bytes before and after apply separately.
+  human_segment_hash: { type: string_or_null, required: true, pattern: "^sha256:[a-f0-9]{64}$" }
+  outside_hash: { type: string, required: true, pattern: "^sha256:[a-f0-9]{64}$" }
+  proposal_id: { type: string_or_null, required: true, pattern: "^compile-[a-z0-9][a-z0-9._-]*$" }
+  candidate_path: { type: string_or_null, required: true }
   generator_version: { type: string, required: true }
   last_verified: { type: date, required: true }
   update_policy: { type: enum, required: true, values: "automatic|proposal_only|human_only" }

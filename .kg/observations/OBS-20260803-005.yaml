@@ -1,0 +1,14 @@
+id: OBS-20260803-005
+at: 2026-08-03T12:00:00Z
+source: agent_insight
+claim: "M4 deterministic carrier and coverage checks must derive their verdicts from independently re-read bytes and protocol taxonomy data rather than renderer output or a duplicated mapping."
+context:
+  task: kg-v2-refactor-M4-contract
+  paths:
+    - .mission/kg-v2-refactor/contract-4.md
+    - skills/kg-compile/scripts/lib/harness.mjs
+    - skills/kg-scan/scripts/check-staleness.mjs
+    - protocol/document-taxonomy.yaml
+evidence:
+  - { type: quote, ref: "contract-4.md §3.1 and §3.5: raw outside-byte proof and taxonomy-derived coverage" }
+urgency: batch

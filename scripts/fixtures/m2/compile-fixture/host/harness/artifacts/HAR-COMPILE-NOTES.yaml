@@ -6,6 +6,11 @@ status: active
 source_kn_ids: []
 source_refs: ["docs/accepted-compile-contract.md#L14"]
 content_hash: sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+machine_segment_hash: sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+human_segment_hash: null
+outside_hash: sha256:984e981017660d5b410c1f433ff008f157485f5694083c2be697266986a845be
+proposal_id: null
+candidate_path: null
 generator_version: kg-compile/2.0.0-m2
 last_verified: 2026-07-31
 update_policy: automatic

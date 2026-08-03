@@ -12,7 +12,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { kyaml, protocol, host, harness } from "./_lib.mjs";
+import { kyaml, protocol, host, harness, compilePlan, inverseMap } from "./_lib.mjs";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const ADD_ENTRY = path.join(SCRIPT_DIR, "add-entry.mjs");
@@ -115,69 +115,7 @@ function validateEvidence(evidence, label) {
 }
 
 function validatePlan(plan) {
-  assertExactFields(plan, PLAN_FIELDS, "compile plan");
-  if (plan.kind !== "kg.compile_plan" || plan.version !== 1) fail("compile plan kind/version is invalid");
-  if (!Array.isArray(plan.items) || plan.items.length === 0) fail("compile plan items must be a non-empty array");
-  const observationIds = new Set();
-  let publishCount = 0;
-  for (const [index, item] of plan.items.entries()) {
-    const label = `compile plan items[${index}]`;
-    assertPlainObject(item, label);
-    if (!Object.hasOwn(ITEM_FIELDS, item.result_type)) {
-      fail(`${label}.result_type must be publish_kn_and_carrier | queue_only | no_change`);
-    }
-    assertExactFields(item, ITEM_FIELDS[item.result_type], label);
-    if (!/^OBS-[0-9]{8}-[0-9]{3}$/.test(item.observation_id)) fail(`${label}.observation_id is invalid`);
-    if (observationIds.has(item.observation_id)) fail(`compile plan repeats observation ${item.observation_id}`);
-    observationIds.add(item.observation_id);
-    if (item.result_type === "publish_kn_and_carrier") {
-      publishCount += 1;
-      assertExactFields(item.knowledge, KNOWLEDGE_FIELDS, `${label}.knowledge`);
-      if (typeof item.knowledge.claim !== "string" || item.knowledge.claim.trim() === "") {
-        fail(`${label}.knowledge.claim must be one non-empty string`);
-      }
-      if (item.knowledge.category !== "project_knowledge") fail(`${label}.knowledge.category must be project_knowledge in M2`);
-      validateScope(item.knowledge.scope, `${label}.knowledge.scope`);
-      const authorityValues = String(protocol.loadKnowledgeSchema().fields.authority.values).split("|");
-      if (!authorityValues.includes(item.knowledge.authority)) fail(`${label}.knowledge.authority is invalid`);
-      if (
-        typeof item.knowledge.confidence !== "number" ||
-        item.knowledge.confidence < 0 ||
-        item.knowledge.confidence > 1
-      ) {
-        fail(`${label}.knowledge.confidence must be between 0 and 1`);
-      }
-      if (typeof item.knowledge.body !== "string" || item.knowledge.body.trim() === "") {
-        fail(`${label}.knowledge.body is required`);
-      }
-      assertExactFields(item.carrier, CARRIER_FIELDS, `${label}.carrier`);
-      if (!/^HAR-[A-Z0-9][A-Z0-9._-]*$/.test(item.carrier.artifact_id)) {
-        fail(`${label}.carrier.artifact_id is invalid`);
-      }
-      if (typeof item.carrier.content !== "string" || item.carrier.content.trim() === "") {
-        fail(`${label}.carrier.content is required`);
-      }
-    } else if (item.result_type === "queue_only") {
-      assertExactFields(item.queue, QUEUE_FIELDS, `${label}.queue`);
-      for (const field of ["claim", "recommendation"]) {
-        if (typeof item.queue[field] !== "string" || item.queue[field].trim() === "") {
-          fail(`${label}.queue.${field} is required`);
-        }
-      }
-      validateEvidence(item.queue.evidence, `${label}.queue.evidence`);
-      if (
-        !Array.isArray(item.queue.options) ||
-        item.queue.options.length < 2 ||
-        !item.queue.options.every((value) => typeof value === "string" && value.trim() !== "")
-      ) {
-        fail(`${label}.queue.options must contain at least two non-empty strings`);
-      }
-    } else if (typeof item.reason !== "string" || item.reason.trim() === "") {
-      fail(`${label}.reason is required`);
-    }
-  }
-  if (publishCount > 1) fail("M2 supports at most one publish_kn_and_carrier item per plan");
-  return plan;
+  return compilePlan.validateCompilePlan(plan);
 }
 
 function portableRelative(root, target) {
@@ -242,11 +180,23 @@ function journalPathFor(paths, planDigest) {
 }
 
 function actionResult(operation) {
+  const disposition =
+    operation.result_type === "publish_kn_and_carrier"
+      ? "add"
+      : operation.result_type === "queue_only"
+        ? "candidate"
+        : "no_change";
+  const actionId = `ACT-${sha256(Buffer.from(`${operation.observation_id}:${operation.result_type}:${operation.observation_sha256}`, "utf8")).slice(0, 16)}`;
   if (operation.result_type === "publish_kn_and_carrier") {
     return {
+      action_id: actionId,
       observation_id: operation.observation_id,
+      disposition,
+      actor: "compile",
+      update_scope: "full",
+      body_action: "updated",
       source_observation_sha256: operation.observation_sha256,
-      kn_id: operation.kn.id,
+      target_kn_id: operation.kn.id,
       artifact_id: operation.carrier.artifact_id,
       result_reason: operation.result_reason,
       actions: ["create_kn", "update_carrier", "update_sidecar", "archive_observation"],
@@ -254,16 +204,29 @@ function actionResult(operation) {
   }
   if (operation.result_type === "queue_only") {
     return {
+      action_id: actionId,
       observation_id: operation.observation_id,
+      disposition,
+      actor: "compile",
+      update_scope: "proposal_only",
+      body_action: "preserved",
       source_observation_sha256: operation.observation_sha256,
-      queue_id: operation.queue.id,
+      target_kn_id: null,
+      artifact_id: null,
       result_reason: operation.result_reason,
       actions: ["create_queue_item", "archive_observation"],
     };
   }
   return {
+    action_id: actionId,
     observation_id: operation.observation_id,
+    disposition,
+    actor: "compile",
+    update_scope: "full",
+    body_action: "preserved",
     source_observation_sha256: operation.observation_sha256,
+    target_kn_id: null,
+    artifact_id: null,
     result_reason: operation.result_reason,
     actions: ["archive_observation"],
   };
@@ -278,12 +241,13 @@ function buildReport(planDigest, contextDigest, now, operations) {
   for (const operation of operations) results[operation.result_type].push(actionResult(operation));
   return {
     kind: "kg.compile_report",
-    version: 1,
+    version: 2,
     plan_digest: planDigest,
     context_digest: contextDigest,
     generated_at: now.toISOString(),
     known_limitations: KNOWN_LIMITATIONS,
     results,
+    actions: operations.map(actionResult),
     archives: operations.map((operation) => ({
       observation_id: operation.observation_id,
       arguments: operation.archive_args,
@@ -292,7 +256,11 @@ function buildReport(planDigest, contextDigest, now, operations) {
 }
 
 function buildFreshJournal(root, context, plan, planDigest, now) {
+  if (plan.version === 2) {
+    fail("compile plan version 2 parsed successfully; update/merge/candidate apply is deferred to R4.2-R4.4");
+  }
   const paths = host.kgPaths(root);
+  validateCurrentInverseMap(root);
   const observationInputs = new Map(context.observations.map((input) => [input.id, input]));
   const artifactInputs = new Map(context.artifacts.map((input) => [input.artifact_id, input]));
   const firstKnId = host.nextKnowledgeId(paths);
@@ -333,8 +301,8 @@ function buildFreshJournal(root, context, plan, planDigest, now) {
       if (!artifact) fail(`carrier artifact was not present in compile context: ${item.carrier.artifact_id}`);
       if (usedArtifacts.has(artifact.artifact_id)) fail(`carrier artifact is repeated: ${artifact.artifact_id}`);
       usedArtifacts.add(artifact.artifact_id);
-      if (artifact.ownership !== "managed") fail(`M2 carrier ownership must be managed: ${artifact.artifact_id}`);
-      if (artifact.update_policy !== "automatic") fail(`M2 carrier update_policy must be automatic: ${artifact.artifact_id}`);
+      const policyRegion = protocol.loadRouting().ownership_update_matrix?.[artifact.ownership]?.[artifact.update_policy];
+      if (policyRegion !== "machine_block") fail(`compile carrier policy is not an automatic managed block: ${artifact.artifact_id}`);
       const sidecarFile = harness.resolveCompileInput(root, artifact.sidecar_path).full;
       const targetFile = harness.resolveCompileInput(root, artifact.target_path).full;
       const sidecar = harness.readHarnessSidecar(root, sidecarFile);
@@ -344,7 +312,7 @@ function buildFreshJournal(root, context, plan, planDigest, now) {
       const beforeBlock = harness.inspectManagedBlock(beforeDocument, artifact.artifact_id);
       const knId = incrementKnId(firstKnId, knOffset);
       knOffset += 1;
-      const carrierRef = `${artifact.artifact_id}@${artifact.target_path}#kg:managed`;
+      const carrierRef = inverseMap.carrierRefForSidecar(sidecar, { root });
       const record = {
         id: knId,
         claim: item.knowledge.claim,
@@ -384,11 +352,14 @@ function buildFreshJournal(root, context, plan, planDigest, now) {
       const renderedContent = `<!-- kg:source ${knId} -->\n${item.carrier.content.trim()}`;
       const afterDocument = harness.replaceManagedBlock(beforeDocument, artifact.artifact_id, renderedContent);
       const afterBlock = harness.inspectManagedBlock(afterDocument, artifact.artifact_id);
-      if (beforeBlock.outsideHash !== afterBlock.outsideHash) fail(`carrier update would change content outside ${artifact.artifact_id}`);
+      harness.assertTransactionByteFence(beforeBlock, afterBlock);
       const updatedSidecar = {
         ...sidecar,
         source_kn_ids: [knId],
         content_hash: afterBlock.contentHash,
+        machine_segment_hash: afterBlock.machine_segment_hash,
+        human_segment_hash: afterBlock.human_segment_hash,
+        outside_hash: afterBlock.outside_hash,
         generator_version: "kg-compile/2.0.0-m2",
         last_verified: now.toISOString().slice(0, 10),
       };
@@ -409,6 +380,10 @@ function buildFreshJournal(root, context, plan, planDigest, now) {
           expected_text: afterDocument,
           content_hash: afterBlock.contentHash,
           outside_hash: beforeBlock.outsideHash,
+          prefix_sha256: beforeBlock.prefix_sha256,
+          suffix_sha256: beforeBlock.suffix_sha256,
+          human_segment_hash: beforeBlock.human_segment_hash,
+          machine_segment_hash: afterBlock.machine_segment_hash,
         },
         sidecar: {
           path: artifact.sidecar_path,
@@ -458,6 +433,20 @@ function buildFreshJournal(root, context, plan, planDigest, now) {
     report,
   };
   return { ...journal, journal_digest: sha256(Buffer.from(JSON.stringify(journal), "utf8")) };
+}
+
+function validateCurrentInverseMap(root) {
+  const paths = host.kgPaths(root);
+  const knowledgeEntries = host
+    .listFiles(paths.knowledge, ".md")
+    .map((file) => protocol.splitFrontmatter(fs.readFileSync(file, "utf8")).frontmatter);
+  const carriers = host
+    .listFiles(path.join(root, "harness", "artifacts"), ".yaml")
+    .map((file) => harness.readHarnessSidecar(root, file));
+  const result = inverseMap.validateInverseMap({ knowledgeEntries, carriers, root });
+  const error = result.findings.find((finding) => finding.severity === "error");
+  if (error) fail(`inverse map preflight failed: ${error.issue}`);
+  return result;
 }
 
 function atomicWrite(file, content) {
@@ -566,13 +555,15 @@ function validateOperationState(root, operation, { final }) {
       const sidecar = harness.readHarnessSidecar(root, sidecarFile);
       const block = harness.inspectManagedBlock(fs.readFileSync(carrierFile, "utf8"), sidecar.artifact_id);
       if (sidecar.content_hash !== block.contentHash) fail(`final managed block hash mismatch: ${sidecar.artifact_id}`);
+      if (sidecar.machine_segment_hash !== block.machine_segment_hash) fail(`final machine segment hash mismatch: ${sidecar.artifact_id}`);
+      if (sidecar.outside_hash !== block.outside_hash) fail(`final outside hash mismatch: ${sidecar.artifact_id}`);
       if (JSON.stringify(sidecar.source_kn_ids) !== JSON.stringify([operation.kn.id])) {
         fail(`final sidecar source_kn_ids mismatch: ${sidecar.artifact_id}`);
       }
       const { frontmatter: knowledge } = protocol.splitFrontmatter(fs.readFileSync(knFile, "utf8"));
       if (
         JSON.stringify(knowledge.carrier_refs) !==
-        JSON.stringify([`${sidecar.artifact_id}@${sidecar.path}#kg:managed`])
+        JSON.stringify([inverseMap.carrierRefForSidecar(sidecar, { root })])
       ) {
         fail(`knowledge entry carrier_refs missing: ${operation.kn.id}`);
       }
@@ -668,6 +659,7 @@ function applyJournal(root, journal, now) {
     }
 
     for (const operation of journal.operations) validateOperationState(root, operation, { final: true });
+    validateCurrentInverseMap(root);
     const paths = host.kgPaths(root);
     const roundLog = host.roundLogFile(paths);
     if (fs.existsSync(roundLog)) fs.unlinkSync(roundLog);
@@ -735,7 +727,7 @@ function validateCompleted(root, reportFile, planDigest, context) {
   }
   if (
     report?.kind !== "kg.compile_report" ||
-    report?.version !== 1 ||
+    report?.version !== 2 ||
     report.plan_digest !== planDigest ||
     report.context_digest !== context.context_digest ||
     host.canonicalPath(context.host_root) !== host.canonicalPath(root) ||
@@ -743,12 +735,15 @@ function validateCompleted(root, reportFile, planDigest, context) {
   ) {
     fail("compile report does not match the requested plan or known limitations");
   }
+  const reportErrors = protocol.validateRecord(report, protocol.loadCompileReportSchema());
+  if (reportErrors.length) fail(`compile report schema is invalid: ${reportErrors.join("; ")}`);
   const paths = host.kgPaths(root);
   const journalFile = journalPathFor(paths, planDigest);
   if (!fs.existsSync(journalFile)) fail("completed compile report is missing its transaction manifest");
   const journal = loadJournal(root, journalFile, planDigest, report.context_digest);
   if (JSON.stringify(journal.report) !== JSON.stringify(report)) fail("compile report differs from transaction manifest");
   for (const operation of journal.operations) validateOperationState(root, operation, { final: true });
+  validateCurrentInverseMap(root);
   return report;
 }
 

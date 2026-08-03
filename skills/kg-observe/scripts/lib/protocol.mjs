@@ -4,7 +4,7 @@
 // source of truth: this module interprets their `fields` specs; it does not
 // hardcode field lists.
 //
-// Run `node scripts/lib/protocol.mjs` for a self-check that all nine protocol
+// Run `node scripts/lib/protocol.mjs` for a self-check that all protocol
 // files parse and are internally coherent.
 
 import fs from "node:fs";
@@ -24,6 +24,10 @@ export const loadObservationSchema = () => loadProtocolFile("observation.schema.
 export const loadKnowledgeSchema = () => loadProtocolFile("knowledge.schema.yaml");
 export const loadProjectDocumentSchema = () => loadProtocolFile("project-document.schema.yaml");
 export const loadHarnessSchema = () => loadProtocolFile("harness.schema.yaml");
+export const loadCompilePlanSchema = () => loadProtocolFile("compile-plan.schema.yaml");
+export const loadCompileReportSchema = () => loadProtocolFile("compile-report.schema.yaml");
+export const loadQueueSchema = () => loadProtocolFile("queue.schema.yaml");
+export const loadProposalManifestSchema = () => loadProtocolFile("proposal-manifest.schema.yaml");
 export const loadTaskSpecSchema = () => loadProtocolFile("task-spec.schema.yaml");
 export const loadDocumentTaxonomy = () => loadProtocolFile("document-taxonomy.yaml");
 export const loadLifecycle = () => loadProtocolFile("lifecycle.yaml");
@@ -117,6 +121,16 @@ function checkValue(value, spec, fieldKey, label, errors, ctx) {
       if (spec.max !== undefined && value > spec.max) errors.push(`${label}: above maximum ${spec.max}`);
       return;
     }
+    case "integer": {
+      if (!Number.isInteger(value)) {
+        errors.push(`${label}: must be an integer`);
+        return;
+      }
+      if (spec.values !== undefined && !String(spec.values).split("|").includes(String(value))) {
+        errors.push(`${label}: \`${value}\` is not one of: ${String(spec.values).split("|").join(" | ")}`);
+      }
+      return;
+    }
     case "string_list": {
       if (!Array.isArray(value) || !value.every((v) => typeof v === "string" && v.trim() !== "")) {
         errors.push(`${label}: must be a list of non-empty strings`);
@@ -196,6 +210,10 @@ if (isMain()) {
     "knowledge.schema.yaml",
     "project-document.schema.yaml",
     "harness.schema.yaml",
+    "compile-plan.schema.yaml",
+    "compile-report.schema.yaml",
+    "queue.schema.yaml",
+    "proposal-manifest.schema.yaml",
     "task-spec.schema.yaml",
     "document-taxonomy.yaml",
     "lifecycle.yaml",
@@ -267,6 +285,11 @@ if (isMain()) {
       "generator_version",
       "last_verified",
       "update_policy",
+      "machine_segment_hash",
+      "human_segment_hash",
+      "outside_hash",
+      "proposal_id",
+      "candidate_path",
     ];
     for (const field of requiredHarnessFields) {
       if (!harness.fields?.[field]?.required) problems.push(`harness: required field \`${field}\` missing`);
@@ -274,10 +297,71 @@ if (isMain()) {
     if (harness.fields?.ownership?.values !== "managed|co_managed|human") {
       problems.push("harness: ownership enum must be managed|co_managed|human");
     }
+    if (harness.version !== 3 || !Array.isArray(harness.field_order)) {
+      problems.push("harness: version 3 and explicit field_order are required");
+    }
+    for (const markerField of [
+      "managed_begin",
+      "managed_end",
+      "co_managed_human_begin",
+      "co_managed_human_end",
+      "co_managed_machine_begin",
+      "co_managed_machine_end",
+    ]) {
+      if (!harness.marker_syntax?.[markerField]) problems.push(`harness: marker syntax ${markerField} missing`);
+    }
     for (const field of ["source_obs_ids", "carrier_refs"]) {
       if (kn.fields?.[field]?.type !== "string_list" || kn.fields?.[field]?.required !== false) {
         problems.push(`knowledge: optional v2 trace field \`${field}\` missing`);
       }
+    }
+  }
+  const routingForShape = routing;
+  const planSchema = docs["compile-plan.schema.yaml"];
+  const reportSchema = docs["compile-report.schema.yaml"];
+  const queueSchema = docs["queue.schema.yaml"];
+  const proposalSchema = docs["proposal-manifest.schema.yaml"];
+  if (routingForShape && planSchema) {
+    const routingActions = [...(routingForShape.actions ?? [])].sort();
+    const planDispositions = [...(planSchema.dispositions ?? [])].sort();
+    if (JSON.stringify(routingActions) !== JSON.stringify(planDispositions)) {
+      problems.push("compile-plan: dispositions must equal routing actions");
+    }
+    const rankKeys = Object.keys(routingForShape.disposition_rank ?? {}).sort();
+    if (JSON.stringify(rankKeys) !== JSON.stringify(routingActions)) {
+      problems.push("routing: disposition_rank must cover every action exactly once");
+    }
+    const ranks = Object.values(routingForShape.disposition_rank ?? {});
+    if (new Set(ranks).size !== ranks.length || !ranks.every((value) => Number.isInteger(value))) {
+      problems.push("routing: disposition_rank values must be unique integers");
+    }
+    if (JSON.stringify([...(routingForShape.plan_actors ?? [])].sort()) !== JSON.stringify([...(planSchema.actors ?? [])].sort())) {
+      problems.push("compile-plan: actors must equal routing plan_actors");
+    }
+    if (JSON.stringify([...(routingForShape.plan_update_scopes ?? [])].sort()) !== JSON.stringify([...(planSchema.update_scopes ?? [])].sort())) {
+      problems.push("compile-plan: update_scopes must equal routing plan_update_scopes");
+    }
+    if (JSON.stringify([...(routingForShape.plan_body_actions ?? [])].sort()) !== JSON.stringify([...(planSchema.body_actions ?? [])].sort())) {
+      problems.push("compile-plan: body_actions must equal routing plan_body_actions");
+    }
+  }
+  if (reportSchema) {
+    if (!Array.isArray(reportSchema.action_field_order) || !reportSchema.action_fields) {
+      problems.push("compile-report: action field order and specs are required");
+    }
+  }
+  if (queueSchema) {
+    const queueFields = Object.keys(queueSchema.fields ?? {});
+    if (JSON.stringify(queueFields) !== JSON.stringify(queueSchema.field_order ?? [])) {
+      problems.push("queue: field_order must match fields insertion order");
+    }
+    if (queueSchema.fields?.resolution_note?.type !== "string_or_null") {
+      problems.push("queue: resolution_note must be nullable");
+    }
+  }
+  if (proposalSchema) {
+    if (JSON.stringify(Object.keys(proposalSchema.fields ?? {})) !== JSON.stringify(proposalSchema.field_order ?? [])) {
+      problems.push("proposal manifest: field_order must match fields insertion order");
     }
   }
   const observation = docs["observation.schema.yaml"];

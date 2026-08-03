@@ -1,0 +1,32 @@
+# kg protocol: content-addressed carrier proposal manifest.
+
+kind: kg.carrier_proposal_schema
+version: 1
+
+field_order:
+  - kind
+  - version
+  - proposal_id
+  - carrier_type
+  - target_path
+  - target_sha256
+  - candidate_path
+  - candidate_sha256
+  - source_kn_ids
+  - source_refs
+  - generator_version
+  - status
+
+fields:
+  kind: { type: enum, required: true, values: "kg.carrier_proposal" }
+  version: { type: integer, required: true, values: "1" }
+  proposal_id: { type: string, required: true, pattern: "^compile-[a-z0-9][a-z0-9._-]*$" }
+  carrier_type: { type: enum, required: true, values: "markdown_document|skill_proposal|script_proposal" }
+  target_path: { type: string_or_null, required: true }
+  target_sha256: { type: string_or_null, required: true, pattern: "^sha256:[a-f0-9]{64}$" }
+  candidate_path: { type: string, required: true }
+  candidate_sha256: { type: string, required: true, pattern: "^sha256:[a-f0-9]{64}$" }
+  source_kn_ids: { type: string_list, required: true }
+  source_refs: { type: string_list, required: true }
+  generator_version: { type: string, required: true }
+  status: { type: enum, required: true, values: "proposed|accepted|rejected|retired" }
