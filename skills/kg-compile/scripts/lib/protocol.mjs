@@ -308,6 +308,9 @@ if (isMain()) {
       ]) {
         if (!record?.[key]) problems.push(`taxonomy: ${docType}.${key} missing`);
       }
+      if ((taxonomy.core_types ?? []).includes(docType) && !record?.create_target_pattern) {
+        problems.push(`taxonomy: ${docType}.create_target_pattern missing`);
+      }
     }
     if (taxonomy.tutorials?.diataxis_quadrant !== "excluded" || !taxonomy.tutorials?.exclusion_rationale) {
       problems.push("taxonomy: tutorials exclusion and rationale are required");

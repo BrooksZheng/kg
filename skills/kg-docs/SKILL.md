@@ -1,6 +1,6 @@
 ---
 name: kg-docs
-description: Build and maintain evidence-backed project documents. Use as a supporting skill during project work, and use its bootstrap path when a brownfield repository needs an initial architecture draft.
+description: Build and maintain evidence-backed project documents. Use as a supporting skill during project work, and use its bootstrap path when a brownfield repository needs initial core-document drafts.
 ---
 
 # kg-docs
@@ -9,11 +9,12 @@ Create project documents from validated evidence. This skill is a supporting
 mechanism for kickoff and ordinary work sessions. It does not replace human
 review or project-document lifecycle decisions.
 
-## R2.1 brownfield bootstrap
+## R3.3 brownfield bootstrap
 
-The first bootstrap path creates only a missing
-`docs/architecture/overview.md`. Existing targets require the later proposal
-workflow.
+Bootstrap creates one draft for every core document type declared by
+`protocol/document-taxonomy.yaml`. The taxonomy owns routing and each
+`assets/templates/*.md` file owns that type's required section keys. Read both
+before preparing a plan. Existing targets require the R3.4 proposal workflow.
 
 ### 1. Produce the static inventory
 
@@ -36,37 +37,41 @@ the manifest, source modules, entrypoint, external boundaries, runtime flow,
 and deployment signals. Use inventory file paths and valid one-based line
 ranges.
 
-### 3. Submit a strict JSON plan
+### 3. Submit a strict version 2 JSON plan
 
-Write `bootstrap-plan.json` with this shape:
+Write `bootstrap-plan.json` with this raw agent shape. Include every taxonomy
+core type exactly once and order them as `core_types` does. The example shows
+one document and one section only to explain nesting; a real plan contains all
+documents and all template sections.
 
 ```json
 {
   "kind": "kg.docs_bootstrap_plan",
-  "version": 1,
-  "title": "Example architecture overview",
-  "coverage_limitations": [],
-  "observed_facts": [
+  "version": 2,
+  "documents": [
     {
-      "section": "context",
-      "statement": "The service exposes an HTTP entrypoint.",
-      "source": {
-        "path": "src/server.mjs",
-        "line_start": 4,
-        "line_end": 4
-      }
-    }
-  ],
-  "inferences": [
-    {
-      "section": "deployment",
-      "statement": "The process is likely deployed as one service.",
-      "confidence": 0.7,
-      "sources": [
+      "doc_type": "architecture",
+      "slug": null,
+      "title": "Example architecture overview",
+      "mode": "create",
+      "target_path": null,
+      "coverage_limitations": [],
+      "sections": [
         {
-          "path": "package.json",
-          "line_start": 5,
-          "line_end": 5
+          "key": "context",
+          "findings": [
+            {
+              "classification": "observed_fact",
+              "statement": "The service exposes an HTTP entrypoint.",
+              "sources": [
+                {
+                  "path": "src/server.mjs",
+                  "line_start": 4,
+                  "line_end": 4
+                }
+              ]
+            }
+          ]
         }
       ]
     }
@@ -74,13 +79,26 @@ Write `bootstrap-plan.json` with this shape:
 }
 ```
 
-Valid sections are `context`, `building_blocks`, `runtime`, and `deployment`.
-Every observed fact needs one source. Every inference needs confidence and at
-least one source. If the inventory is truncated, `coverage_limitations` must
-describe the missing coverage.
+Use a lowercase safe slug only when the taxonomy target pattern contains
+`{slug}`. Keep `slug` null for fixed targets. Keep `target_path` null in create
+mode. The renderer derives paths and allocates any `{sequence}` value with an
+exclusive create.
 
-Do not submit IDs, timestamps, hashes, lifecycle fields, or output paths.
-The script owns deterministic metadata and the fixed target path.
+Each template section needs at least one finding. Classification rules are:
+
+- `observed_fact` has at least one inventoried source.
+- `inference` has a numeric `confidence` from 0 through 1 and at least one
+  inventoried source.
+- `conflict` has at least two distinct inventoried sources.
+- `unknown` has an empty `sources` list and a non-empty `missing_evidence`.
+
+If the inventory is truncated, every document must carry a non-empty
+`coverage_limitations` list. The renderer preserves it in machine-readable
+frontmatter and evidence metadata.
+
+Do not submit IDs, timestamps, hashes, sequence numbers, lifecycle fields, or
+derived output paths. The script rebuilds the canonical plan and owns that
+metadata.
 
 ### 4. Render through the bootstrap script
 
@@ -91,9 +109,17 @@ node <skill>/scripts/bootstrap.mjs \
   --plan <artifacts-dir>/bootstrap-plan.json
 ```
 
-The script revalidates every inventory file hash and evidence range before
-writing. It creates a registered `draft` architecture document and refuses
-an existing target.
+The script revalidates every inventory file hash, exclusion boundary, and
+evidence range before writing. It preflights the full batch, then creates all
+registered `draft` documents. Every rendered finding carries a machine-readable
+evidence marker. Any target, source, schema, template, or route failure leaves
+the batch with zero documents.
+
+### Version 1 compatibility
+
+The M2 architecture-only version 1 plan remains accepted. It continues to
+create only `docs/architecture/overview.md` with its original four sections.
+New brownfield sessions use version 2.
 
 ## Hard boundaries
 
@@ -105,4 +131,4 @@ an existing target.
   plan.
 - Never write project-document status `accepted`. Human review controls that
   lifecycle transition.
-- Never bypass `bootstrap.mjs` by writing the architecture Markdown directly.
+- Never bypass `bootstrap.mjs` by writing project-document Markdown directly.

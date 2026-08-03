@@ -51,6 +51,8 @@ const HEALTH_CHECK = path.join(ROOT, "skills", "kg-scan", "scripts", "health-che
 const INIT_INSTALL = path.join(ROOT, "skills", "kg-init", "scripts", "install.mjs");
 const FIXTURE_LINT = path.join(ROOT, "scripts", "lint-fixtures.mjs");
 const MOCK_BOOTSTRAP_RUNNER = path.join(ROOT, "scripts", "fixtures", "m2", "mock-bootstrap-runner.mjs");
+const MOCK_BOOTSTRAP_V2_RUNNER = path.join(ROOT, "scripts", "fixtures", "m3", "mock-bootstrap-runner.mjs");
+const BOOTSTRAP_V2_EVAL_FIXTURE = path.join(ROOT, "scripts", "fixtures", "m3", "bootstrap-all-types", "fixture.json");
 const MOCK_COMPILE_RUNNER = path.join(ROOT, "scripts", "fixtures", "m2", "mock-compile-runner.mjs");
 const MOCK_KICKOFF_RUNNER = path.join(ROOT, "scripts", "fixtures", "m2", "mock-kickoff-runner.mjs");
 const BOOTSTRAP_FIXTURE = path.join(ROOT, "scripts", "fixtures", "m2", "bootstrap");
@@ -71,6 +73,12 @@ const SPEC_FIXTURES = [
   path.join(ROOT, "scripts", "fixtures", "m2", "spec-03-compiled", "fixture.yaml"),
 ];
 const KG_SKILLS = ["kg-init", "kg-observe", "kg-compile", "kg-scan", "kg-kickoff", "kg-spec", "kg-docs"];
+const FINDING_FIELDS_FOR_TEST = {
+  observed_fact: true,
+  inference: true,
+  conflict: true,
+  unknown: true,
+};
 
 class CaseFailure extends Error {
   constructor(context, message, details = {}) {
@@ -1398,9 +1406,22 @@ function runPart1(context) {
 function cloneBootstrapProject(destination, { hazards = false } = {}) {
   fs.cpSync(path.join(BOOTSTRAP_FIXTURE, "host"), destination, { recursive: true });
   if (hazards) {
+    fs.mkdirSync(path.join(destination, "lower", ".kg"), { recursive: true });
+    fs.writeFileSync(path.join(destination, "lower", ".kg", "uncompiled.yaml"), "forbidden: true\n");
+    fs.mkdirSync(path.join(destination, "node_modules", "unsafe-package"), { recursive: true });
+    fs.writeFileSync(path.join(destination, "node_modules", "unsafe-package", "index.js"), "throw new Error('unsafe');\n");
+    fs.mkdirSync(path.join(destination, "generated"), { recursive: true });
+    fs.writeFileSync(path.join(destination, "generated", "client.js"), "generated\n");
+    fs.writeFileSync(path.join(destination, "private-key.pem"), "private\n");
+    fs.writeFileSync(path.join(destination, "service.sqlite"), "database\n");
     fs.writeFileSync(path.join(destination, "binary.png"), Buffer.from([0, 1, 2, 3]));
+    fs.writeFileSync(path.join(destination, "binary.txt"), Buffer.from([1, 2, 3, 4]));
     fs.writeFileSync(path.join(destination, "large.txt"), "x".repeat(2048));
     fs.symlinkSync(path.join(destination, "src"), path.join(destination, "linked-src"));
+    const outside = path.join(path.dirname(destination), "outside.txt");
+    fs.writeFileSync(outside, "outside\n");
+    fs.symlinkSync(outside, path.join(destination, "outside-link.txt"));
+    fs.symlinkSync(path.join(destination, ".KG", "uncompiled.yaml"), path.join(destination, "excluded-link.yaml"));
   }
 }
 
@@ -1424,17 +1445,136 @@ function setupBootstrapCase(context, name, inventoryArgs = []) {
 
 function expectBootstrapFailure(context, setup, planValue) {
   writeJson(setup.plan, planValue);
+  const before = treeHash(setup.project);
   runNode(
     context,
     DOCS_BOOTSTRAP,
     ["--project-root", setup.project, "--inventory", setup.inventory, "--plan", setup.plan],
     { cwd: setup.project, expectFailure: true },
   );
-  ensure(context, !fs.existsSync(path.join(setup.project, "docs", "architecture", "overview.md")), "failed bootstrap left a target");
+  ensure(context, treeHash(setup.project) === before, "failed bootstrap changed the project tree");
 }
 
 function factSourcesFromDocument(text) {
   return [...text.matchAll(/^<!-- kg:fact-source (.+) -->$/gm)].map((match) => JSON.parse(match[1]));
+}
+
+function bootstrapTaxonomyContract() {
+  const taxonomy = protocol.loadDocumentTaxonomy();
+  const templates = new Map();
+  for (const docType of taxonomy.core_types) {
+    const record = taxonomy.documents[docType];
+    const templateFile = path.join(ROOT, record.template_path);
+    const text = fs.readFileSync(templateFile, "utf8");
+    const sections = [...text.matchAll(/^<!-- kg:section ([a-z][a-z0-9_]*) -->\r?\n## ([^\r\n]+)$/gm)].map(
+      (match) => ({ key: match[1], heading: match[2] }),
+    );
+    ensureTemplateContract(record, templateFile, sections);
+    templates.set(docType, { ...record, sections });
+  }
+  return { taxonomy, templates };
+}
+
+function ensureTemplateContract(record, templateFile, sections) {
+  if (sections.length === 0) throw new Error(`template has no machine section keys: ${templateFile}`);
+  const placeholders = [...fs.readFileSync(templateFile, "utf8").matchAll(/\{\{findings:([a-z][a-z0-9_]*)\}\}/g)]
+    .map((match) => match[1]);
+  if (JSON.stringify(placeholders) !== JSON.stringify(sections.map((section) => section.key))) {
+    throw new Error(`template placeholders drifted from section keys: ${templateFile}`);
+  }
+  if (typeof record.create_target_pattern !== "string") throw new Error(`taxonomy target pattern missing for ${templateFile}`);
+}
+
+function buildV2BootstrapPlan({ taxonomyState, allUnknown = false, coverageLimitations = [] }) {
+  const observedSource = { path: "src/server.mjs", line_start: 1, line_end: 1 };
+  const secondSource = { path: "package.json", line_start: 5, line_end: 5 };
+  let classificationIndex = 0;
+  const classifications = [
+    { classification: "observed_fact", statement: "The server module imports the order loader.", sources: [observedSource] },
+    {
+      classification: "inference",
+      statement: "The package likely runs as one server process.",
+      confidence: 0.75,
+      sources: [secondSource],
+    },
+    {
+      classification: "conflict",
+      statement: "The module boundary and package entrypoint provide conflicting placement signals.",
+      sources: [observedSource, secondSource],
+    },
+    {
+      classification: "unknown",
+      statement: "Deployment ownership is undocumented.",
+      sources: [],
+      missing_evidence: "No deployment ownership record was inventoried.",
+    },
+  ];
+  return {
+    kind: "kg.docs_bootstrap_plan",
+    version: 2,
+    documents: taxonomyState.taxonomy.core_types.map((docType) => {
+      const template = taxonomyState.templates.get(docType);
+      return {
+        doc_type: docType,
+        slug: template.create_target_pattern.includes("{slug}") ? `r33-${docType}` : null,
+        title: `R3.3 ${docType} bootstrap draft`,
+        mode: "create",
+        target_path: null,
+        coverage_limitations: [...coverageLimitations],
+        sections: template.sections.map((section) => {
+          const finding = allUnknown || classificationIndex >= classifications.length
+            ? {
+                classification: "unknown",
+                statement: `Evidence for ${docType} ${section.key} remains incomplete.`,
+                sources: [],
+                missing_evidence: `The static inventory does not establish ${docType} ${section.key}.`,
+              }
+            : classifications[classificationIndex++];
+          return { key: section.key, findings: [structuredClone(finding)] };
+        }),
+      };
+    }),
+  };
+}
+
+function v2ExpectedTargets(taxonomyState, plan) {
+  return plan.documents.map((document) => {
+    const template = taxonomyState.templates.get(document.doc_type);
+    return template.create_target_pattern
+      .replace("{sequence}", "0001")
+      .replace("{slug}", document.slug ?? "");
+  });
+}
+
+function decodeEvidenceMarkers(text) {
+  return [...text.matchAll(/^<!-- kg:evidence ([A-Za-z0-9_-]+) -->$/gm)].map((match) =>
+    JSON.parse(Buffer.from(match[1], "base64url").toString("utf8")));
+}
+
+function canonicalJsonForTest(value) {
+  if (Array.isArray(value)) return `[${value.map(canonicalJsonForTest).join(",")}]`;
+  if (value !== null && typeof value === "object") {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalJsonForTest(value[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function inventoryDigestForTest(inventory) {
+  return crypto.createHash("sha256").update(canonicalJsonForTest(inventory)).digest("hex");
+}
+
+function canonicalFindingMarkersFromRaw(document) {
+  return document.sections.flatMap((section) => section.findings.map((finding) => ({ section: section.key, ...finding })));
+}
+
+function runV2Bootstrap(context, setup, plan) {
+  writeJson(setup.plan, plan);
+  runNode(
+    context,
+    DOCS_BOOTSTRAP,
+    ["--project-root", setup.project, "--inventory", setup.inventory, "--plan", setup.plan],
+    { cwd: setup.project },
+  );
 }
 
 function runPart2(context) {
@@ -1466,7 +1606,7 @@ function runPart2(context) {
     ensure(context, rejected[0] === rejected[1] && rejected[0].includes("symbolic link"), "symlink differential verdicts differ");
   });
 
-  testCase(context, "positive_inventory_plan_render_chain", () => {
+  testCase(context, "v1_architecture_plan_remains_compatible", () => {
     const setup = setupBootstrapCase(context, "positive");
     const inventory = readJson(setup.inventory);
     const safePaths = inventory.files.map((file) => file.path);
@@ -1541,15 +1681,143 @@ function runPart2(context) {
     ensure(context, validation.stdout.includes("1/1 registered project document(s) valid"), "project document validator did not pass");
   });
 
-  testCase(context, "reject_unknown_and_script_owned_plan_fields", () => {
+  testCase(context, "bootstrap_creates_all_eight_core_document_types", () => {
+    const setup = setupBootstrapCase(context, "v2-all-types");
+    const taxonomyState = bootstrapTaxonomyContract();
+    const plan = buildV2BootstrapPlan({ taxonomyState });
+    runV2Bootstrap(context, setup, plan);
+    const targets = v2ExpectedTargets(taxonomyState, plan);
+    ensure(context, targets.length === taxonomyState.taxonomy.core_types.length, "target count differs from taxonomy core_types");
+    for (const [index, targetPath] of targets.entries()) {
+      const text = fs.readFileSync(path.join(setup.project, targetPath), "utf8");
+      const { frontmatter } = protocol.splitFrontmatter(text);
+      const document = plan.documents[index];
+      ensure(context, frontmatter.doc_type === document.doc_type, `rendered doc_type mismatch for ${targetPath}`);
+      ensure(context, frontmatter.status === "draft", `rendered status mismatch for ${targetPath}`);
+      const sectionKeys = [...text.matchAll(/^<!-- kg:section ([a-z][a-z0-9_]*) -->$/gm)].map((match) => match[1]);
+      const templateKeys = taxonomyState.templates.get(document.doc_type).sections.map((section) => section.key);
+      ensure(context, canonicalJsonForTest(sectionKeys) === canonicalJsonForTest(templateKeys), `template section drift for ${targetPath}`);
+    }
+    const validation = runNode(context, DOCS_VALIDATE, targets.map((target) => path.join(setup.project, target)), {
+      cwd: setup.project,
+      env: { KG_ROOT: setup.project },
+    });
+    ensure(context, validation.stdout.includes(`${targets.length}/${targets.length} registered project document(s) valid`), "eight-document validator did not pass");
+    runNode(
+      context,
+      DOCS_BOOTSTRAP,
+      ["--check", "--project-root", setup.project, "--inventory", setup.inventory, "--plan", setup.plan],
+      { cwd: setup.project },
+    );
+  });
+
+  testCase(context, "rendered_evidence_exactly_matches_canonical_plan", () => {
+    const setup = setupBootstrapCase(context, "v2-evidence");
+    const taxonomyState = bootstrapTaxonomyContract();
+    const plan = buildV2BootstrapPlan({ taxonomyState });
+    runV2Bootstrap(context, setup, plan);
+    const digest = inventoryDigestForTest(readJson(setup.inventory));
+    const targets = v2ExpectedTargets(taxonomyState, plan);
+    for (const [index, targetPath] of targets.entries()) {
+      const document = plan.documents[index];
+      const text = fs.readFileSync(path.join(setup.project, targetPath), "utf8");
+      const markers = decodeEvidenceMarkers(text);
+      const documentMarker = markers.shift();
+      ensure(
+        context,
+        canonicalJsonForTest(documentMarker) === canonicalJsonForTest({
+          kind: "kg.bootstrap_document",
+          version: 2,
+          inventory_sha256: digest,
+          doc_type: document.doc_type,
+          target_path: targetPath,
+          coverage_limitations: document.coverage_limitations,
+        }),
+        `document evidence marker differs for ${targetPath}`,
+      );
+      ensure(
+        context,
+        canonicalJsonForTest(markers) === canonicalJsonForTest(canonicalFindingMarkersFromRaw(document)),
+        `finding evidence markers differ for ${targetPath}`,
+      );
+      const expectedRefs = [...new Set(document.sections.flatMap((section) =>
+        section.findings.flatMap((finding) => finding.sources.map((source) => {
+          const suffix = source.line_start === source.line_end ? `#L${source.line_start}` : `#L${source.line_start}-L${source.line_end}`;
+          return `${source.path}${suffix}`;
+        }))))];
+      const { frontmatter } = protocol.splitFrontmatter(text);
+      ensure(context, canonicalJsonForTest(frontmatter.source_refs) === canonicalJsonForTest(expectedRefs), `source_refs differ for ${targetPath}`);
+    }
+  });
+
+  testCase(context, "classification_rules_for_fact_inference_conflict_unknown", () => {
+    const setup = setupBootstrapCase(context, "v2-classification");
+    const taxonomyState = bootstrapTaxonomyContract();
+    const positive = buildV2BootstrapPlan({ taxonomyState });
+    runV2Bootstrap(context, setup, positive);
+    const classifications = new Set(v2ExpectedTargets(taxonomyState, positive).flatMap((target) =>
+      decodeEvidenceMarkers(fs.readFileSync(path.join(setup.project, target), "utf8"))
+        .filter((marker) => marker.classification)
+        .map((marker) => marker.classification)));
+    ensure(context, canonicalJsonForTest([...classifications].sort()) === canonicalJsonForTest(Object.keys(FINDING_FIELDS_FOR_TEST).sort()), "rendered classifications are incomplete");
+
+    const mutations = [
+      ["observed-empty", (finding) => { finding.sources = []; }],
+      ["inference-no-confidence", (finding) => { delete finding.confidence; }],
+      ["inference-out-of-range", (finding) => { finding.confidence = 1.1; }],
+      ["conflict-one-source", (finding) => { finding.sources = finding.sources.slice(0, 1); }],
+      ["conflict-duplicate-source", (finding) => { finding.sources = [finding.sources[0], finding.sources[0]]; }],
+      ["unknown-no-reason", (finding) => { delete finding.missing_evidence; }],
+      ["unknown-with-source", (finding) => { finding.sources = [{ path: "src/server.mjs", line_start: 1, line_end: 1 }]; }],
+    ];
+    for (const [name, mutate] of mutations) {
+      const negative = setupBootstrapCase(context, `v2-classification-${name}`);
+      const plan = buildV2BootstrapPlan({ taxonomyState });
+      const findings = plan.documents.flatMap((document) => document.sections.flatMap((section) => section.findings));
+      const classification = name.startsWith("observed-") ? "observed_fact" : name.split("-")[0];
+      mutate(findings.find((finding) => finding.classification === classification));
+      expectBootstrapFailure(context, negative, plan);
+    }
+  });
+
+  testCase(context, "eight_document_batch_is_atomic", () => {
+    const taxonomyState = bootstrapTaxonomyContract();
+    const invalid = setupBootstrapCase(context, "v2-atomic-invalid-last");
+    const invalidPlan = buildV2BootstrapPlan({ taxonomyState });
+    invalidPlan.documents.at(-1).sections.at(-1).findings = [];
+    expectBootstrapFailure(context, invalid, invalidPlan);
+
+    const occupied = setupBootstrapCase(context, "v2-atomic-existing-last");
+    const occupiedPlan = buildV2BootstrapPlan({ taxonomyState });
+    const lastTarget = v2ExpectedTargets(taxonomyState, occupiedPlan).at(-1);
+    fs.mkdirSync(path.dirname(path.join(occupied.project, lastTarget)), { recursive: true });
+    fs.writeFileSync(path.join(occupied.project, lastTarget), "human-authored glossary\n");
+    expectBootstrapFailure(context, occupied, occupiedPlan);
+    ensure(context, fs.readFileSync(path.join(occupied.project, lastTarget), "utf8") === "human-authored glossary\n", "occupied target bytes changed");
+  });
+
+  testCase(context, "rejects_unknown_and_script_owned_fields", () => {
     const setup = setupBootstrapCase(context, "unknown-plan");
     const plan = readJson(setup.plan);
     plan.status = "accepted";
     plan.created_at = FIXED_NOW;
     expectBootstrapFailure(context, setup, plan);
+
+    const taxonomyState = bootstrapTaxonomyContract();
+    for (const [name, mutate] of [
+      ["inventory-hash", (value) => { value.inventory_sha256 = "a".repeat(64); }],
+      ["document-status", (value) => { value.documents[0].status = "accepted"; }],
+      ["document-id", (value) => { value.documents[0].id = "DOC-0001"; }],
+      ["finding-created-at", (value) => { value.documents[0].sections[0].findings[0].created_at = FIXED_NOW; }],
+    ]) {
+      const negative = setupBootstrapCase(context, `unknown-v2-${name}`);
+      const value = buildV2BootstrapPlan({ taxonomyState });
+      mutate(value);
+      expectBootstrapFailure(context, negative, value);
+    }
   });
 
-  testCase(context, "reject_missing_uninventoried_and_out_of_range_sources", () => {
+  testCase(context, "rejects_uninventoried_out_of_range_and_drifted_sources", () => {
     for (const variant of ["missing", "uninventoried", "out-of-range", "symlink", "kg-case"]) {
       const setup = setupBootstrapCase(context, `bad-source-${variant}`);
       const plan = readJson(setup.plan);
@@ -1560,15 +1828,45 @@ function runPart2(context) {
       if (variant === "kg-case") plan.observed_facts[0].source.path = ".KG/uncompiled.yaml";
       expectBootstrapFailure(context, setup, plan);
     }
+    const taxonomyState = bootstrapTaxonomyContract();
+    for (const variant of ["uninventoried", "out-of-range"]) {
+      const setup = setupBootstrapCase(context, `bad-v2-source-${variant}`);
+      const plan = buildV2BootstrapPlan({ taxonomyState });
+      const finding = plan.documents[0].sections[0].findings[0];
+      if (variant === "uninventoried") finding.sources[0].path = "src/missing.mjs";
+      if (variant === "out-of-range") finding.sources[0].line_end = 999;
+      expectBootstrapFailure(context, setup, plan);
+    }
+    const drifted = setupBootstrapCase(context, "bad-v2-source-drift");
+    const driftedPlan = buildV2BootstrapPlan({ taxonomyState });
+    fs.appendFileSync(path.join(drifted.project, "src", "server.mjs"), "\n// changed after inventory\n");
+    expectBootstrapFailure(context, drifted, driftedPlan);
   });
 
-  testCase(context, "reject_truncation_without_coverage_limitation", () => {
+  testCase(context, "rejects_truncation_without_coverage_limitations", () => {
     const setup = setupBootstrapCase(context, "truncated", ["--max-files", "1"]);
     const inventory = readJson(setup.inventory);
     ensure(context, inventory.truncated === true, "max-files inventory did not report truncation");
     const plan = readJson(setup.plan);
     plan.coverage_limitations = [];
     expectBootstrapFailure(context, setup, plan);
+
+    const taxonomyState = bootstrapTaxonomyContract();
+    const v2 = setupBootstrapCase(context, "truncated-v2", ["--max-files", "1"]);
+    const rejected = buildV2BootstrapPlan({ taxonomyState, allUnknown: true });
+    expectBootstrapFailure(context, v2, rejected);
+
+    const accepted = setupBootstrapCase(context, "truncated-v2-covered", ["--max-files", "1"]);
+    const limitation = "The max_files limit truncated repository coverage.";
+    const acceptedPlan = buildV2BootstrapPlan({ taxonomyState, allUnknown: true, coverageLimitations: [limitation] });
+    runV2Bootstrap(context, accepted, acceptedPlan);
+    for (const target of v2ExpectedTargets(taxonomyState, acceptedPlan)) {
+      const text = fs.readFileSync(path.join(accepted.project, target), "utf8");
+      const { frontmatter } = protocol.splitFrontmatter(text);
+      const documentMarker = decodeEvidenceMarkers(text)[0];
+      ensure(context, canonicalJsonForTest(frontmatter.coverage_limitations) === canonicalJsonForTest([limitation]), `frontmatter lost coverage limitation: ${target}`);
+      ensure(context, canonicalJsonForTest(documentMarker.coverage_limitations) === canonicalJsonForTest([limitation]), `evidence marker lost coverage limitation: ${target}`);
+    }
   });
 
   testCase(context, "reject_inference_without_confidence_or_evidence", () => {
@@ -1581,7 +1879,7 @@ function runPart2(context) {
     }
   });
 
-  testCase(context, "reject_source_drift_after_inventory", () => {
+  testCase(context, "v1_source_drift_remains_rejected", () => {
     const setup = setupBootstrapCase(context, "source-drift");
     fs.appendFileSync(path.join(setup.project, "src", "server.mjs"), "\n// changed after inventory\n");
     expectBootstrapFailure(context, setup, readJson(setup.plan));
@@ -1601,7 +1899,53 @@ function runPart2(context) {
     ensure(context, fs.readFileSync(target, "utf8") === "human-authored\n", "existing architecture target was modified");
   });
 
-  testCase(context, "gb_evaluator_requires_tool_chain_and_rejects_denials", () => {
+  testCase(context, "kn0016_host_code_never_executes", () => {
+    const setup = setupBootstrapCase(context, "kn0016-static-boundary");
+    const inventory = readJson(setup.inventory);
+    const safePaths = inventory.files.map((file) => file.path);
+    for (const forbidden of [
+      "lower/.kg/uncompiled.yaml",
+      ".KG/uncompiled.yaml",
+      "mixed/.kG/mixed-case.yaml",
+      ".env",
+      "secrets/notes.txt",
+      "private-key.pem",
+      "service.sqlite",
+      "binary.png",
+      "binary.txt",
+      "large.txt",
+      "node_modules/unsafe-package/index.js",
+      "generated/client.js",
+      "linked-src",
+      "outside-link.txt",
+      "excluded-link.yaml",
+    ]) {
+      ensure(context, !safePaths.some((item) => item === forbidden || item.startsWith(`${forbidden}/`)), `KN-0016 exclusion failed: ${forbidden}`);
+    }
+    ensure(context, inventory.stats.excluded_kg_directories >= 3, "three mixed-case .kg directories were not excluded");
+    ensure(context, inventory.stats.excluded_symlinks >= 3, "symlink classes were not excluded");
+    ensure(context, !fs.existsSync(path.join(setup.project, "should-not-run.executed")), "inventory executed host code");
+    const taxonomyState = bootstrapTaxonomyContract();
+    const plan = buildV2BootstrapPlan({ taxonomyState, allUnknown: true });
+    runV2Bootstrap(context, setup, plan);
+    ensure(context, !fs.existsSync(path.join(setup.project, "should-not-run.executed")), "renderer executed host code");
+
+    const forged = setupBootstrapCase(context, "kn0016-forged-inventory");
+    const forgedInventory = readJson(forged.inventory);
+    const secret = fs.readFileSync(path.join(forged.project, ".env"));
+    forgedInventory.files.push({
+      path: ".env",
+      kind: "text",
+      bytes: secret.byteLength,
+      line_count: secret.toString("utf8").split(/\r?\n/).length,
+      sha256: crypto.createHash("sha256").update(secret).digest("hex"),
+    });
+    forgedInventory.stats.safe_files += 1;
+    writeJson(forged.inventory, forgedInventory);
+    expectBootstrapFailure(context, forged, buildV2BootstrapPlan({ taxonomyState, allUnknown: true }));
+  });
+
+  testCase(context, "real_runner_adapter_cannot_invent_read_evidence", () => {
     const fixture = path.join(ROOT, "scripts", "fixtures", "m2", "bootstrap.fixture.json");
     const passingArtifacts = path.join(context.root, "gb-evaluator-pass");
     runNode(
@@ -1668,6 +2012,19 @@ function runPart2(context) {
       shellPlanResult.failures.tools.some((failure) => failure.includes("JSON plan submission tool event missing")),
       "Bash plan event was accepted as plan submission",
     );
+
+    const v2Artifacts = path.join(context.root, "gb3-evaluator-v2-pass");
+    runNode(
+      context,
+      EVAL_BOOTSTRAP,
+      ["--fixture", BOOTSTRAP_V2_EVAL_FIXTURE, "--artifacts", v2Artifacts],
+      { cwd: ROOT, env: { KG_EVAL_RUNNER: MOCK_BOOTSTRAP_V2_RUNNER } },
+    );
+    const v2Result = readJson(path.join(v2Artifacts, "result.json"));
+    ensure(context, v2Result.pass === true, "version 2 G-B3 evaluator fixture did not pass");
+    const oracleAudit = readJson(path.join(v2Artifacts, "oracle-isolation-audit.json"));
+    ensure(context, oracleAudit.pass === true && oracleAudit.checked_values === 4, "version 2 oracle isolation audit did not pass");
+    ensure(context, readJson(path.join(v2Artifacts, "products.json")).filter((item) => item.kind === "kg.project_document").length === 8, "version 2 evaluator lost document products");
   });
 }
 

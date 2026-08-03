@@ -12,6 +12,7 @@ documents:
   architecture:
     path: docs/architecture/
     template_path: skills/kg-docs/assets/templates/architecture.md
+    create_target_pattern: docs/architecture/overview.md
     diataxis_quadrant: explanation
     arc42_sections: "3|5|6|7|8|10"
     detection_rule: "Detect a registered architecture document under the configured path."
@@ -19,6 +20,7 @@ documents:
   decision:
     path: docs/decisions/
     template_path: skills/kg-docs/assets/templates/decision.md
+    create_target_pattern: docs/decisions/{sequence}-{slug}.md
     diataxis_quadrant: explanation
     arc42_sections: "9"
     detection_rule: "Detect a registered decision document under the configured path."
@@ -26,6 +28,7 @@ documents:
   standard:
     path: docs/standards/
     template_path: skills/kg-docs/assets/templates/standard.md
+    create_target_pattern: docs/standards/{slug}.md
     diataxis_quadrant: reference
     arc42_sections: "2"
     detection_rule: "Detect a registered standard document under the configured path."
@@ -33,6 +36,7 @@ documents:
   api:
     path: docs/api/
     template_path: skills/kg-docs/assets/templates/api.md
+    create_target_pattern: docs/api/{slug}.md
     diataxis_quadrant: reference
     arc42_sections: "5|8"
     detection_rule: "Detect a registered API reference under the configured path."
@@ -40,6 +44,7 @@ documents:
   runbook:
     path: docs/runbooks/
     template_path: skills/kg-docs/assets/templates/runbook.md
+    create_target_pattern: docs/runbooks/{slug}.md
     diataxis_quadrant: howto
     arc42_sections: "7|11"
     detection_rule: "Detect a registered operational runbook under the configured path."
@@ -47,6 +52,7 @@ documents:
   trap:
     path: docs/traps/
     template_path: skills/kg-docs/assets/templates/trap.md
+    create_target_pattern: docs/traps/trap-{slug}.md
     diataxis_quadrant: howto
     arc42_sections: "8|11"
     detection_rule: "Detect a registered trap document under the configured path."
@@ -54,6 +60,7 @@ documents:
   debt:
     path: docs/traps/
     template_path: skills/kg-docs/assets/templates/debt.md
+    create_target_pattern: docs/traps/debt-{slug}.md
     diataxis_quadrant: explanation
     arc42_sections: "8|10|11"
     detection_rule: "Detect a registered debt document under the configured path."
@@ -61,6 +68,7 @@ documents:
   glossary:
     path: docs/glossary.md
     template_path: skills/kg-docs/assets/templates/glossary.md
+    create_target_pattern: docs/glossary.md
     diataxis_quadrant: reference
     arc42_sections: "12"
     detection_rule: "Detect the project glossary at the configured path."

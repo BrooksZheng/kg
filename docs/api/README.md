@@ -58,7 +58,7 @@ node skills/kg-observe/scripts/check-threshold.mjs
 Agent drafts are strict JSON. The writer generates `id` and `at`, rejects
 agent-submitted `compiled_to_kn`, and stores canonical KYAML.
 
-## Brownfield architecture bootstrap
+## Brownfield project-document bootstrap
 
 ```bash
 node skills/kg-docs/scripts/inventory.mjs \
@@ -69,8 +69,10 @@ node skills/kg-docs/scripts/bootstrap.mjs \
   --plan <bootstrap-plan.json>
 ```
 
-The inventory is static-only. The plan is strict JSON. R2.1 creates only a
-missing `docs/architecture/overview.md`.
+The inventory is static-only. The plan is strict JSON. Version 2 routes and
+creates all taxonomy core types as one atomic draft batch. Required section
+keys come from `skills/kg-docs/assets/templates/`. Version 1 remains available
+for the M2 architecture-only plan.
 
 ## Project-document sources
 

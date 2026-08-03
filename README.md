@@ -211,9 +211,11 @@ node .agents/skills/kg-docs/scripts/bootstrap.mjs \
   --plan /path/to/artifacts/bootstrap-plan.json
 ```
 
-Follow `kg-docs/SKILL.md` to create the strict JSON plan. R2.1 can create a
-missing architecture overview. Static inventory executes no host code and
-excludes `.kg/`, secrets, binaries, oversized files, and symbolic links.
+Follow `kg-docs/SKILL.md` to create the strict JSON plan. Version 2 creates one
+missing draft for every taxonomy core type in one preflighted batch. The
+architecture-only version 1 plan remains compatible. Static inventory executes
+no host code and excludes `.kg/`, secrets, binaries, oversized files,
+dependency and generated directories, and symbolic links.
 
 Validate registered documents:
 

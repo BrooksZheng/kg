@@ -17,3 +17,4 @@ fields:
   supersedes: { type: string_or_null, required: true }
   superseded_by: { type: string_or_null, required: false }
   source_refs: { type: string_list, required: false }
+  coverage_limitations: { type: string_list, required: false }

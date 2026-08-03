@@ -2,6 +2,9 @@
   "name": "kg-docs-bootstrap-fixture",
   "type": "module",
   "scripts": {
-    "start": "node src/server.mjs"
+    "start": "node src/server.mjs",
+    "build": "node should-not-run.mjs",
+    "test": "node should-not-run.mjs",
+    "migrate": "node should-not-run.mjs"
   }
 }

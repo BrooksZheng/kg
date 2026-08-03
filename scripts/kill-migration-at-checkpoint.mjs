@@ -90,6 +90,7 @@ try {
   await waitForReady(args.ready, child);
 } catch (error) {
   child.kill("SIGKILL");
+  if (stderr) process.stderr.write(stderr);
   fail(error.message);
 }
 

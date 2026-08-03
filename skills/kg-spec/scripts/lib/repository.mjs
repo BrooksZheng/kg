@@ -174,8 +174,35 @@ const INVENTORY_FIELDS = [
   "evidence",
 ];
 
+const LIMIT_FIELDS = ["max_files", "max_bytes_per_file", "max_evidence"];
+const STATS_FIELDS = [
+  "safe_files",
+  "excluded_directories",
+  "excluded_kg_directories",
+  "excluded_sensitive_directories",
+  "excluded_sensitive_files",
+  "excluded_binary_files",
+  "excluded_oversized_files",
+  "excluded_symlinks",
+];
+
 function sha256(buffer) {
   return crypto.createHash("sha256").update(buffer).digest("hex");
+}
+
+function canonicalJson(value) {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (value !== null && typeof value === "object") {
+    return `{${Object.keys(value)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+export function inventoryDigest(inventory) {
+  return sha256(Buffer.from(canonicalJson(inventory), "utf8"));
 }
 
 function normalizeRelative(value) {
@@ -202,6 +229,40 @@ function isSensitiveFile(name) {
 function looksTextual(name) {
   const lower = name.toLowerCase();
   return TEXT_EXTENSIONS.has(path.extname(lower)) || SPECIAL_TEXT_FILES.has(lower);
+}
+
+function isTextBuffer(buffer) {
+  if (buffer.includes(0)) return false;
+  const text = buffer.toString("utf8");
+  if (text.includes("\uFFFD")) return false;
+  for (const byte of buffer) {
+    if (byte < 0x20 && ![0x09, 0x0a, 0x0c, 0x0d].includes(byte)) return false;
+  }
+  return true;
+}
+
+function assertEligibleInventoryPath(root, relative, maxBytesPerFile) {
+  if (normalizeRelative(relative) !== relative || relative === "") {
+    throw new Error(`inventory path is not canonical: ${relative}`);
+  }
+  const segments = relative.split("/");
+  const directorySegments = segments.slice(0, -1).map((segment) => segment.toLowerCase());
+  if (directorySegments.includes(".kg")) throw new Error(`inventory path enters excluded .kg: ${relative}`);
+  if (directorySegments.some((segment) => SENSITIVE_DIRECTORIES.has(segment))) {
+    throw new Error(`inventory path enters a sensitive directory: ${relative}`);
+  }
+  if (directorySegments.some((segment) => EXCLUDED_DIRECTORIES.has(segment))) {
+    throw new Error(`inventory path enters an excluded directory: ${relative}`);
+  }
+  const name = segments.at(-1);
+  if (isSensitiveFile(name)) throw new Error(`inventory path is sensitive: ${relative}`);
+  if (!looksTextual(name)) throw new Error(`inventory path is not an allowed text file: ${relative}`);
+  const resolved = host.resolveSafeRelative(root, relative);
+  if (!fs.statSync(resolved.full).isFile()) throw new Error(`inventory path is not a file: ${relative}`);
+  const buffer = fs.readFileSync(resolved.full);
+  if (buffer.byteLength > maxBytesPerFile) throw new Error(`inventory path exceeds the byte limit: ${relative}`);
+  if (!isTextBuffer(buffer)) throw new Error(`inventory path is binary: ${relative}`);
+  return { resolved, buffer };
 }
 
 function fileKind(relative) {
@@ -332,7 +393,7 @@ export function buildRepositoryInventory(options = {}) {
       }
 
       const buffer = fs.readFileSync(full);
-      if (buffer.includes(0)) {
+      if (!isTextBuffer(buffer)) {
         stats.excluded_binary_files += 1;
         continue;
       }
@@ -409,6 +470,28 @@ export function validateRepositoryInventory(inventory, projectRoot) {
   if (typeof inventory.truncated !== "boolean" || !Array.isArray(inventory.truncation_reasons)) {
     throw new Error("inventory truncation fields are invalid");
   }
+  rejectUnknown(inventory.limits, LIMIT_FIELDS, "inventory.limits");
+  for (const field of LIMIT_FIELDS) {
+    if (!Number.isInteger(inventory.limits[field]) || inventory.limits[field] <= 0) {
+      throw new Error(`inventory.limits.${field} must be a positive integer`);
+    }
+  }
+  rejectUnknown(inventory.stats, STATS_FIELDS, "inventory.stats");
+  for (const field of STATS_FIELDS) {
+    if (!Number.isInteger(inventory.stats[field]) || inventory.stats[field] < 0) {
+      throw new Error(`inventory.stats.${field} must be a non-negative integer`);
+    }
+  }
+  if (inventory.files.length > inventory.limits.max_files || inventory.evidence.length > inventory.limits.max_evidence) {
+    throw new Error("inventory exceeds its declared limits");
+  }
+  if (inventory.stats.safe_files !== inventory.files.length) throw new Error("inventory safe_files count is inconsistent");
+  if (!inventory.truncated && inventory.truncation_reasons.length > 0) {
+    throw new Error("non-truncated inventory has truncation reasons");
+  }
+  if (inventory.truncated && inventory.truncation_reasons.length === 0) {
+    throw new Error("truncated inventory has no truncation reason");
+  }
 
   const byPath = new Map();
   for (const [index, file] of inventory.files.entries()) {
@@ -424,9 +507,7 @@ export function validateRepositoryInventory(inventory, projectRoot) {
       throw new Error(`inventory.files[${index}] is invalid`);
     }
     if (byPath.has(file.path)) throw new Error(`inventory contains duplicate file path: ${file.path}`);
-    const resolved = host.resolveSafeRelative(root, file.path);
-    if (!fs.statSync(resolved.full).isFile()) throw new Error(`inventory path is not a file: ${file.path}`);
-    const buffer = fs.readFileSync(resolved.full);
+    const { buffer } = assertEligibleInventoryPath(root, file.path, inventory.limits.max_bytes_per_file);
     const lineCount = buffer.toString("utf8").split(/\r?\n/).length;
     if (buffer.byteLength !== file.bytes || sha256(buffer) !== file.sha256 || lineCount !== file.line_count) {
       throw new Error(`inventory source changed after scan: ${file.path}`);

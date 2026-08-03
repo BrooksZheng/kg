@@ -1,0 +1,7 @@
+{
+  "kind": "kg.eval_bootstrap_fixture",
+  "version": 2,
+  "project_source": "scripts/fixtures/m3/bootstrap-all-types/host",
+  "oracle": "scripts/fixtures/m3/bootstrap-all-types/oracle.json",
+  "task": "Create an evidence-backed initial draft for every core project-document type declared by the installed taxonomy. Keep uncertain material explicit and use only the static repository inventory."
+}

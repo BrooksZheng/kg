@@ -1,0 +1,16 @@
+{
+  "kind": "kg.eval_bootstrap_oracle",
+  "version": 1,
+  "expected_document_count": 8,
+  "required_evidence_source_paths": [
+    "package.json",
+    "src/server.mjs",
+    "src/order-store.mjs"
+  ],
+  "prompt_isolation_values": [
+    "src/server.mjs",
+    "src/order-store.mjs",
+    "ops/service-operations.md",
+    "should-not-run.executed"
+  ]
+}
