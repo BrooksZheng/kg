@@ -1,0 +1,11 @@
+{
+  "name": "shipment-status-service",
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.mjs",
+    "build": "node should-not-run.mjs",
+    "test": "node should-not-run.mjs",
+    "migrate": "node should-not-run.mjs",
+    "install": "node should-not-run.mjs"
+  }
+}

@@ -205,6 +205,10 @@ export function inventoryDigest(inventory) {
   return sha256(Buffer.from(canonicalJson(inventory), "utf8"));
 }
 
+export function canonicalDigest(value) {
+  return sha256(Buffer.from(canonicalJson(value), "utf8"));
+}
+
 function normalizeRelative(value) {
   return String(value).replaceAll("\\", "/").replace(/^\.\/+/, "").replace(/\/+$/, "");
 }

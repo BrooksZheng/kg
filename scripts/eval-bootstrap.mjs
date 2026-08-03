@@ -20,6 +20,20 @@ const ORACLE_FIELDS = [
   "expected_document_count",
   "required_evidence_source_paths",
   "prompt_isolation_values",
+  "expected_proposal_target_paths",
+];
+const PROPOSAL_MANIFEST_FIELDS = [
+  "kind",
+  "version",
+  "proposal_id",
+  "doc_type",
+  "target_path",
+  "target_sha256",
+  "candidate_path",
+  "candidate_sha256",
+  "inventory_sha256",
+  "source_refs",
+  "status",
 ];
 
 function fail(message) {
@@ -67,7 +81,7 @@ function loadFixture(value) {
   } catch (error) {
     fail(error.message);
   }
-  if (fixture.kind !== "kg.eval_bootstrap_fixture" || ![1, 2].includes(fixture.version)) {
+  if (fixture.kind !== "kg.eval_bootstrap_fixture" || ![1, 2, 3].includes(fixture.version)) {
     fail("bootstrap fixture 的 kind/version 无效");
   }
   if (typeof fixture.task !== "string" || fixture.task.trim() === "") fail("bootstrap fixture 缺少 task");
@@ -81,8 +95,8 @@ function loadFixture(value) {
   if (host.hasPathSegment(projectSource, ".kg")) fail("bootstrap fixture 项目不得位于 .kg 内");
   let oracle = null;
   let oracleFile = null;
-  if (fixture.version === 2) {
-    if (typeof fixture.oracle !== "string" || fixture.oracle.trim() === "") fail("version 2 bootstrap fixture 缺少 evaluator oracle");
+  if ([2, 3].includes(fixture.version)) {
+    if (typeof fixture.oracle !== "string" || fixture.oracle.trim() === "") fail(`version ${fixture.version} bootstrap fixture 缺少 evaluator oracle`);
     oracleFile = resolveDeclared(fixture.oracle);
     if (!fs.existsSync(oracleFile) || !fs.statSync(oracleFile).isFile()) fail(`bootstrap oracle 不存在：${oracleFile}`);
     try {
@@ -99,10 +113,16 @@ function loadFixture(value) {
       !Array.isArray(oracle.required_evidence_source_paths) ||
       !oracle.required_evidence_source_paths.every((item) => typeof item === "string" && item.trim() !== "") ||
       !Array.isArray(oracle.prompt_isolation_values) ||
-      !oracle.prompt_isolation_values.every((item) => typeof item === "string" && item.trim() !== "")
+      !oracle.prompt_isolation_values.every((item) => typeof item === "string" && item.trim() !== "") ||
+      (oracle.expected_proposal_target_paths !== undefined &&
+        (!Array.isArray(oracle.expected_proposal_target_paths) ||
+          !oracle.expected_proposal_target_paths.every((item) => typeof item === "string" && item.trim() !== "")))
     ) {
       fail("bootstrap oracle 字段无效");
     }
+    const proposalTargets = oracle.expected_proposal_target_paths ?? [];
+    if (fixture.version === 2 && proposalTargets.length !== 0) fail("version 2 bootstrap oracle 不接受 proposal target");
+    if (fixture.version === 3 && proposalTargets.length === 0) fail("version 3 bootstrap oracle 必须声明 proposal target");
   } else if (fixture.oracle !== undefined) {
     fail("version 1 bootstrap fixture 不接受 oracle");
   }
@@ -125,7 +145,7 @@ function writeJson(file, value) {
   fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`);
 }
 
-function validateRunnerResponse(response) {
+export function validateRunnerResponse(response) {
   const errors = [];
   if (response === null || typeof response !== "object" || Array.isArray(response)) {
     return ["runner response must be an object"];
@@ -135,9 +155,7 @@ function validateRunnerResponse(response) {
     if (!Array.isArray(response[field])) errors.push(`${field} must be an array`);
   }
   if (!Array.isArray(response.tool_events)) errors.push("tool_events must be an array for G-B");
-  if (response.permission_denials !== undefined && !Array.isArray(response.permission_denials)) {
-    errors.push("permission_denials must be an array when present");
-  }
+  if (!Array.isArray(response.permission_denials)) errors.push("permission_denials must be an array");
   for (const [index, event] of (response.tool_events ?? []).entries()) {
     if (
       typeof event?.name !== "string" ||
@@ -182,6 +200,24 @@ function validateRunnerResponse(response) {
     }
   }
   return errors;
+}
+
+export function runnerEnvelopeConformanceProfile(response) {
+  const arrays = ["transcript", "file_reads", "citations", "products", "tool_events", "permission_denials"];
+  const itemFields = Object.fromEntries(arrays.map((field) => [
+    field,
+    [...new Set((response[field] ?? []).flatMap((item) => Object.keys(item ?? {})))].sort(),
+  ]));
+  const pathForm = (value) => path.isAbsolute(value) ? "absolute" : "relative";
+  return {
+    top_level_fields: ["session_id", ...arrays].filter((field) => Object.hasOwn(response, field)).sort(),
+    item_fields: itemFields,
+    path_forms: {
+      file_reads: [...new Set((response.file_reads ?? []).map((item) => pathForm(item.path)))].sort(),
+      citations: [...new Set((response.citations ?? []).map((item) => pathForm(item.path)))].sort(),
+      products: [...new Set((response.products ?? []).map((item) => pathForm(item.path)))].sort(),
+    },
+  };
 }
 
 function requireProduct(response, kind) {
@@ -249,8 +285,17 @@ function expectedV2Targets(projectRoot, plan, taxonomyState) {
     const document = byType.get(docType);
     if (!document) throw new Error(`version 2 plan is missing ${docType}`);
     const template = taxonomyState.templates.get(docType);
-    let targetPath = template.create_target_pattern.replace("{slug}", document.slug ?? "");
-    if (targetPath.includes("{sequence}")) {
+    let targetPath;
+    if (document.mode === "proposal") {
+      if (typeof document.target_path !== "string" || document.target_path.trim() === "") {
+        throw new Error(`proposal target is missing for ${docType}`);
+      }
+      targetPath = document.target_path;
+      host.resolveSafeRelative(projectRoot, targetPath);
+    } else {
+      targetPath = template.create_target_pattern.replace("{slug}", document.slug ?? "");
+    }
+    if (document.mode !== "proposal" && targetPath.includes("{sequence}")) {
       const directory = path.posix.dirname(targetPath);
       const resolvedDirectory = host.resolveSafeRelative(projectRoot, directory);
       const matcher = targetFilenamePattern(template, document.slug);
@@ -260,7 +305,7 @@ function expectedV2Targets(projectRoot, plan, taxonomyState) {
       if (names.length !== 1) throw new Error(`expected one sequence target for ${docType}, found ${names.length}`);
       targetPath = path.posix.join(directory, names[0]);
     }
-    targets.set(docType, targetPath);
+    targets.set(docType, { document, targetPath });
   }
   return targets;
 }
@@ -286,7 +331,75 @@ function normalizedFindingMarkers(document) {
   }));
 }
 
-function validateV2Documents({ response, projectRoot, plan, inventory, oracle }) {
+function fileSha256(file) {
+  return crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex");
+}
+
+export function relativeProductPath(projectRoot, product, label) {
+  const resolved = host.resolveProductPath(projectRoot, product.path, { label });
+  return path.relative(projectRoot, resolved.declared).replaceAll("\\", "/");
+}
+
+function proposalCandidates({ response, projectRoot, routes, inventory, targetBaselines }) {
+  const proposalRoutes = [...routes.values()].filter(({ document }) => document.mode === "proposal");
+  const manifestProducts = requireProducts(response, "kg.docs_bootstrap_proposal", proposalRoutes.length);
+  const candidateProducts = requireProducts(response, "kg.project_document_candidate", proposalRoutes.length);
+  const declaredCandidates = new Set(candidateProducts.map((product) => relativeProductPath(projectRoot, product, "proposal candidate")));
+  const byTarget = new Map();
+  const inventorySha256 = inventoryDigest(inventory);
+  for (const product of manifestProducts) {
+    const manifestRelative = relativeProductPath(projectRoot, product, "proposal manifest");
+    const manifestFile = path.join(projectRoot, manifestRelative);
+    const manifest = JSON.parse(fs.readFileSync(manifestFile, "utf8"));
+    rejectUnknown(manifest, PROPOSAL_MANIFEST_FIELDS, "proposal manifest");
+    const route = [...routes.values()].find(({ targetPath }) => targetPath === manifest.target_path);
+    if (!route || route.document.mode !== "proposal") throw new Error(`unexpected proposal target: ${manifest.target_path}`);
+    if (byTarget.has(manifest.target_path)) throw new Error(`duplicate proposal target: ${manifest.target_path}`);
+    const target = path.join(projectRoot, manifest.target_path);
+    const targetSha256 = fileSha256(target);
+    if (targetBaselines.get(manifest.target_path) !== targetSha256) {
+      throw new Error(`proposal changed target bytes: ${manifest.target_path}`);
+    }
+    const candidate = host.resolveProductPath(projectRoot, manifest.candidate_path, { label: "proposal candidate" });
+    const candidateRelative = path.relative(projectRoot, candidate.declared).replaceAll("\\", "/");
+    if (!declaredCandidates.has(candidateRelative)) throw new Error(`proposal candidate product missing: ${candidateRelative}`);
+    const candidateSha256 = fileSha256(candidate.declared);
+    const contentId = crypto.createHash("sha256").update(canonicalJson({
+      target_path: manifest.target_path,
+      target_sha256: targetSha256,
+      candidate_sha256: candidateSha256,
+      inventory_sha256: inventorySha256,
+    })).digest("hex");
+    const proposalId = `bootstrap-${contentId}`;
+    const bundlePath = `docs/proposals/${proposalId}`;
+    if (manifestRelative !== `${bundlePath}/manifest.json` || candidateRelative !== `${bundlePath}/candidate.md`) {
+      throw new Error(`proposal bundle path is not content addressed: ${manifest.target_path}`);
+    }
+    const candidateText = fs.readFileSync(candidate.declared, "utf8");
+    const { frontmatter } = protocol.splitFrontmatter(candidateText);
+    const expectedManifest = {
+      kind: "kg.docs_bootstrap_proposal",
+      version: 1,
+      proposal_id: proposalId,
+      doc_type: route.document.doc_type,
+      target_path: manifest.target_path,
+      target_sha256: targetSha256,
+      candidate_path: candidateRelative,
+      candidate_sha256: candidateSha256,
+      inventory_sha256: inventorySha256,
+      source_refs: frontmatter.source_refs ?? [],
+      status: "proposed",
+    };
+    if (canonicalJson(manifest) !== canonicalJson(expectedManifest)) {
+      throw new Error(`proposal manifest differs from target and candidate content: ${manifest.target_path}`);
+    }
+    byTarget.set(manifest.target_path, candidateRelative);
+  }
+  if (byTarget.size !== proposalRoutes.length) throw new Error("proposal products do not cover every proposal plan item");
+  return byTarget;
+}
+
+function validateV2Documents({ response, projectRoot, plan, inventory, oracle, targetBaselines }) {
   const failures = [];
   try {
     const taxonomyState = loadTaxonomyContract();
@@ -294,20 +407,31 @@ function validateV2Documents({ response, projectRoot, plan, inventory, oracle })
       throw new Error("oracle document count differs from taxonomy core_types");
     }
     const targets = expectedV2Targets(projectRoot, plan, taxonomyState);
-    const products = requireProducts(response, "kg.project_document", oracle.expected_document_count);
+    const expectedProposalTargets = [...(oracle.expected_proposal_target_paths ?? [])].sort();
+    const actualProposalTargets = [...targets.values()]
+      .filter(({ document }) => document.mode === "proposal")
+      .map(({ targetPath }) => targetPath)
+      .sort();
+    if (canonicalJson(actualProposalTargets) !== canonicalJson(expectedProposalTargets)) {
+      throw new Error("proposal plan targets differ from evaluator oracle");
+    }
+    const proposalByTarget = proposalCandidates({ response, projectRoot, routes: targets, inventory, targetBaselines });
+    const createRoutes = [...targets.values()].filter(({ document }) => document.mode === "create");
+    const products = requireProducts(response, "kg.project_document", createRoutes.length);
     const productPaths = new Set();
     for (const product of products) {
-      const resolved = host.resolveProductPath(projectRoot, product.path, { label: "project document" });
-      productPaths.add(path.relative(projectRoot, resolved.declared).replaceAll("\\", "/"));
+      productPaths.add(relativeProductPath(projectRoot, product, "project document"));
     }
-    if (canonicalJson([...productPaths].sort()) !== canonicalJson([...targets.values()].sort())) {
+    if (canonicalJson([...productPaths].sort()) !== canonicalJson(createRoutes.map(({ targetPath }) => targetPath).sort())) {
       throw new Error("project document products differ from taxonomy-derived targets");
     }
     const digest = inventoryDigest(inventory);
-    const rawByType = new Map(plan.documents.map((document) => [document.doc_type, document]));
     const allSourcePaths = new Set();
-    for (const [docType, targetPath] of targets) {
-      const text = fs.readFileSync(path.join(projectRoot, targetPath), "utf8");
+    const validatedPaths = [];
+    for (const [docType, route] of targets) {
+      const { document: rawDocument, targetPath } = route;
+      const documentPath = rawDocument.mode === "proposal" ? proposalByTarget.get(targetPath) : targetPath;
+      const text = fs.readFileSync(path.join(projectRoot, documentPath), "utf8");
       const { frontmatter } = protocol.splitFrontmatter(text);
       if (frontmatter.doc_type !== docType || frontmatter.status !== "draft") {
         throw new Error(`frontmatter identity is invalid for ${targetPath}`);
@@ -319,7 +443,6 @@ function validateV2Documents({ response, projectRoot, plan, inventory, oracle })
       }
       const markers = decodeEvidenceMarkers(text);
       const documentMarker = markers.shift();
-      const rawDocument = rawByType.get(docType);
       const expectedDocumentMarker = {
         kind: "kg.bootstrap_document",
         version: 2,
@@ -336,6 +459,7 @@ function validateV2Documents({ response, projectRoot, plan, inventory, oracle })
         throw new Error(`finding evidence markers differ from canonical plan for ${targetPath}`);
       }
       for (const marker of markers) for (const source of marker.sources) allSourcePaths.add(source.path);
+      validatedPaths.push(documentPath);
     }
     for (const required of oracle.required_evidence_source_paths) {
       if (!allSourcePaths.has(required)) throw new Error(`required evaluator-side evidence source was not used: ${required}`);
@@ -343,7 +467,7 @@ function validateV2Documents({ response, projectRoot, plan, inventory, oracle })
     if (!Array.isArray(response.citations) || response.citations.length === 0) throw new Error("runner citations are empty");
     for (const citation of response.citations) host.resolveSafeRelative(projectRoot, citation.path);
     if (fs.existsSync(path.join(projectRoot, "should-not-run.executed"))) throw new Error("bootstrap executed host code");
-    return { failures, targetPaths: [...targets.values()] };
+    return { failures, targetPaths: validatedPaths };
   } catch (error) {
     failures.push(error.message);
     return { failures, targetPaths: [] };
@@ -351,7 +475,7 @@ function validateV2Documents({ response, projectRoot, plan, inventory, oracle })
 }
 
 function oracleIsolationAudit(prompt, loaded) {
-  if (loaded.fixture.version !== 2) return { pass: true, checked_values: 0, leaked_values: [] };
+  if (loaded.fixture.version === 1) return { pass: true, checked_values: 0, leaked_values: [] };
   const leakedValues = loaded.oracle.prompt_isolation_values.filter((value) => prompt.includes(value));
   if (prompt.includes(loaded.fixture.oracle) || prompt.includes(path.basename(loaded.oracleFile))) {
     leakedValues.push("<oracle-path>");
@@ -366,17 +490,8 @@ function oracleIsolationAudit(prompt, loaded) {
   };
 }
 
-function resolveArtifactProduct(product, artifactRoot, label) {
-  const declared = path.isAbsolute(product.path)
-    ? path.resolve(product.path)
-    : path.resolve(artifactRoot, ...product.path.replaceAll("\\", "/").split("/"));
-  if (host.hasPathSegment(declared, ".kg")) throw new Error(`${label} product must not be inside .kg`);
-  const canonicalRoot = host.canonicalPath(artifactRoot);
-  const canonicalFile = host.canonicalPath(declared);
-  if (host.isOutside(canonicalRoot, canonicalFile)) throw new Error(`${label} product escapes artifacts_dir`);
-  if (!fs.existsSync(declared) || !fs.statSync(declared).isFile()) throw new Error(`${label} product does not exist`);
-  if (fs.lstatSync(declared).isSymbolicLink()) throw new Error(`${label} product must not be a symbolic link`);
-  return declared;
+export function resolveArtifactProduct(product, artifactRoot, label) {
+  return host.resolveProductPath(artifactRoot, product.path, { label: `${label} product` }).declared;
 }
 
 function isShellToolName(name) {
@@ -487,6 +602,12 @@ function main() {
   fs.mkdirSync(path.dirname(projectRoot), { recursive: true });
   fs.mkdirSync(sessionArtifacts, { recursive: true });
   fs.cpSync(loaded.projectSource, projectRoot, { recursive: true });
+  const targetBaselines = new Map();
+  for (const targetPath of loaded.oracle?.expected_proposal_target_paths ?? []) {
+    const resolved = host.resolveSafeRelative(projectRoot, targetPath);
+    if (!fs.statSync(resolved.full).isFile()) fail(`proposal oracle target 不是文件：${targetPath}`);
+    targetBaselines.set(targetPath, fileSha256(resolved.full));
+  }
   const installedSkill = path.join(projectRoot, ".agents", "skills", "kg-docs");
   fs.mkdirSync(path.dirname(installedSkill), { recursive: true });
   fs.cpSync(BOOTSTRAP_SOURCE, installedSkill, { recursive: true });
@@ -496,16 +617,18 @@ function main() {
   const inventoryScript = path.join(installedSkill, "scripts", "inventory.mjs");
   const bootstrapScript = path.join(installedSkill, "scripts", "bootstrap.mjs");
   const taxonomyFile = path.join(installedSkill, "protocol", "document-taxonomy.yaml");
-  const prompt = loaded.fixture.version === 1
-    ?
+  let prompt;
+  if (loaded.fixture.version === 1) {
+    prompt =
       `请在 project_root 中为任务“${loaded.fixture.task}”执行 kg-docs brownfield bootstrap。` +
       `先运行 ${inventoryScript}，把静态 inventory 写到 ${inventoryPath}。` +
       "读取 inventory 和完成判断所需的最小安全源码集合。" +
       `把严格 JSON 的 kg.docs_bootstrap_plan 写到 ${planPath}，不得提交 ID、时间、hash、status 或输出路径。` +
       `最后运行 ${bootstrapScript}，用该 inventory 和 plan 创建 docs/architecture/overview.md。` +
       "在 products 中登记 kg.repository_inventory、kg.docs_bootstrap_plan 和 kg.project_document。" +
-      "返回完整 transcript、file_reads、citations、products、tool_events 和 permission_denials。"
-    :
+      "返回完整 transcript、file_reads、citations、products、tool_events 和 permission_denials。";
+  } else if (loaded.fixture.version === 2) {
+    prompt =
       `请在 project_root 中为任务“${loaded.fixture.task}”执行 kg-docs brownfield bootstrap。` +
       `完整阅读已安装技能说明与 ${taxonomyFile}，按 taxonomy 和模板合同准备 version 2 plan。` +
       `先运行 ${inventoryScript}，把静态 inventory 写到 ${inventoryPath}。` +
@@ -515,6 +638,19 @@ function main() {
       `最后运行 ${bootstrapScript}，用该 inventory 和 plan 创建全部 taxonomy core document drafts。` +
       "在 products 中登记 inventory、plan，并为每份实际生成的 project document 各登记一项。" +
       "返回完整 transcript、file_reads、citations、products、tool_events 和 permission_denials。";
+  } else {
+    prompt =
+      `请在 project_root 中为任务“${loaded.fixture.task}”执行 kg-docs brownfield bootstrap。` +
+      `完整阅读已安装技能说明与 ${taxonomyFile}，按 taxonomy 和模板合同准备 version 2 plan。` +
+      `先运行 ${inventoryScript}，把静态 inventory 写到 ${inventoryPath}。` +
+      "只读取 inventory 与完成判断所需的最小安全源码集合。" +
+      `用文件写入工具把严格 JSON 的 kg.docs_bootstrap_plan 写到 ${planPath}。` +
+      "已有人工目标必须使用 proposal 和精确 target_path，缺失目标使用 create；不得提交 ID、时间、hash、status、序号或派生输出路径。" +
+      `最后运行 ${bootstrapScript}，用该 inventory 和 plan 完成全部 taxonomy core type。` +
+      "在 products 中登记 inventory、plan、每份直接 draft、每份 proposal manifest 和每份 proposal candidate。" +
+      "proposal manifest 使用 kg.docs_bootstrap_proposal，candidate 使用 kg.project_document_candidate。" +
+      "返回完整 transcript、file_reads、citations、products、tool_events 和 permission_denials。";
+  }
   const request = {
     protocol_version: "1.1",
     skill: "kg-docs",
@@ -545,6 +681,15 @@ function main() {
     : request.prompt;
   const oracleAudit = oracleIsolationAudit(auditedPrompt, loaded);
   writeJson(path.join(artifacts, "oracle-isolation-audit.json"), oracleAudit);
+  const targetHashAudit = [...targetBaselines].map(([targetPath, beforeSha256]) => {
+    const target = path.join(projectRoot, targetPath);
+    return {
+      target_path: targetPath,
+      before_sha256: beforeSha256,
+      after_sha256: fs.existsSync(target) && fs.statSync(target).isFile() ? fileSha256(target) : null,
+    };
+  });
+  writeJson(path.join(artifacts, "target-hashes.json"), targetHashAudit);
 
   const result = {
     pass: false,
@@ -598,8 +743,13 @@ function main() {
       if (!fs.existsSync(declaredDocument) || !fs.statSync(declaredDocument).isFile()) {
         throw new Error("project document product does not exist");
       }
-    } else {
+    } else if (loaded.fixture.version === 2) {
       requireProducts(response, "kg.project_document", loaded.oracle.expected_document_count);
+    } else {
+      const proposalCount = loaded.oracle.expected_proposal_target_paths.length;
+      requireProducts(response, "kg.project_document", loaded.oracle.expected_document_count - proposalCount);
+      requireProducts(response, "kg.docs_bootstrap_proposal", proposalCount);
+      requireProducts(response, "kg.project_document_candidate", proposalCount);
     }
     result.failures.tools.push(...toolChainAudit(response, inventoryFile, planFile));
   } catch (error) {
@@ -625,13 +775,20 @@ function main() {
         });
         requireRunOk(validate, "project document validation");
       } else {
-        const validated = validateV2Documents({ response, projectRoot, plan, inventory, oracle: loaded.oracle });
+        const validated = validateV2Documents({
+          response,
+          projectRoot,
+          plan,
+          inventory,
+          oracle: loaded.oracle,
+          targetBaselines,
+        });
         if (validated.failures.length) throw new Error(validated.failures.join("; "));
         const validate = runNode(DOCS_VALIDATE, validated.targetPaths.map((target) => path.join(projectRoot, target)), {
           cwd: projectRoot,
           env: { KG_ROOT: projectRoot },
         });
-        requireRunOk(validate, "eight project document validation");
+        requireRunOk(validate, "project document and proposal candidate validation");
       }
       if (fs.existsSync(path.join(projectRoot, "should-not-run.executed"))) {
         throw new Error("bootstrap executed the should-not-run fixture");
@@ -647,4 +804,4 @@ function main() {
   console.log(`kg: G-B bootstrap 门禁通过，证据保存在 ${artifacts}`);
 }
 
-main();
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main();

@@ -9,12 +9,13 @@ Create project documents from validated evidence. This skill is a supporting
 mechanism for kickoff and ordinary work sessions. It does not replace human
 review or project-document lifecycle decisions.
 
-## R3.3 brownfield bootstrap
+## Brownfield bootstrap
 
 Bootstrap creates one draft for every core document type declared by
 `protocol/document-taxonomy.yaml`. The taxonomy owns routing and each
 `assets/templates/*.md` file owns that type's required section keys. Read both
-before preparing a plan. Existing targets require the R3.4 proposal workflow.
+before preparing a plan. Missing targets use direct draft creation. Existing
+targets use content-addressed proposal bundles and remain byte-for-byte intact.
 
 ### 1. Produce the static inventory
 
@@ -80,9 +81,11 @@ documents and all template sections.
 ```
 
 Use a lowercase safe slug only when the taxonomy target pattern contains
-`{slug}`. Keep `slug` null for fixed targets. Keep `target_path` null in create
-mode. The renderer derives paths and allocates any `{sequence}` value with an
-exclusive create.
+`{slug}`. Keep `slug` null for fixed targets. In `create` mode, keep
+`target_path` null. In `proposal` mode, set `target_path` to the exact existing
+project-relative taxonomy target and keep the matching slug. The renderer
+derives create paths and allocates any `{sequence}` value with an exclusive
+create.
 
 Each template section needs at least one finding. Classification rules are:
 
@@ -110,10 +113,14 @@ node <skill>/scripts/bootstrap.mjs \
 ```
 
 The script revalidates every inventory file hash, exclusion boundary, and
-evidence range before writing. It preflights the full batch, then creates all
-registered `draft` documents. Every rendered finding carries a machine-readable
+evidence range before writing. It preflights the full batch, then creates
+registered `draft` documents for missing targets. For each existing target it
+writes `docs/proposals/bootstrap-<content-id>/manifest.json` and `candidate.md`.
+The manifest binds the target, candidate, inventory, document type, and source
+references. Identical input reuses the same bundle. Target drift after inventory
+invalidates the plan. Every rendered finding carries a machine-readable
 evidence marker. Any target, source, schema, template, or route failure leaves
-the batch with zero documents.
+the batch with zero new output.
 
 ### Version 1 compatibility
 
@@ -132,3 +139,4 @@ New brownfield sessions use version 2.
 - Never write project-document status `accepted`. Human review controls that
   lifecycle transition.
 - Never bypass `bootstrap.mjs` by writing project-document Markdown directly.
+- Never use `create` for an existing target or hand-write a proposal bundle.

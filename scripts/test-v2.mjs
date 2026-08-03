@@ -11,6 +11,12 @@ import * as kyaml from "./lib/kyaml.mjs";
 import * as protocol from "./lib/protocol.mjs";
 import * as harness from "./lib/harness.mjs";
 import * as host from "./lib/host.mjs";
+import {
+  relativeProductPath as normalizeRunnerProjectProduct,
+  resolveArtifactProduct as normalizeRunnerArtifactProduct,
+  runnerEnvelopeConformanceProfile,
+  validateRunnerResponse,
+} from "./eval-bootstrap.mjs";
 import { computeMigrationPlanId } from "../skills/kg-init/scripts/migration-lib.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -53,6 +59,8 @@ const FIXTURE_LINT = path.join(ROOT, "scripts", "lint-fixtures.mjs");
 const MOCK_BOOTSTRAP_RUNNER = path.join(ROOT, "scripts", "fixtures", "m2", "mock-bootstrap-runner.mjs");
 const MOCK_BOOTSTRAP_V2_RUNNER = path.join(ROOT, "scripts", "fixtures", "m3", "mock-bootstrap-runner.mjs");
 const BOOTSTRAP_V2_EVAL_FIXTURE = path.join(ROOT, "scripts", "fixtures", "m3", "bootstrap-all-types", "fixture.json");
+const BOOTSTRAP_PROPOSAL_EVAL_FIXTURE = path.join(ROOT, "scripts", "fixtures", "m3", "bootstrap-proposal", "fixture.json");
+const REAL_BOOTSTRAP_RUNNER_ENVELOPE = path.join(ROOT, "scripts", "fixtures", "m3", "real-bootstrap-runner-envelope.json");
 const MOCK_COMPILE_RUNNER = path.join(ROOT, "scripts", "fixtures", "m2", "mock-compile-runner.mjs");
 const MOCK_KICKOFF_RUNNER = path.join(ROOT, "scripts", "fixtures", "m2", "mock-kickoff-runner.mjs");
 const BOOTSTRAP_FIXTURE = path.join(ROOT, "scripts", "fixtures", "m2", "bootstrap");
@@ -1413,6 +1421,9 @@ function cloneBootstrapProject(destination, { hazards = false } = {}) {
     fs.mkdirSync(path.join(destination, "generated"), { recursive: true });
     fs.writeFileSync(path.join(destination, "generated", "client.js"), "generated\n");
     fs.writeFileSync(path.join(destination, "private-key.pem"), "private\n");
+    fs.writeFileSync(path.join(destination, "certificate.pem"), "certificate\n");
+    fs.writeFileSync(path.join(destination, "credentials.json"), "{}\n");
+    fs.writeFileSync(path.join(destination, "api-secret.txt"), "secret\n");
     fs.writeFileSync(path.join(destination, "service.sqlite"), "database\n");
     fs.writeFileSync(path.join(destination, "binary.png"), Buffer.from([0, 1, 2, 3]));
     fs.writeFileSync(path.join(destination, "binary.txt"), Buffer.from([1, 2, 3, 4]));
@@ -1422,15 +1433,33 @@ function cloneBootstrapProject(destination, { hazards = false } = {}) {
     fs.writeFileSync(outside, "outside\n");
     fs.symlinkSync(outside, path.join(destination, "outside-link.txt"));
     fs.symlinkSync(path.join(destination, ".KG", "uncompiled.yaml"), path.join(destination, "excluded-link.yaml"));
+    const executableDirectory = path.join(destination, "executable-sentinels");
+    fs.mkdirSync(executableDirectory);
+    for (const name of ["build", "test", "migration", "install"]) {
+      fs.writeFileSync(
+        path.join(executableDirectory, `${name}.mjs`),
+        `import fs from "node:fs";\nfs.writeFileSync(new URL("../${name}.executed", import.meta.url), "executed\\n");\n`,
+      );
+    }
+    const manifest = readJson(path.join(destination, "package.json"));
+    manifest.scripts = {
+      ...manifest.scripts,
+      build: "node executable-sentinels/build.mjs",
+      test: "node executable-sentinels/test.mjs",
+      migrate: "node executable-sentinels/migration.mjs",
+      install: "node executable-sentinels/install.mjs",
+    };
+    writeJson(path.join(destination, "package.json"), manifest);
   }
 }
 
-function setupBootstrapCase(context, name, inventoryArgs = []) {
+function setupBootstrapCase(context, name, inventoryArgs = [], beforeInventory = null) {
   const caseRoot = path.join(context.root, name);
   const project = path.join(caseRoot, "project");
   const artifacts = path.join(caseRoot, "artifacts");
   fs.mkdirSync(artifacts, { recursive: true });
   cloneBootstrapProject(project, { hazards: true });
+  if (beforeInventory) beforeInventory(project);
   const inventory = path.join(artifacts, "repository-inventory.json");
   const plan = path.join(artifacts, "bootstrap-plan.json");
   fs.copyFileSync(path.join(BOOTSTRAP_FIXTURE, "plan.valid.json"), plan);
@@ -1563,6 +1592,88 @@ function inventoryDigestForTest(inventory) {
   return crypto.createHash("sha256").update(canonicalJsonForTest(inventory)).digest("hex");
 }
 
+function contentHashForTest(value) {
+  return crypto.createHash("sha256").update(canonicalJsonForTest(value)).digest("hex");
+}
+
+function writeManualProjectDocument(project, targetPath, docType, title = `Human ${docType}`) {
+  const file = path.join(project, targetPath);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const frontmatter = {
+    kind: "kg.project_document",
+    title,
+    doc_type: docType,
+    status: "draft",
+    owners: [],
+    supersedes: null,
+    source_refs: [],
+  };
+  fs.writeFileSync(file, `---\n${kyaml.stringify(frontmatter).trimEnd()}\n---\n\n# ${title}\n\nHuman-authored content.\n`);
+  return file;
+}
+
+function makeAllDocumentsProposals(project, taxonomyState, plan) {
+  const targets = v2ExpectedTargets(taxonomyState, plan);
+  for (const [index, targetPath] of targets.entries()) {
+    const document = plan.documents[index];
+    writeManualProjectDocument(project, targetPath, document.doc_type);
+    document.mode = "proposal";
+    document.target_path = targetPath;
+  }
+  return targets;
+}
+
+function proposalBundles(project) {
+  const root = path.join(project, "docs", "proposals");
+  if (!fs.existsSync(root)) return [];
+  return fs.readdirSync(root, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && entry.name.startsWith("bootstrap-"))
+    .map((entry) => {
+      const bundle = path.join(root, entry.name);
+      const manifestFile = path.join(bundle, "manifest.json");
+      const candidateFile = path.join(bundle, "candidate.md");
+      return { bundle, manifestFile, candidateFile, manifest: readJson(manifestFile) };
+    })
+    .sort((left, right) => left.bundle.localeCompare(right.bundle));
+}
+
+function assertProposalBundle(context, setup, bundle, inventory) {
+  const target = path.join(setup.project, bundle.manifest.target_path);
+  const targetSha256 = fileHash(target);
+  const candidateSha256 = fileHash(bundle.candidateFile);
+  const inventorySha256 = inventoryDigestForTest(inventory);
+  const contentId = contentHashForTest({
+    target_path: bundle.manifest.target_path,
+    target_sha256: targetSha256,
+    candidate_sha256: candidateSha256,
+    inventory_sha256: inventorySha256,
+  });
+  const proposalId = `bootstrap-${contentId}`;
+  const bundlePath = `docs/proposals/${proposalId}`;
+  ensure(context, path.basename(bundle.bundle) === proposalId, "proposal directory is not content addressed");
+  ensure(
+    context,
+    canonicalJsonForTest(bundle.manifest) === canonicalJsonForTest({
+      kind: "kg.docs_bootstrap_proposal",
+      version: 1,
+      proposal_id: proposalId,
+      doc_type: bundle.manifest.doc_type,
+      target_path: bundle.manifest.target_path,
+      target_sha256: targetSha256,
+      candidate_path: `${bundlePath}/candidate.md`,
+      candidate_sha256: candidateSha256,
+      inventory_sha256: inventorySha256,
+      source_refs: bundle.manifest.source_refs,
+      status: "proposed",
+    }),
+    `proposal manifest fields or hashes are invalid for ${bundle.manifest.target_path}`,
+  );
+  const candidate = fs.readFileSync(bundle.candidateFile, "utf8");
+  const { frontmatter } = protocol.splitFrontmatter(candidate);
+  ensure(context, frontmatter.doc_type === bundle.manifest.doc_type && frontmatter.status === "draft", "proposal candidate identity is invalid");
+  ensure(context, canonicalJsonForTest(frontmatter.source_refs ?? []) === canonicalJsonForTest(bundle.manifest.source_refs), "proposal source_refs differ from candidate");
+}
+
 function canonicalFindingMarkersFromRaw(document) {
   return document.sections.flatMap((section) => section.findings.map((finding) => ({ section: section.key, ...finding })));
 }
@@ -1575,6 +1686,63 @@ function runV2Bootstrap(context, setup, plan) {
     ["--project-root", setup.project, "--inventory", setup.inventory, "--plan", setup.plan],
     { cwd: setup.project },
   );
+}
+
+function assertRunnerAdapterConformance(context, artifacts, label) {
+  const realEnvelope = readJson(REAL_BOOTSTRAP_RUNNER_ENVELOPE);
+  const mockEnvelope = readJson(path.join(artifacts, "runner-output.json"));
+  ensure(context, validateRunnerResponse(realEnvelope).length === 0, "saved real runner envelope is invalid");
+  ensure(context, validateRunnerResponse(mockEnvelope).length === 0, `${label} mock runner envelope is invalid`);
+  ensure(
+    context,
+    canonicalJsonForTest(runnerEnvelopeConformanceProfile(mockEnvelope)) ===
+      canonicalJsonForTest(runnerEnvelopeConformanceProfile(realEnvelope)),
+    `${label} mock runner fields or path forms differ from the saved real envelope`,
+  );
+  for (const field of ["session_id", "transcript", "file_reads", "citations", "products", "tool_events", "permission_denials"]) {
+    const realMissing = structuredClone(realEnvelope);
+    const mockMissing = structuredClone(mockEnvelope);
+    delete realMissing[field];
+    delete mockMissing[field];
+    ensure(
+      context,
+      canonicalJsonForTest(validateRunnerResponse(realMissing)) === canonicalJsonForTest(validateRunnerResponse(mockMissing)),
+      `${label} missing ${field} verdict differs from the saved real envelope`,
+    );
+  }
+
+  const artifactRoot = path.join(artifacts, "session");
+  const inventoryProduct = mockEnvelope.products.find((product) => product.kind === "kg.repository_inventory");
+  const absoluteArtifact = normalizeRunnerArtifactProduct(inventoryProduct, artifactRoot, "inventory");
+  const relativeArtifact = normalizeRunnerArtifactProduct(
+    { ...inventoryProduct, path: path.relative(artifactRoot, absoluteArtifact) },
+    artifactRoot,
+    "inventory",
+  );
+  ensure(context, host.canonicalPath(absoluteArtifact) === host.canonicalPath(relativeArtifact), `${label} artifact path relativization drifted`);
+  const artifactLink = path.join(artifactRoot, `adapter-${label}.json`);
+  fs.symlinkSync(absoluteArtifact, artifactLink);
+  let artifactLinkRejected = false;
+  try {
+    normalizeRunnerArtifactProduct({ ...inventoryProduct, path: path.basename(artifactLink) }, artifactRoot, "inventory");
+  } catch (error) {
+    artifactLinkRejected = error.message.includes("symbolic link");
+  }
+  ensure(context, artifactLinkRejected, `${label} artifact symlink was accepted`);
+
+  const projectRoot = path.join(artifacts, "workspace", "project");
+  const projectProduct = mockEnvelope.products.find((product) =>
+    ["kg.project_document", "kg.project_document_candidate"].includes(product.kind));
+  const projectRelative = normalizeRunnerProjectProduct(projectRoot, projectProduct, "project document");
+  const projectLink = path.join(projectRoot, `adapter-${label}.md`);
+  fs.symlinkSync(path.join(projectRoot, projectRelative), projectLink);
+  let projectLinkRejected = false;
+  try {
+    normalizeRunnerProjectProduct(projectRoot, { ...projectProduct, path: path.basename(projectLink) }, "project document");
+  } catch (error) {
+    projectLinkRejected = error.message.includes("symbolic link");
+  }
+  ensure(context, projectLinkRejected, `${label} project product symlink was accepted`);
 }
 
 function runPart2(context) {
@@ -1796,6 +1964,74 @@ function runPart2(context) {
     ensure(context, fs.readFileSync(path.join(occupied.project, lastTarget), "utf8") === "human-authored glossary\n", "occupied target bytes changed");
   });
 
+  testCase(context, "existing_target_produces_content_addressed_proposal", () => {
+    const taxonomyState = bootstrapTaxonomyContract();
+    const plan = buildV2BootstrapPlan({ taxonomyState });
+    const architecture = plan.documents.find((document) => document.doc_type === "architecture");
+    const targetPath = taxonomyState.templates.get("architecture").create_target_pattern;
+    const setup = setupBootstrapCase(context, "v2-proposal-existing", [], (project) => {
+      writeManualProjectDocument(project, targetPath, "architecture", "Human architecture");
+    });
+    architecture.mode = "proposal";
+    architecture.target_path = targetPath;
+    const target = path.join(setup.project, targetPath);
+    const before = fileHash(target);
+    runV2Bootstrap(context, setup, plan);
+    ensure(context, fileHash(target) === before, "proposal changed the human target bytes");
+    const bundles = proposalBundles(setup.project);
+    ensure(context, bundles.length === 1, "proposal run did not create exactly one bundle");
+    assertProposalBundle(context, setup, bundles[0], readJson(setup.inventory));
+    const validation = runNode(context, DOCS_VALIDATE, [bundles[0].candidateFile], {
+      cwd: setup.project,
+      env: { KG_ROOT: setup.project },
+    });
+    ensure(context, validation.stdout.includes("1/1 registered project document(s) valid"), "proposal candidate validator did not pass");
+    runNode(
+      context,
+      DOCS_BOOTSTRAP,
+      ["--check", "--project-root", setup.project, "--inventory", setup.inventory, "--plan", setup.plan],
+      { cwd: setup.project },
+    );
+  });
+
+  testCase(context, "proposal_rerun_is_idempotent_and_target_is_unchanged", () => {
+    const taxonomyState = bootstrapTaxonomyContract();
+    const plan = buildV2BootstrapPlan({ taxonomyState });
+    let targets;
+    const setup = setupBootstrapCase(context, "v2-proposal-idempotent", [], (project) => {
+      targets = makeAllDocumentsProposals(project, taxonomyState, plan);
+    });
+    const beforeHashes = new Map(targets.map((target) => [target, fileHash(path.join(setup.project, target))]));
+    runV2Bootstrap(context, setup, plan);
+    const firstTree = treeHash(setup.project);
+    const firstBundles = proposalBundles(setup.project);
+    ensure(context, firstBundles.length === targets.length, "all-proposal batch bundle count mismatch");
+    runV2Bootstrap(context, setup, plan);
+    ensure(context, treeHash(setup.project) === firstTree, "identical proposal rerun changed the project tree");
+    ensure(context, proposalBundles(setup.project).length === firstBundles.length, "identical proposal rerun created duplicate bundles");
+    for (const target of targets) {
+      ensure(context, fileHash(path.join(setup.project, target)) === beforeHashes.get(target), `proposal rerun changed ${target}`);
+    }
+  });
+
+  testCase(context, "proposal_rejects_target_drift", () => {
+    const taxonomyState = bootstrapTaxonomyContract();
+    const plan = buildV2BootstrapPlan({ taxonomyState });
+    let targets;
+    const setup = setupBootstrapCase(context, "v2-proposal-drift", [], (project) => {
+      targets = makeAllDocumentsProposals(project, taxonomyState, plan);
+    });
+    runV2Bootstrap(context, setup, plan);
+    const originalBundles = proposalBundles(setup.project).map((bundle) => path.basename(bundle.bundle));
+    fs.appendFileSync(path.join(setup.project, targets[0]), "\nHuman edit after inventory.\n");
+    expectBootstrapFailure(context, setup, plan);
+    ensure(
+      context,
+      canonicalJsonForTest(proposalBundles(setup.project).map((bundle) => path.basename(bundle.bundle))) === canonicalJsonForTest(originalBundles),
+      "target drift created or replaced a proposal bundle",
+    );
+  });
+
   testCase(context, "rejects_unknown_and_script_owned_fields", () => {
     const setup = setupBootstrapCase(context, "unknown-plan");
     const plan = readJson(setup.plan);
@@ -1899,6 +2135,144 @@ function runPart2(context) {
     ensure(context, fs.readFileSync(target, "utf8") === "human-authored\n", "existing architecture target was modified");
   });
 
+  testCase(context, "kn0016_exclusion_matrix_is_complete", () => {
+    const setup = setupBootstrapCase(context, "kn0016-complete-matrix");
+    const inventory = readJson(setup.inventory);
+    const safePaths = inventory.files.map((file) => file.path);
+    const excludedPaths = [
+      "lower/.kg/uncompiled.yaml",
+      ".KG/uncompiled.yaml",
+      "mixed/.kG/mixed-case.yaml",
+      ".env",
+      "credentials.json",
+      "private-key.pem",
+      "certificate.pem",
+      "service.sqlite",
+      "api-secret.txt",
+      "secrets/notes.txt",
+      "binary.png",
+      "binary.txt",
+      "large.txt",
+      "node_modules/unsafe-package/index.js",
+      "generated/client.js",
+      "linked-src/server.mjs",
+      "outside-link.txt",
+      "excluded-link.yaml",
+    ];
+    for (const forbidden of excludedPaths) {
+      ensure(
+        context,
+        !safePaths.some((item) => item === forbidden || item.startsWith(`${forbidden}/`)),
+        `excluded KN-0016 path entered inventory: ${forbidden}`,
+      );
+    }
+    ensure(context, inventory.stats.excluded_kg_directories >= 3, "mixed-case .kg matrix is incomplete");
+    ensure(context, inventory.stats.excluded_sensitive_files >= 6, "sensitive material matrix is incomplete");
+    ensure(context, inventory.stats.excluded_sensitive_directories >= 1, "sensitive directory matrix is incomplete");
+    ensure(context, inventory.stats.excluded_binary_files >= 2, "binary matrix is incomplete");
+    ensure(context, inventory.stats.excluded_oversized_files >= 1, "oversized matrix is incomplete");
+    ensure(context, inventory.stats.excluded_directories >= 2, "dependency or generated directory matrix is incomplete");
+    ensure(context, inventory.stats.excluded_symlinks >= 3, "symlink matrix is incomplete");
+
+    const taxonomyState = bootstrapTaxonomyContract();
+    for (const excluded of excludedPaths) {
+      const plan = buildV2BootstrapPlan({ taxonomyState, allUnknown: true });
+      plan.documents[0].sections[0].findings[0] = {
+        classification: "observed_fact",
+        statement: `Excluded source ${excluded} must be rejected.`,
+        sources: [{ path: excluded, line_start: 1, line_end: 1 }],
+      };
+      expectBootstrapFailure(context, setup, plan);
+    }
+
+    const manual = setupBootstrapCase(context, "kn0016-direct-create-existing", [], (project) => {
+      writeManualProjectDocument(project, "docs/architecture/overview.md", "architecture");
+    });
+    const manualPlan = buildV2BootstrapPlan({ taxonomyState, allUnknown: true });
+    const manualHash = fileHash(path.join(manual.project, "docs/architecture/overview.md"));
+    expectBootstrapFailure(context, manual, manualPlan);
+    ensure(context, fileHash(path.join(manual.project, "docs/architecture/overview.md")) === manualHash, "direct create changed an existing human document");
+
+    const lastInvalid = setupBootstrapCase(context, "kn0016-last-invalid");
+    const lastInvalidPlan = buildV2BootstrapPlan({ taxonomyState, allUnknown: true });
+    lastInvalidPlan.documents.at(-1).sections.at(-1).findings = [];
+    expectBootstrapFailure(context, lastInvalid, lastInvalidPlan);
+
+    const drifted = setupBootstrapCase(context, "kn0016-inventory-drift");
+    fs.appendFileSync(path.join(drifted.project, "src", "server.mjs"), "\n// post-inventory drift\n");
+    expectBootstrapFailure(context, drifted, buildV2BootstrapPlan({ taxonomyState, allUnknown: true }));
+
+    const truncated = setupBootstrapCase(context, "kn0016-truncated-no-coverage", ["--max-files", "1"]);
+    ensure(context, readJson(truncated.inventory).truncated === true, "KN-0016 truncation fixture did not truncate");
+    expectBootstrapFailure(context, truncated, buildV2BootstrapPlan({ taxonomyState, allUnknown: true }));
+
+    const runtimeInventory = path.join(setup.artifacts, "runtime-inventory.json");
+    runNode(
+      context,
+      DOCS_INVENTORY,
+      ["--root", setup.project, "--output", runtimeInventory, "--runtime-verification"],
+      { cwd: setup.project, expectFailure: true },
+    );
+    ensure(context, !fs.existsSync(runtimeInventory), "unauthorized runtime inventory request produced output");
+    runNode(
+      context,
+      DOCS_BOOTSTRAP,
+      ["--project-root", setup.project, "--inventory", setup.inventory, "--plan", setup.plan, "--runtime-verification"],
+      { cwd: setup.project, expectFailure: true },
+    );
+    for (const marker of ["should-not-run.executed", "build.executed", "test.executed", "migration.executed", "install.executed"]) {
+      ensure(context, !fs.existsSync(path.join(setup.project, marker)), `host execution sentinel fired: ${marker}`);
+    }
+  });
+
+  testCase(context, "rejects_symlink_escape_and_mixed_case_kg_paths", () => {
+    const taxonomyState = bootstrapTaxonomyContract();
+
+    const targetLinkPlan = buildV2BootstrapPlan({ taxonomyState, allUnknown: true });
+    const targetLink = setupBootstrapCase(context, "proposal-target-symlink", [], (project) => {
+      const source = writeManualProjectDocument(project, "manual/architecture.md", "architecture");
+      const target = path.join(project, "docs", "architecture", "overview.md");
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.symlinkSync(path.relative(path.dirname(target), source), target);
+    });
+    targetLinkPlan.documents[0].mode = "proposal";
+    targetLinkPlan.documents[0].target_path = "docs/architecture/overview.md";
+    expectBootstrapFailure(context, targetLink, targetLinkPlan);
+
+    const parentLinkPlan = buildV2BootstrapPlan({ taxonomyState, allUnknown: true });
+    const standardDocument = parentLinkPlan.documents.find((document) => document.doc_type === "standard");
+    const standardPath = taxonomyState.templates.get("standard").create_target_pattern.replace("{slug}", standardDocument.slug);
+    const parentLink = setupBootstrapCase(context, "proposal-target-parent-symlink", [], (project) => {
+      const target = writeManualProjectDocument(project, `manual/${standardDocument.slug}.md`, "standard");
+      fs.mkdirSync(path.join(project, "docs"), { recursive: true });
+      fs.symlinkSync(path.dirname(target), path.join(project, "docs", "standards"));
+    });
+    standardDocument.mode = "proposal";
+    standardDocument.target_path = standardPath;
+    expectBootstrapFailure(context, parentLink, parentLinkPlan);
+
+    const bundleLinkPlan = buildV2BootstrapPlan({ taxonomyState, allUnknown: true });
+    const bundleLink = setupBootstrapCase(context, "proposal-bundle-parent-symlink", [], (project) => {
+      writeManualProjectDocument(project, "docs/architecture/overview.md", "architecture");
+      fs.mkdirSync(path.join(project, "proposal-storage"));
+      fs.symlinkSync(path.join(project, "proposal-storage"), path.join(project, "docs", "proposals"));
+    });
+    bundleLinkPlan.documents[0].mode = "proposal";
+    bundleLinkPlan.documents[0].target_path = "docs/architecture/overview.md";
+    expectBootstrapFailure(context, bundleLink, bundleLinkPlan);
+
+    for (const [index, mixedCasePath] of ["lower/.kg/uncompiled.yaml", ".KG/uncompiled.yaml", "mixed/.kG/mixed-case.yaml"].entries()) {
+      const mixed = setupBootstrapCase(context, `mixed-case-${index + 1}`);
+      const plan = buildV2BootstrapPlan({ taxonomyState, allUnknown: true });
+      plan.documents[0].sections[0].findings[0] = {
+        classification: "observed_fact",
+        statement: "Mixed-case .kg paths are excluded.",
+        sources: [{ path: mixedCasePath, line_start: 1, line_end: 1 }],
+      };
+      expectBootstrapFailure(context, mixed, plan);
+    }
+  });
+
   testCase(context, "kn0016_host_code_never_executes", () => {
     const setup = setupBootstrapCase(context, "kn0016-static-boundary");
     const inventory = readJson(setup.inventory);
@@ -1959,6 +2333,7 @@ function runPart2(context) {
     const prompt = fs.readFileSync(path.join(passingArtifacts, "actual-prompt.txt"), "utf8");
     ensure(context, !prompt.includes("The application exposes an order lookup route"), "fixture oracle leaked into runner prompt");
     ensure(context, readJson(path.join(passingArtifacts, "tool-events.json")).length === 3, "tool events were not saved");
+    assertRunnerAdapterConformance(context, passingArtifacts, "v1");
 
     const deniedArtifacts = path.join(context.root, "gb-evaluator-denied");
     runNode(
@@ -2025,6 +2400,27 @@ function runPart2(context) {
     const oracleAudit = readJson(path.join(v2Artifacts, "oracle-isolation-audit.json"));
     ensure(context, oracleAudit.pass === true && oracleAudit.checked_values === 4, "version 2 oracle isolation audit did not pass");
     ensure(context, readJson(path.join(v2Artifacts, "products.json")).filter((item) => item.kind === "kg.project_document").length === 8, "version 2 evaluator lost document products");
+    assertRunnerAdapterConformance(context, v2Artifacts, "v2");
+
+    const proposalArtifacts = path.join(context.root, "gb4-evaluator-proposal-pass");
+    runNode(
+      context,
+      EVAL_BOOTSTRAP,
+      ["--fixture", BOOTSTRAP_PROPOSAL_EVAL_FIXTURE, "--artifacts", proposalArtifacts],
+      { cwd: ROOT, env: { KG_EVAL_RUNNER: MOCK_BOOTSTRAP_V2_RUNNER } },
+    );
+    const proposalResult = readJson(path.join(proposalArtifacts, "result.json"));
+    ensure(context, proposalResult.pass === true, "proposal G-B4 evaluator fixture did not pass");
+    const proposalProducts = readJson(path.join(proposalArtifacts, "products.json"));
+    ensure(context, proposalProducts.filter((item) => item.kind === "kg.project_document").length === 6, "proposal evaluator lost direct draft products");
+    ensure(context, proposalProducts.filter((item) => item.kind === "kg.docs_bootstrap_proposal").length === 2, "proposal evaluator lost manifest products");
+    ensure(context, proposalProducts.filter((item) => item.kind === "kg.project_document_candidate").length === 2, "proposal evaluator lost candidate products");
+    ensure(
+      context,
+      readJson(path.join(proposalArtifacts, "target-hashes.json")).every((item) => item.before_sha256 === item.after_sha256),
+      "proposal evaluator did not preserve target hashes",
+    );
+    assertRunnerAdapterConformance(context, proposalArtifacts, "proposal");
   });
 }
 

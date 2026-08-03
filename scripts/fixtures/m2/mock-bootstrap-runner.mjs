@@ -98,9 +98,9 @@ const response = {
     { path: "src/order-service.mjs", at_step: 2 },
   ],
   citations: [
-    { path: "src/server.mjs", line: 4 },
-    { path: "src/order-service.mjs", line: 2 },
-    { path: "package.json", line: 5 },
+    { path: "src/server.mjs", line: 4, context: "Order route" },
+    { path: "src/order-service.mjs", line: 2, context: "External order lookup" },
+    { path: "package.json", line: 5, context: "Start command" },
   ],
   products: [
     { kind: "kg.repository_inventory", path: inventory },

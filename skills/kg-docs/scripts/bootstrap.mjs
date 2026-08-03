@@ -3,6 +3,7 @@
 // Validate an agent-authored JSON bootstrap plan against one static inventory,
 // rebuild a canonical plan, and render project-document drafts atomically.
 
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -105,6 +106,16 @@ function sourceReference(source) {
     ? `#L${source.line_start}`
     : `#L${source.line_start}-L${source.line_end}`;
   return `${source.path}${suffix}`;
+}
+
+function documentSourceRefs(document) {
+  const refs = [];
+  for (const section of document.sections) {
+    for (const finding of section.findings) {
+      for (const source of finding.sources) refs.push(sourceReference(source));
+    }
+  }
+  return [...new Set(refs)];
 }
 
 function markdownText(value) {
@@ -278,8 +289,24 @@ function canonicalPlanV2(raw, inventory, inventoryState, taxonomyState) {
     } else if (item.slug !== null) {
       throw new Error(`plan.documents[${index}].slug must be null for fixed taxonomy targets`);
     }
-    if (item.mode !== "create") throw new Error(`plan.documents[${index}].mode must be create in R3.3`);
-    if (item.target_path !== null) throw new Error(`plan.documents[${index}].target_path must be null for create mode`);
+    if (!["create", "proposal"].includes(item.mode)) {
+      throw new Error(`plan.documents[${index}].mode must be create or proposal`);
+    }
+    let targetPath = null;
+    if (item.mode === "create") {
+      if (item.target_path !== null) throw new Error(`plan.documents[${index}].target_path must be null for create mode`);
+    } else {
+      if (
+        typeof item.target_path !== "string" ||
+        item.target_path.trim() === "" ||
+        item.target_path !== item.target_path.replaceAll("\\", "/") ||
+        item.target_path.startsWith("./") ||
+        item.target_path.endsWith("/")
+      ) {
+        throw new Error(`plan.documents[${index}].target_path must be a canonical project-relative path for proposal mode`);
+      }
+      targetPath = item.target_path;
+    }
     const coverageLimitations = stringList(item.coverage_limitations, `plan.documents[${index}].coverage_limitations`);
     if (inventory.truncated && coverageLimitations.length === 0) {
       throw new Error(`truncated inventory requires coverage_limitations for ${item.doc_type}`);
@@ -310,8 +337,8 @@ function canonicalPlanV2(raw, inventory, inventoryState, taxonomyState) {
       doc_type: item.doc_type,
       slug,
       title: nonEmptyString(item.title, `plan.documents[${index}].title`),
-      mode: "create",
-      target_path: null,
+      mode: item.mode,
+      target_path: targetPath,
       coverage_limitations: coverageLimitations,
       sections: expectedKeys.map((key) => sectionByKey.get(key)),
     });
@@ -386,10 +413,6 @@ function humanFinding(finding) {
 }
 
 function renderV2Document(plan, document, template, targetPath) {
-  const sourceRefs = [];
-  for (const section of document.sections) {
-    for (const finding of section.findings) for (const source of finding.sources) sourceRefs.push(sourceReference(source));
-  }
   const frontmatter = {
     kind: "kg.project_document",
     title: document.title,
@@ -397,7 +420,7 @@ function renderV2Document(plan, document, template, targetPath) {
     status: "draft",
     owners: [],
     supersedes: null,
-    source_refs: [...new Set(sourceRefs)],
+    source_refs: documentSourceRefs(document),
     coverage_limitations: document.coverage_limitations,
   };
   const errors = protocol.validateRecord(frontmatter, protocol.loadProjectDocumentSchema());
@@ -457,12 +480,35 @@ function existingSequenceFiles(projectRoot, template) {
     .sort((left, right) => left.sequence - right.sequence);
 }
 
+function targetPattern(template) {
+  const parts = template.create_target_pattern.split(/(\{sequence\}|\{slug\})/g);
+  const expression = parts.map((part) => {
+    if (part === "{sequence}") return "(?<sequence>[0-9]{4})";
+    if (part === "{slug}") return "(?<slug>[a-z0-9]+(?:-[a-z0-9]+)*)";
+    return escapeRegex(part);
+  }).join("");
+  return new RegExp(`^${expression}$`);
+}
+
+function validateProposalTarget(document, template) {
+  const match = targetPattern(template).exec(document.target_path);
+  if (!match) {
+    throw new Error(`proposal target does not match taxonomy route for ${document.doc_type}: ${document.target_path}`);
+  }
+  if (match.groups?.slug !== undefined && match.groups.slug !== document.slug) {
+    throw new Error(`proposal target slug does not match plan slug for ${document.doc_type}: ${document.target_path}`);
+  }
+}
+
 function deriveV2Targets(projectRoot, plan, taxonomyState, check) {
   const routes = [];
   for (const document of plan.documents) {
     const template = taxonomyState.templates.get(document.doc_type);
     let targetPath;
-    if (template.targetPlaceholders.includes("sequence")) {
+    if (document.mode === "proposal") {
+      validateProposalTarget(document, template);
+      targetPath = document.target_path;
+    } else if (template.targetPlaceholders.includes("sequence")) {
       const existing = existingSequenceFiles(projectRoot, template);
       const exact = existing.filter((item) => sequencePattern(template, document.slug).test(item.name));
       if (check) {
@@ -488,25 +534,114 @@ function deriveV2Targets(projectRoot, plan, taxonomyState, check) {
   return routes;
 }
 
-function preflightTarget(projectRoot, route, check) {
-  const segments = route.targetPath.split("/");
+function preflightPathSegments(projectRoot, relative, label) {
+  const segments = relative.split("/");
   let current = projectRoot;
   for (let index = 0; index < segments.length; index += 1) {
     current = path.join(current, segments[index]);
     if (!fs.existsSync(current)) break;
     const stat = fs.lstatSync(current);
-    if (stat.isSymbolicLink()) throw new Error(`target path contains a symbolic link: ${route.targetPath}`);
+    if (stat.isSymbolicLink()) throw new Error(`${label} path contains a symbolic link: ${relative}`);
     if (index < segments.length - 1 && !stat.isDirectory()) {
-      throw new Error(`target parent is not a directory: ${route.targetPath}`);
+      throw new Error(`${label} parent is not a directory: ${relative}`);
     }
   }
-  if (check) {
+}
+
+function preflightTarget(projectRoot, route, inventoryState, check) {
+  preflightPathSegments(projectRoot, route.targetPath, "target");
+  if (route.document.mode === "proposal") {
+    if (!fs.existsSync(route.target) || !fs.statSync(route.target).isFile()) {
+      throw new Error(`proposal target does not exist: ${route.targetPath}`);
+    }
+    const inventoryRecord = inventoryState.byPath.get(route.targetPath);
+    if (!inventoryRecord) {
+      throw new Error(`proposal target was not read by inventory: ${route.targetPath}`);
+    }
+    if (sha256(fs.readFileSync(route.target)) !== inventoryRecord.sha256) {
+      throw new Error(`proposal target changed after inventory: ${route.targetPath}`);
+    }
+    route.targetSha256 = inventoryRecord.sha256;
+  } else if (check) {
     if (!fs.existsSync(route.target) || !fs.statSync(route.target).isFile()) {
       throw new Error(`bootstrap target does not exist: ${route.targetPath}`);
     }
   } else if (fs.existsSync(route.target)) {
-    throw new Error(`bootstrap target already exists: ${route.targetPath}; proposal mode belongs to R3.4`);
+    throw new Error(`bootstrap target already exists: ${route.targetPath}; use proposal mode`);
   }
+}
+
+function sha256(buffer) {
+  return crypto.createHash("sha256").update(buffer).digest("hex");
+}
+
+function buildProposal(projectRoot, plan, route) {
+  const targetBuffer = fs.readFileSync(route.target);
+  const candidateBuffer = Buffer.from(route.expected, "utf8");
+  const targetSha256 = sha256(targetBuffer);
+  if (targetSha256 !== route.targetSha256) {
+    throw new Error(`proposal target changed while preparing candidate: ${route.targetPath}`);
+  }
+  const candidateSha256 = sha256(candidateBuffer);
+  const contentId = repository.canonicalDigest({
+    target_path: route.targetPath,
+    target_sha256: targetSha256,
+    candidate_sha256: candidateSha256,
+    inventory_sha256: plan.inventory_sha256,
+  });
+  const proposalId = `bootstrap-${contentId}`;
+  const bundlePath = `docs/proposals/${proposalId}`;
+  const candidatePath = `${bundlePath}/candidate.md`;
+  const manifestPath = `${bundlePath}/manifest.json`;
+  const manifest = {
+    kind: "kg.docs_bootstrap_proposal",
+    version: 1,
+    proposal_id: proposalId,
+    doc_type: route.document.doc_type,
+    target_path: route.targetPath,
+    target_sha256: targetSha256,
+    candidate_path: candidatePath,
+    candidate_sha256: candidateSha256,
+    inventory_sha256: plan.inventory_sha256,
+    source_refs: documentSourceRefs(route.document),
+    status: "proposed",
+  };
+  return {
+    contentId,
+    proposalId,
+    bundlePath,
+    bundle: host.resolveSafeRelative(projectRoot, bundlePath, { mustExist: false }).full,
+    candidatePath,
+    candidate: host.resolveSafeRelative(projectRoot, candidatePath, { mustExist: false }).full,
+    candidateText: route.expected,
+    manifestPath,
+    manifest: host.resolveSafeRelative(projectRoot, manifestPath, { mustExist: false }).full,
+    manifestText: `${JSON.stringify(manifest, null, 2)}\n`,
+    value: manifest,
+    reused: false,
+  };
+}
+
+function preflightProposal(projectRoot, proposal) {
+  preflightPathSegments(projectRoot, proposal.candidatePath, "proposal candidate");
+  preflightPathSegments(projectRoot, proposal.manifestPath, "proposal manifest");
+  if (!fs.existsSync(proposal.bundle)) return;
+  const bundleStat = fs.lstatSync(proposal.bundle);
+  if (bundleStat.isSymbolicLink() || !bundleStat.isDirectory()) {
+    throw new Error(`proposal bundle path is unsafe: ${proposal.bundlePath}`);
+  }
+  for (const [label, file, expected] of [
+    ["candidate", proposal.candidate, proposal.candidateText],
+    ["manifest", proposal.manifest, proposal.manifestText],
+  ]) {
+    if (!fs.existsSync(file) || fs.lstatSync(file).isSymbolicLink() || !fs.statSync(file).isFile()) {
+      throw new Error(`existing proposal ${label} is missing or unsafe: ${proposal.bundlePath}`);
+    }
+    if (fs.readFileSync(file, "utf8") !== expected) {
+      throw new Error(`existing proposal ${label} does not match content address: ${proposal.bundlePath}`);
+    }
+  }
+  proposal.reused = true;
 }
 
 function ensureDirectory(directory, projectRoot, createdDirectories) {
@@ -574,7 +709,7 @@ if (rawPlan?.version === 1) {
     plan = canonicalPlanV1(rawPlan, inventory, inventoryState);
     target = host.resolveSafeRelative(projectRoot, V1_TARGET, { mustExist: args.check }).full;
     expected = renderV1Document(plan);
-    preflightTarget(projectRoot, { targetPath: V1_TARGET, target }, args.check);
+    preflightTarget(projectRoot, { targetPath: V1_TARGET, target, document: { mode: "create" } }, inventoryState, args.check);
   } catch (error) {
     host.fail(error.message);
   }
@@ -602,8 +737,12 @@ try {
   plan = canonicalPlanV2(rawPlan, inventory, inventoryState, taxonomyState);
   routes = deriveV2Targets(projectRoot, plan, taxonomyState, args.check);
   for (const route of routes) {
-    preflightTarget(projectRoot, route, args.check);
+    preflightTarget(projectRoot, route, inventoryState, args.check);
     route.expected = renderV2Document(plan, route.document, route.template, route.targetPath);
+    if (route.document.mode === "proposal") {
+      route.proposal = buildProposal(projectRoot, plan, route);
+      preflightProposal(projectRoot, route.proposal);
+    }
   }
 } catch (error) {
   host.fail(error.message);
@@ -611,22 +750,43 @@ try {
 
 if (args.check) {
   for (const route of routes) {
+    if (route.document.mode === "proposal") continue;
     if (fs.readFileSync(route.target, "utf8") !== route.expected) {
       host.fail(`bootstrap target does not match validated version 2 plan: ${route.targetPath}`);
     }
   }
-  console.log(`kg: ${routes.length} bootstrap documents match inventory and canonical version 2 plan`);
+  const proposals = routes.filter((route) => route.document.mode === "proposal").length;
+  const drafts = routes.length - proposals;
+  console.log(`kg: ${drafts} bootstrap document(s) and ${proposals} proposal bundle(s) match inventory and canonical version 2 plan`);
   process.exit(0);
 }
 
+const proposalRoutes = routes.filter((route) => route.document.mode === "proposal");
+const createRoutes = routes.filter((route) => route.document.mode === "create");
 const createdFiles = [];
 const createdDirectories = [];
 try {
-  for (const route of routes) ensureDirectory(path.dirname(route.target), projectRoot, createdDirectories);
-  for (const route of routes) writeExclusive(route.target, route.expected, createdFiles);
+  for (const route of routes) preflightTarget(projectRoot, route, inventoryState, false);
+  for (const route of proposalRoutes) preflightProposal(projectRoot, route.proposal);
+  for (const route of routes) {
+    if (route.document.mode === "create") ensureDirectory(path.dirname(route.target), projectRoot, createdDirectories);
+    else if (!route.proposal.reused) ensureDirectory(route.proposal.bundle, projectRoot, createdDirectories);
+  }
+  for (const route of routes) {
+    if (route.document.mode === "create") {
+      writeExclusive(route.target, route.expected, createdFiles);
+    } else if (!route.proposal.reused) {
+      writeExclusive(route.proposal.candidate, route.proposal.candidateText, createdFiles);
+      writeExclusive(route.proposal.manifest, route.proposal.manifestText, createdFiles);
+    }
+  }
 } catch (error) {
   rollbackWrites(createdFiles, createdDirectories);
   host.fail(error.message);
 }
-console.log(`kg: created ${routes.length} bootstrap documents from canonical version 2 plan`);
-for (const route of routes) console.log(`kg: created ${route.document.doc_type} ${route.targetPath}`);
+console.log(`kg: wrote ${createRoutes.length} bootstrap document(s) and resolved ${proposalRoutes.length} proposal bundle(s) from canonical version 2 plan`);
+for (const route of createRoutes) console.log(`kg: created ${route.document.doc_type} ${route.targetPath}`);
+for (const route of proposalRoutes) {
+  const action = route.proposal.reused ? "reused" : "created";
+  console.log(`kg: ${action} ${route.document.doc_type} proposal ${route.proposal.bundlePath}`);
+}
