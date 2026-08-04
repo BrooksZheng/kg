@@ -6,6 +6,9 @@
 //   scripts/lib/  ->  skills/<name>/scripts/lib/
 //   protocol/     ->  skills/<name>/protocol/
 //
+// Evaluator-only scripts under scripts/lib/eval-*.mjs stay in the plugin
+// checkout. They are imported by root-level evaluator entrypoints and are not
+// part of a skill's installed runtime.
 // The _lib.mjs resolver prefers the root copy in the plugin checkout, so the
 // vendored copies are inert during development — they only matter to
 // consumers who received a lone skill directory.
@@ -27,7 +30,11 @@ const SKILL_NAMES = fs
   .filter((name) => fs.existsSync(path.join(SKILLS_DIR, name, "SKILL.md")))
   .sort();
 const SOURCES = [
-  { src: path.join(ROOT, "scripts", "lib"), destRel: path.join("scripts", "lib") },
+  {
+    src: path.join(ROOT, "scripts", "lib"),
+    destRel: path.join("scripts", "lib"),
+    include: (relative) => !/(^|[\\/])eval-[^\\/]+\.mjs$/.test(relative),
+  },
   { src: path.join(ROOT, "protocol"), destRel: "protocol" },
 ];
 const checkMode = process.argv.includes("--check");
@@ -48,19 +55,22 @@ function canonical(p) {
   }
 }
 
-function listFilesRecursive(dir, base = dir) {
+function listFilesRecursive(dir, base = dir, include = () => true) {
   if (!fs.existsSync(dir)) return [];
   const out = [];
   for (const entry of fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
     const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) out.push(...listFilesRecursive(full, base));
-    else out.push(path.relative(base, full));
+    if (entry.isDirectory()) out.push(...listFilesRecursive(full, base, include));
+    else {
+      const relative = path.relative(base, full);
+      if (include(relative)) out.push(relative);
+    }
   }
   return out;
 }
 
-function diffDirs(src, dest) {
-  const srcFiles = listFilesRecursive(src);
+function diffDirs(src, dest, include = () => true) {
+  const srcFiles = listFilesRecursive(src, src, include);
   const destFiles = listFilesRecursive(dest);
   const problems = [];
   for (const f of srcFiles) {
@@ -75,12 +85,12 @@ function diffDirs(src, dest) {
 
 let drifted = 0;
 for (const name of SKILL_NAMES) {
-  for (const { src, destRel } of SOURCES) {
+  for (const { src, destRel, include = () => true } of SOURCES) {
     if (!fs.existsSync(src)) fail(`source missing: ${src}`);
     const dest = path.join(ROOT, "skills", name, destRel);
     const relDest = path.relative(ROOT, dest);
     if (canonical(src) === canonical(dest)) fail(`source and destination are the same directory: ${src}`);
-    const problems = diffDirs(src, dest);
+    const problems = diffDirs(src, dest, include);
     if (problems.length === 0) {
       console.log(`kg: ${relDest} in sync`);
       continue;
@@ -91,6 +101,9 @@ for (const name of SKILL_NAMES) {
     } else {
       fs.rmSync(dest, { recursive: true, force: true });
       fs.cpSync(src, dest, { recursive: true });
+      for (const file of listFilesRecursive(dest)) {
+        if (!include(file)) fs.rmSync(path.join(dest, file), { force: true });
+      }
       console.log(`kg: refreshed ${relDest} (${problems.length} difference${problems.length === 1 ? "" : "s"})`);
     }
   }

@@ -3647,6 +3647,63 @@ function runPart4(context) {
     }
   });
 
+  testCase(context, "v2_transaction_journal_resumes_and_revalidates", () => {
+    const setup = setupCompileCase(context, "v2-resume", "publish-plan.json", "OBS-20260731-101");
+    writeJson(setup.plan, {
+      kind: "kg.compile_plan",
+      version: 2,
+      items: [{
+        observation_id: "OBS-20260731-101",
+        disposition: "add",
+        actor: "compile",
+        update_scope: "full",
+        body_action: "updated",
+        knowledge: {
+          claim: "The v2 transaction journal must remain readable across recovery.",
+          category: "project_knowledge",
+          scope: { paths: ["docs/runbooks/**"] },
+          authority: "verified_runtime_behavior",
+          confidence: 1,
+          body: "## V2 recovery\n\nThe transaction resumes from its persisted fingerprints.",
+        },
+        carrier: {
+          artifact_id: "HAR-COMPILE-NOTES",
+          content: "The v2 transaction updated this managed block.",
+        },
+      }],
+    });
+
+    const interrupted = applyCompile(context, setup, {
+      expectFailure: true,
+      env: { KG_COMPILE_FAIL_AFTER: "v2_write" },
+    });
+    ensure(context, interrupted.stderr.includes("injected failure after v2 write"), "v2 interruption did not trigger");
+    ensure(
+      context,
+      fs.readdirSync(path.join(setup.project, ".kg", "reports")).some((name) => name.startsWith(".compile-transaction-")),
+      "v2 interruption did not preserve a transaction manifest",
+    );
+
+    applyCompile(context, setup);
+    ensure(context, compileReports(setup.project).length === 1, "v2 resume did not complete the report");
+    ensure(
+      context,
+      fs.existsSync(path.join(setup.project, ".kg", "observations", "processed", "OBS-20260731-101.yaml")),
+      "v2 resume did not archive the observation",
+    );
+
+    runNode(
+      context,
+      COMPILE_APPLY,
+      ["--check", "--root", setup.project, "--context", setup.context, "--plan", setup.plan, "--now", "2026-07-31T02:00:00Z"],
+      { cwd: setup.project, env: { KG_ROOT: setup.project } },
+    );
+    const stable = treeHash(setup.project);
+    const rerun = applyCompile(context, setup);
+    ensure(context, rerun.stdout.includes("already applied"), "completed v2 apply did not report already applied");
+    ensure(context, treeHash(setup.project) === stable, "completed v2 apply performed a new write");
+  });
+
   testCase(context, "gd_evaluator_requires_reads_non_shell_plan_apply_and_no_denials", () => {
     const fixture = path.join(ROOT, "scripts", "fixtures", "m2", "compile.fixture.json");
     const passing = path.join(context.root, "gd-pass");

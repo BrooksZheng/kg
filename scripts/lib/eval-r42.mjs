@@ -45,9 +45,9 @@ function lineBounds(bytes, marker) {
 
 function carrierHashes(bytes, record) {
   const id = record.artifact_id;
-  const begin = lineBounds(bytes, `<!-- kg:managed ${id} begin -->`);
-  const end = lineBounds(bytes, `<!-- kg:managed ${id} end -->`);
   if (record.ownership === "managed") {
+    const begin = lineBounds(bytes, `<!-- kg:managed ${id} begin -->`);
+    const end = lineBounds(bytes, `<!-- kg:managed ${id} end -->`);
     const prefix = bytes.subarray(0, begin.lineEnd);
     const machine = bytes.subarray(begin.lineEnd, end.index);
     const suffix = bytes.subarray(end.index);

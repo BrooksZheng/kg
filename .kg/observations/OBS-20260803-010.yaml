@@ -1,0 +1,15 @@
+id: OBS-20260803-010
+at: 2026-08-03T10:00:08Z
+source: agent_insight
+claim: "Evaluator-only scripts under scripts/lib/eval-*.mjs must remain in the plugin checkout and be excluded from vendored skill copies while each skill still carries scripts/lib and protocol."
+context:
+  task: "R4.2 vendored boundary review"
+  paths:
+    - scripts/sync-vendored.mjs
+    - scripts/lib/eval-r42.mjs
+    - "skills/*/scripts/lib/**"
+    - "skills/*/protocol/**"
+evidence:
+  - { type: test, ref: "node scripts/sync-vendored.mjs --check" }
+  - { type: diff, ref: "scripts/sync-vendored.mjs filters eval-*.mjs and removes excluded files after refresh" }
+urgency: batch

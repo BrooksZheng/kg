@@ -1317,13 +1317,24 @@ function loadJournal(root, file, planDigest, contextDigest) {
   } catch (error) {
     fail(`compile transaction journal is invalid: ${error.message}`);
   }
+  const planSchema = protocol.loadCompilePlanSchema();
+  const legacyVersions = Array.isArray(planSchema.legacy_versions) ? planSchema.legacy_versions : [];
+  const supportedVersions = new Set([planSchema.version, ...legacyVersions]);
+  const versionSupported = supportedVersions.has(journal?.version);
+  const legacyResultTypes = new Set(Object.keys(planSchema.legacy_item_fields ?? {}));
+  const operationsMatchVersion = versionSupported && (
+    journal.version === planSchema.version
+      ? journal.operations?.every((operation) => operation?.protocol_version === planSchema.version && Array.isArray(operation.writes))
+      : journal.operations?.every((operation) => operation?.protocol_version === undefined && legacyResultTypes.has(operation?.result_type))
+  );
   if (
     journal?.kind !== "kg.compile_transaction" ||
-    journal?.version !== 1 ||
+    !versionSupported ||
     journal.plan_digest !== planDigest ||
     journal.context_digest !== contextDigest ||
     !Array.isArray(journal.operations) ||
     journal.operations.length === 0 ||
+    !operationsMatchVersion ||
     journal.report?.plan_digest !== planDigest ||
     typeof journal.journal_digest !== "string"
   ) {
