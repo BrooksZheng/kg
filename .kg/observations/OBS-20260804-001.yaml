@@ -1,0 +1,16 @@
+id: OBS-20260804-001
+at: 2026-08-04T08:00:00Z
+source: task_outcome
+claim: "Deterministic kg-scan reports must derive resident-surface limits from protocol, keep hard errors separate from warnings, and leave legacy v1 records with no trace on either side as non-gating warnings."
+context:
+  task: "R4.3 scan deterministic staleness, inverse integrity, and A-4 resident-surface metric"
+  paths:
+    - "skills/kg-scan/scripts/**"
+    - protocol/scan.yaml
+    - protocol/scan-report.schema.yaml
+    - scripts/test-v2.mjs
+evidence:
+  - { type: test, ref: scripts/test-v2.mjs:scan_covers_all_ownerships_and_reports_resident_surface_warning }
+  - { type: test, ref: scripts/test-v2.mjs:scan_reports_dangling_kn_carrier_line_and_schema_findings }
+  - { type: diff, ref: "skills/kg-scan/scripts/report-builder.mjs and protocol/scan.yaml" }
+urgency: batch

@@ -1,0 +1,13 @@
+# kg protocol: deterministic scan policy.
+# Values here are inputs to the scan report. The scanner must not duplicate
+# resident-surface targets or finding guidance in code.
+
+kind: kg.scan_policy
+version: 1
+
+resident_surface:
+  path: AGENTS.md
+  target_lines: 30
+  finding_issue: agents_line_budget_exceeded
+  knowledge_id: KN-0013
+  guidance: "做减法而非扩面"

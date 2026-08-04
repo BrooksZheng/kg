@@ -1,0 +1,32 @@
+# kg protocol: deterministic scan report shape.
+
+kind: kg.scan_report_schema
+version: 2
+
+field_order:
+  - kind
+  - version
+  - scanned_at
+  - artifacts_scanned
+  - findings
+  - staleness_count
+  - hard_error_count
+  - warning_count
+  - resident_surface
+  - scan_limits
+
+finding_field_order:
+  - detection_mode
+  - artifact_id
+  - source_ref
+  - issue
+  - severity
+  - side
+  - kn_id
+  - carrier_ref
+  - source_path
+  - line_start
+  - line_end
+  - expected
+  - actual
+  - message

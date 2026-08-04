@@ -30,6 +30,8 @@ export const loadQueueSchema = () => loadProtocolFile("queue.schema.yaml");
 export const loadProposalManifestSchema = () => loadProtocolFile("proposal-manifest.schema.yaml");
 export const loadTaskSpecSchema = () => loadProtocolFile("task-spec.schema.yaml");
 export const loadDocumentTaxonomy = () => loadProtocolFile("document-taxonomy.yaml");
+export const loadScanPolicy = () => loadProtocolFile("scan.yaml");
+export const loadScanReportSchema = () => loadProtocolFile("scan-report.schema.yaml");
 export const loadLifecycle = () => loadProtocolFile("lifecycle.yaml");
 export const loadAuthority = () => loadProtocolFile("authority.yaml");
 export const loadRouting = () => loadProtocolFile("routing.yaml");
@@ -228,6 +230,8 @@ if (isMain()) {
     "proposal-manifest.schema.yaml",
     "task-spec.schema.yaml",
     "document-taxonomy.yaml",
+    "scan.yaml",
+    "scan-report.schema.yaml",
     "lifecycle.yaml",
     "authority.yaml",
     "routing.yaml",
@@ -401,6 +405,8 @@ if (isMain()) {
     problems.push("observation: optional compile-owned compiled_to_kn field is invalid");
   }
   const taxonomy = docs["document-taxonomy.yaml"];
+  const scan = docs["scan.yaml"];
+  const scanReport = docs["scan-report.schema.yaml"];
   const projectDocument = docs["project-document.schema.yaml"];
   if (taxonomy && projectDocument) {
     if (projectDocument.version !== 1) problems.push("project-document: version must remain 1");
@@ -426,6 +432,33 @@ if (isMain()) {
     }
     if (taxonomy.tutorials?.diataxis_quadrant !== "excluded" || !taxonomy.tutorials?.exclusion_rationale) {
       problems.push("taxonomy: tutorials exclusion and rationale are required");
+    }
+  }
+  if (scan) {
+    if (scan.kind !== "kg.scan_policy" || scan.version !== 1) {
+      problems.push("scan: kind/version is invalid");
+    }
+    const surface = scan.resident_surface;
+    if (!surface || surface.path !== "AGENTS.md") problems.push("scan: resident surface must target AGENTS.md");
+    if (!Number.isInteger(surface?.target_lines) || surface.target_lines < 1) {
+      problems.push("scan: resident surface target_lines must be a positive integer");
+    }
+    if (typeof surface?.finding_issue !== "string" || surface.finding_issue.trim() === "") {
+      problems.push("scan: resident surface finding_issue is required");
+    }
+    if (!/^KN-[0-9]{4}$/.test(String(surface?.knowledge_id ?? ""))) {
+      problems.push("scan: resident surface knowledge_id must be a KN id");
+    }
+    if (typeof surface?.guidance !== "string" || surface.guidance.trim() === "") {
+      problems.push("scan: resident surface guidance is required");
+    }
+  }
+  if (scanReport) {
+    if (scanReport.kind !== "kg.scan_report_schema" || scanReport.version !== 2) {
+      problems.push("scan-report: kind/version is invalid");
+    }
+    if (!Array.isArray(scanReport.field_order) || !Array.isArray(scanReport.finding_field_order)) {
+      problems.push("scan-report: field orders are required");
     }
   }
   const taskSpec = docs["task-spec.schema.yaml"];

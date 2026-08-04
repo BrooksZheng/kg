@@ -126,9 +126,21 @@ the observation inbox.
 
 ## Deterministic staleness health check
 
-M2 health checks inspect harness sidecar `source_refs` for path liveness only.
-They do not validate line numbers, execute host code, run an agent, or enter
-`.kg/`.
+The R4.3 report builder is shared by `check-staleness.mjs` and
+`health-check.mjs`. It independently checks source anchors, canonical
+containment, sidecar and knowledge schemas, carrier hashes, proposal target
+hashes, and the KN to carrier inverse map. It never validates a sidecar by
+using the sidecar's own hash as the expected byte source.
+
+The report is version 2. Ordinary report mode emits findings and returns
+success. `--gates` fails on hard errors or when the configured staleness limit
+is exceeded. Legacy v1 entries with no trace on either side remain warnings.
+The report also measures the configured AGENTS.md resident-surface target;
+an over-budget file is a warning that points to KN-0013 and directs the next
+change toward subtraction.
+
+The scanner remains static-only. It does not execute host code, follow
+symlinks, or enter `.kg/`.
 
 ```bash
 node <kg-scan>/scripts/health-check.mjs \

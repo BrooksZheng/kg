@@ -73,6 +73,7 @@ const MIGRATION_FIXTURE = path.join(ROOT, "scripts", "fixtures", "m2", "migratio
 const MIGRATION_RECOVERY_FIXTURE = path.join(ROOT, "scripts", "fixtures", "m2", "migration-recovery");
 const MIGRATION_CHECKPOINT_DRIVER = path.join(ROOT, "scripts", "kill-migration-at-checkpoint.mjs");
 const COMPILE_FIXTURE = path.join(ROOT, "scripts", "fixtures", "m2", "compile-fixture");
+const R42_SCAN_FIXTURE = path.join(ROOT, "scripts", "fixtures", "m4", "compile-update-ownership", "host");
 const KICKOFF_FIXTURES = [
   path.join(ROOT, "scripts", "fixtures", "m1", "kickoff.fixture.yaml"),
   path.join(ROOT, "scripts", "fixtures", "m1", "kickoff-no-conflict.fixture.yaml"),
@@ -4790,18 +4791,51 @@ function assertStalenessShape(context, report) {
   ensure(
     context,
     JSON.stringify(Object.keys(report)) ===
-      JSON.stringify(["kind", "version", "scanned_at", "artifacts_scanned", "findings", "staleness_count"]),
-    "staleness report fields or canonical order differ from D15",
+      JSON.stringify([
+        "kind",
+        "version",
+        "scanned_at",
+        "artifacts_scanned",
+        "findings",
+        "staleness_count",
+        "hard_error_count",
+        "warning_count",
+        "resident_surface",
+        "scan_limits",
+      ]),
+    "staleness report fields or canonical order differ from R4.3",
   );
-  ensure(context, report.kind === "kg.staleness_report" && report.version === 1, "staleness report kind/version invalid");
+  ensure(context, report.kind === "kg.staleness_report" && report.version === 2, "staleness report kind/version invalid");
   ensure(context, report.scanned_at === "2026-07-31T09:00:00.000Z", "staleness report clock mismatch");
-  ensure(context, report.staleness_count === report.findings.length, "staleness count differs from findings");
+  ensure(context, report.staleness_count === report.hard_error_count, "staleness count differs from hard errors");
+  ensure(
+    context,
+    report.hard_error_count + report.warning_count === report.findings.length,
+    "scan counts differ from findings",
+  );
+  ensure(context, report.resident_surface.target_lines === 30, "resident surface target did not come from protocol");
+  ensure(context, report.scan_limits.reads_kg === false && report.scan_limits.executes_host_code === false, "scan limits permit forbidden reads or execution");
   for (const finding of report.findings) {
     ensure(
       context,
       JSON.stringify(Object.keys(finding)) ===
-        JSON.stringify(["detection_mode", "artifact_id", "source_ref", "issue", "severity"]),
-      "staleness finding fields or canonical order differ from D15",
+        JSON.stringify([
+          "detection_mode",
+          "artifact_id",
+          "source_ref",
+          "issue",
+          "severity",
+          "side",
+          "kn_id",
+          "carrier_ref",
+          "source_path",
+          "line_start",
+          "line_end",
+          "expected",
+          "actual",
+          "message",
+        ]),
+      "staleness finding fields or canonical order differ from R4.3",
     );
   }
 }
@@ -4825,6 +4859,13 @@ function setupStalenessProject(context, name) {
   const caseRoot = path.join(context.root, name);
   const project = path.join(caseRoot, "project");
   fs.cpSync(KICKOFF_COMPILED_PROJECT, project, { recursive: true });
+  return { caseRoot, project };
+}
+
+function setupR43ScanProject(context, name) {
+  const caseRoot = path.join(context.root, name);
+  const project = path.join(caseRoot, "project");
+  fs.cpSync(R42_SCAN_FIXTURE, project, { recursive: true });
   return { caseRoot, project };
 }
 
@@ -5233,15 +5274,15 @@ function runPart7(context) {
     ensure(context, stale.staleness_count === 1, "corrupted source did not yield count 1");
     ensure(
       context,
-      JSON.stringify(stale.findings[0]) ===
-        JSON.stringify({
-          detection_mode: "deterministic",
-          artifact_id: "HAR-COMPILE-NOTES",
-          source_ref: "docs/accepted-compile-contract.md#L14",
-          issue: "missing_source",
-          severity: "high",
-        }),
-      "missing-source finding differs from D15",
+      stale.findings.some(
+        (finding) =>
+          finding.artifact_id === "HAR-COMPILE-NOTES" &&
+          finding.source_ref === "docs/accepted-compile-contract.md#L14" &&
+          finding.issue === "missing_source" &&
+          finding.severity === "error" &&
+          finding.side === "source",
+      ),
+      "missing-source finding differs from R4.3",
     );
     const gate = runHealth(context, setup.project, { gates: true, expectFailure: true });
     ensure(context, gate.status !== 0, "staleness gate returned zero above the threshold");
@@ -5253,14 +5294,20 @@ function runPart7(context) {
       runHealth(context, setup.project, { entrypoint: STALENESS_CHECK }),
     );
     ensure(context, JSON.stringify(direct) === JSON.stringify(restored), "health-check alias differs from check-staleness");
+    const rootAlias = path.join(setup.caseRoot, "project-alias");
+    fs.symlinkSync(setup.project, rootAlias);
+    const aliased = readStalenessReport(runHealth(context, rootAlias));
+    ensure(context, JSON.stringify(aliased) === JSON.stringify(restored), "canonical root alias changed the scan report");
   });
 
   testCase(context, "scan_rejects_invalid_sidecar_without_trusted_result", () => {
     const setup = setupStalenessProject(context, "staleness-invalid-sidecar");
     const sidecar = path.join(setup.project, "harness", "artifacts", "HAR-COMPILE-NOTES.yaml");
     fs.writeFileSync(sidecar, fs.readFileSync(sidecar, "utf8").replace("artifact_id: HAR-COMPILE-NOTES\n", ""));
-    const rejected = runHealth(context, setup.project, { expectFailure: true });
-    ensure(context, rejected.stdout.trim() === "", "invalid sidecar emitted a trusted health report");
+    const rejected = runHealth(context, setup.project);
+    const report = readStalenessReport(rejected);
+    assertStalenessShape(context, report);
+    ensure(context, report.findings.some((finding) => finding.issue === "schema_invalid" && finding.side === "sidecar"), "invalid sidecar did not yield a schema finding");
   });
 
   testCase(context, "scan_rejects_kg_escape_and_symlink_source_refs", () => {
@@ -5294,9 +5341,170 @@ function runPart7(context) {
       const setup = setupStalenessProject(context, `staleness-${name}`);
       setupHost(setup.project);
       writeSidecarSourceRef(setup.project, sourceRef);
-      const rejected = runHealth(context, setup.project, { expectFailure: true });
-      ensure(context, rejected.stdout.trim() === "", `${name} source ref emitted a trusted report`);
+      const rejected = runHealth(context, setup.project);
+      const report = readStalenessReport(rejected);
+      assertStalenessShape(context, report);
+      ensure(context, report.hard_error_count > 0, `${name} source ref did not yield a hard finding`);
     }
+  });
+
+  testCase(context, "scan_covers_all_ownerships_and_reports_resident_surface_warning", () => {
+    const setup = setupR43ScanProject(context, "r43-ownerships");
+    const initial = readStalenessReport(runHealth(context, setup.project));
+    assertStalenessShape(context, initial);
+    ensure(context, initial.artifacts_scanned === 3, "R4.2 ownership fixture did not scan managed, co_managed, and human carriers");
+    ensure(context, initial.hard_error_count === 0, "valid managed/co_managed/human carriers were rejected");
+
+    fs.appendFileSync(path.join(setup.project, "AGENTS.md"), `${Array.from({ length: 30 }, (_, index) => `\nextra resident line ${index + 1}`).join("")}\n`);
+    const oversized = readStalenessReport(runHealth(context, setup.project));
+    const finding = oversized.findings.find((item) => item.issue === "agents_line_budget_exceeded");
+    ensure(context, finding?.severity === "warning", "AGENTS.md size finding is not a warning");
+    ensure(context, finding?.kn_id === "KN-0013", "AGENTS.md size finding does not point to KN-0013");
+    ensure(context, finding?.message.includes("做减法而非扩面"), "AGENTS.md size finding omitted the subtraction direction");
+    ensure(context, oversized.hard_error_count === 0, "resident surface warning failed the ordinary scan");
+  });
+
+  testCase(context, "scan_reports_dangling_kn_carrier_line_and_schema_findings", () => {
+    const cases = [
+      {
+        name: "dangling-kn",
+        mutate: (project) => {
+          const file = path.join(project, "harness", "artifacts", "HAR-R42-MANAGED.yaml");
+          const record = readKyaml(file);
+          record.source_kn_ids = ["KN-9999"];
+          fs.writeFileSync(file, harness.renderHarnessSidecar(record));
+        },
+        issue: "unknown_kn",
+      },
+      {
+        name: "dangling-carrier",
+        mutate: (project) => {
+          const file = path.join(project, "knowledge", "KN-0001-r42-existing-claim.md");
+          const text = fs.readFileSync(file, "utf8");
+          fs.writeFileSync(file, text.replace("carrier_refs: []", "carrier_refs:\n  - \"HAR-MISSING@docs/runbooks/missing.md#kg:managed\""));
+        },
+        issue: "unknown_artifact",
+      },
+      {
+        name: "line-range",
+        mutate: (project) => {
+          const file = path.join(project, "harness", "artifacts", "HAR-R42-MANAGED.yaml");
+          const record = readKyaml(file);
+          record.source_refs = ["docs/accepted-r42.md#L999-L1000"];
+          fs.writeFileSync(file, harness.renderHarnessSidecar(record));
+        },
+        issue: "line_out_of_range",
+      },
+      {
+        name: "one-sided-inverse",
+        mutate: (project) => {
+          const file = path.join(project, "knowledge", "KN-0001-r42-existing-claim.md");
+          const text = fs.readFileSync(file, "utf8");
+          fs.writeFileSync(
+            file,
+            text.replace(
+              "carrier_refs: []",
+              "carrier_refs:\n  - \"HAR-R42-MANAGED@docs/runbooks/managed.md#kg:managed\"",
+            ),
+          );
+        },
+        issue: "inverse_missing_carrier_ref",
+      },
+      {
+        name: "hash",
+        mutate: (project) => {
+          const file = path.join(project, "harness", "artifacts", "HAR-R42-MANAGED.yaml");
+          const record = readKyaml(file);
+          record.content_hash = `sha256:${"0".repeat(64)}`;
+          fs.writeFileSync(file, harness.renderHarnessSidecar(record));
+        },
+        issue: "content_hash_mismatch",
+      },
+      {
+        name: "schema",
+        mutate: (project) => {
+          const file = path.join(project, "harness", "artifacts", "HAR-R42-MANAGED.yaml");
+          fs.writeFileSync(file, fs.readFileSync(file, "utf8").replace("artifact_id: HAR-R42-MANAGED\n", ""));
+        },
+        issue: "schema_invalid",
+      },
+    ];
+    for (const item of cases) {
+      const setup = setupR43ScanProject(context, `r43-${item.name}`);
+      item.mutate(setup.project);
+      const report = readStalenessReport(runHealth(context, setup.project));
+      ensure(context, report.findings.some((finding) => finding.issue === item.issue), `${item.name} did not yield ${item.issue}`);
+    }
+  });
+
+  testCase(context, "scan_report_sorting_and_counts_are_reproducible", () => {
+    const setup = setupR43ScanProject(context, "r43-reproducible");
+    for (const [artifactId, sourceRef] of [
+      ["HAR-R42-MANAGED", "docs/missing-a.md#L1"],
+      ["HAR-R42-CO", "docs/accepted-r42.md#L999"],
+    ]) {
+      const file = path.join(setup.project, "harness", "artifacts", `${artifactId}.yaml`);
+      const record = readKyaml(file);
+      record.source_refs = [sourceRef];
+      fs.writeFileSync(file, harness.renderHarnessSidecar(record));
+    }
+    const first = readStalenessReport(runHealth(context, setup.project));
+    const second = readStalenessReport(runHealth(context, setup.project));
+    ensure(context, JSON.stringify(first) === JSON.stringify(second), "identical scan inputs produced different reports");
+    ensure(context, first.hard_error_count + first.warning_count === first.findings.length, "finding counts are not reproducible");
+    for (let index = 1; index < first.findings.length; index += 1) {
+      ensure(context, JSON.stringify(first.findings[index - 1]).localeCompare(JSON.stringify(first.findings[index])) <= 0, "findings are not in canonical order");
+    }
+  });
+
+  testCase(context, "scan_reports_proposal_target_drift_without_self_attestation", () => {
+    const setup = setupR43ScanProject(context, "r43-proposal-drift");
+    const targetPath = "docs/policies/human.md";
+    const candidatePath = "docs/proposals/compile-r43-test/candidate.mjs";
+    const manifestPath = "docs/proposals/compile-r43-test/manifest.json";
+    const candidateBytes = Buffer.from("export const proposal = true;\n", "utf8");
+    const targetBytes = fs.readFileSync(path.join(setup.project, targetPath));
+    const manifest = {
+      kind: "kg.carrier_proposal",
+      version: 1,
+      proposal_id: "compile-pending",
+      carrier_type: "script_proposal",
+      target_path: targetPath,
+      target_sha256: `sha256:${fileHash(path.join(setup.project, targetPath))}`,
+      candidate_path: candidatePath,
+      candidate_sha256: `sha256:${crypto.createHash("sha256").update(candidateBytes).digest("hex")}`,
+      source_kn_ids: [],
+      source_refs: ["docs/accepted-r42.md#L14"],
+      generator_version: "test",
+      status: "proposed",
+    };
+    manifest.proposal_id = `compile-${proposal.proposalManifestDigest(manifest).slice(0, 16)}`;
+    fs.mkdirSync(path.join(setup.project, path.dirname(candidatePath)), { recursive: true });
+    fs.writeFileSync(path.join(setup.project, candidatePath), candidateBytes);
+    fs.writeFileSync(path.join(setup.project, manifestPath), proposal.renderProposalManifest(manifest));
+    const sidecar = {
+      artifact_id: "HAR-R43-PROPOSAL",
+      type: "script_proposal",
+      path: targetPath,
+      ownership: "human",
+      status: "proposed",
+      source_kn_ids: [],
+      source_refs: ["docs/accepted-r42.md#L14"],
+      content_hash: `sha256:${"0".repeat(64)}`,
+      machine_segment_hash: `sha256:${"0".repeat(64)}`,
+      human_segment_hash: null,
+      outside_hash: `sha256:${"0".repeat(64)}`,
+      proposal_id: manifest.proposal_id,
+      candidate_path: candidatePath,
+      generator_version: "test",
+      last_verified: "2026-08-04",
+      update_policy: "proposal_only",
+    };
+    fs.writeFileSync(path.join(setup.project, "harness", "artifacts", "HAR-R43-PROPOSAL.yaml"), harness.renderHarnessSidecar(sidecar));
+    fs.appendFileSync(path.join(setup.project, targetPath), "\nDrift after proposal creation.\n");
+    ensure(context, !targetBytes.equals(fs.readFileSync(path.join(setup.project, targetPath))), "proposal target was not drifted for the test");
+    const report = readStalenessReport(runHealth(context, setup.project));
+    ensure(context, report.findings.some((finding) => finding.issue === "proposal_target_drift" && finding.artifact_id === "HAR-R43-PROPOSAL"), "proposal target drift was not reported");
   });
 
   testCase(context, "seven_step_pipeline_consumes_real_outputs", () => {
