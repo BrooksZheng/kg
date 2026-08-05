@@ -1,0 +1,12 @@
+id: OBS-20260805-002
+at: 2026-08-05T03:02:39Z
+source: task_outcome
+claim: "kg-kickoff deep retrieval currently accepts any caller-selected indexed path, so task-scope relevance has no machine-readable authorization boundary."
+context:
+  task: kg-v2-refactor-m5-contract
+  paths:
+    - skills/kg-kickoff/scripts/gather-context.mjs
+    - skills/kg-kickoff/SKILL.md
+evidence:
+  - { type: diff, ref: "skills/kg-kickoff/scripts/gather-context.mjs:276-303 validates index membership for --include but has no scope product or selection-basis check" }
+urgency: batch
