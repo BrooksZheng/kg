@@ -35,6 +35,14 @@ export const loadScanReportSchema = () => loadProtocolFile("scan-report.schema.y
 export const loadLifecycle = () => loadProtocolFile("lifecycle.yaml");
 export const loadAuthority = () => loadProtocolFile("authority.yaml");
 export const loadRouting = () => loadProtocolFile("routing.yaml");
+export const loadKickoffIndexSchema = () => loadProtocolFile("kickoff-index.schema.yaml");
+export const loadKickoffScopeSchema = () => loadProtocolFile("kickoff-scope.schema.yaml");
+export const loadKickoffSessionSchema = () => loadProtocolFile("kickoff-session.schema.yaml");
+export const loadKickoffTurnSchema = () => loadProtocolFile("kickoff-turn.schema.yaml");
+export const loadKickoffConflictSchema = () => loadProtocolFile("kickoff-conflict.schema.yaml");
+export const loadSpecSynthesisSchema = () => loadProtocolFile("spec-synthesis.schema.yaml");
+export const loadAdrAssessmentSchema = () => loadProtocolFile("adr-assessment.schema.yaml");
+export const loadScanAgentReportSchema = () => loadProtocolFile("scan-agent-report.schema.yaml");
 
 // --- generic record validation against a schema's `fields` specs -----------
 // Spec paths: `field` (top level), `field.sub` (one-level nested map),
@@ -59,7 +67,7 @@ export function validateRecord(record, schema) {
       topSpecs[specPath] = spec;
     }
   }
-  checkMap(record, topSpecs, "", errors, { subSpecs, itemSpecs });
+  checkMap(record, topSpecs, "", errors, { schema, subSpecs, itemSpecs });
   return errors;
 }
 
@@ -70,7 +78,7 @@ function checkMap(obj, specs, prefix, errors, ctx) {
   for (const [key, spec] of Object.entries(specs)) {
     const label = `${prefix}${key}`;
     const value = obj[key];
-    if (value === undefined || (value === null && !["string_or_null", "string_or_list_or_null", "map"].includes(spec.type))) {
+    if (value === undefined || (value === null && !["string_or_null", "string_or_list_or_null", "map", "json"].includes(spec.type))) {
       if (spec.required) errors.push(`${label}: required field is missing`);
       continue;
     }
@@ -126,6 +134,20 @@ function checkValue(value, spec, fieldKey, label, errors, ctx) {
       }
       return;
     }
+    case "enum_from": {
+      const source = resolveSchemaValue(ctx.schema, spec.values_from);
+      const allowed = Array.isArray(source) ? source.map(String) : Object.keys(source ?? {});
+      if (allowed.length === 0) {
+        errors.push(`${label}: schema bug — values_from \`${spec.values_from}\` is empty or missing`);
+      } else if (typeof value !== "string" || !allowed.includes(value)) {
+        errors.push(`${label}: \`${value}\` is not one of protocol table ${spec.values_from}: ${allowed.join(" | ")}`);
+      }
+      return;
+    }
+    case "boolean": {
+      if (typeof value !== "boolean") errors.push(`${label}: must be a boolean`);
+      return;
+    }
     case "float": {
       if (typeof value !== "number" || Number.isNaN(value)) {
         errors.push(`${label}: must be a number`);
@@ -143,12 +165,22 @@ function checkValue(value, spec, fieldKey, label, errors, ctx) {
       if (spec.values !== undefined && !String(spec.values).split("|").includes(String(value))) {
         errors.push(`${label}: \`${value}\` is not one of: ${String(spec.values).split("|").join(" | ")}`);
       }
+      if (spec.min !== undefined && value < spec.min) errors.push(`${label}: below minimum ${spec.min}`);
+      if (spec.max !== undefined && value > spec.max) errors.push(`${label}: above maximum ${spec.max}`);
       return;
     }
     case "string_list": {
       if (!Array.isArray(value) || !value.every((v) => typeof v === "string" && v.trim() !== "")) {
         errors.push(`${label}: must be a list of non-empty strings`);
+        return;
       }
+      if (spec.min_items !== undefined && value.length < spec.min_items) {
+        errors.push(`${label}: needs at least ${spec.min_items} item(s)`);
+      }
+      if (spec.max_items !== undefined && value.length > spec.max_items) {
+        errors.push(`${label}: allows at most ${spec.max_items} item(s)`);
+      }
+      if (spec.unique === true && new Set(value).size !== value.length) errors.push(`${label}: must not contain duplicates`);
       return;
     }
     case "map": {
@@ -169,15 +201,45 @@ function checkValue(value, spec, fieldKey, label, errors, ctx) {
       if (spec.min_items !== undefined && value.length < spec.min_items) {
         errors.push(`${label}: needs at least ${spec.min_items} item(s)`);
       }
+      if (spec.max_items !== undefined && value.length > spec.max_items) {
+        errors.push(`${label}: allows at most ${spec.max_items} item(s)`);
+      }
+      for (const uniqueField of String(spec.unique_by ?? "").split("|").filter(Boolean)) {
+        const values = value.map((item) => item[uniqueField]).filter((item) => item !== undefined);
+        if (new Set(values).size !== values.length) errors.push(`${label}: ${uniqueField} must be unique`);
+      }
       const specs = ctx.itemSpecs[fieldKey];
       if (specs) {
         value.forEach((item, i) => checkMap(item, specs, `${label}[${i}].`, errors, ctx));
       }
       return;
     }
+    case "json": {
+      try {
+        if (JSON.stringify(value) === undefined) throw new Error("undefined JSON value");
+      } catch {
+        errors.push(`${label}: must be a JSON value`);
+      }
+      return;
+    }
     default:
       errors.push(`${label}: schema bug — unknown spec type \`${spec.type}\``);
   }
+}
+
+function resolveSchemaValue(schema, dottedPath) {
+  if (typeof dottedPath !== "string" || dottedPath.trim() === "") return undefined;
+  const parts = dottedPath.split(".");
+  function descend(value, index) {
+    if (index === parts.length) return value;
+    const key = parts[index];
+    if (key === "*") {
+      if (value === null || typeof value !== "object") return undefined;
+      return Object.values(value).map((item) => descend(item, index + 1));
+    }
+    return descend(value?.[key], index + 1);
+  }
+  return descend(schema, 0);
 }
 
 // --- markdown frontmatter ---------------------------------------------------
@@ -219,23 +281,11 @@ function isMain() {
 
 if (isMain()) {
   const problems = [];
-  const files = [
-    "observation.schema.yaml",
-    "knowledge.schema.yaml",
-    "project-document.schema.yaml",
-    "harness.schema.yaml",
-    "compile-plan.schema.yaml",
-    "compile-report.schema.yaml",
-    "queue.schema.yaml",
-    "proposal-manifest.schema.yaml",
-    "task-spec.schema.yaml",
-    "document-taxonomy.yaml",
-    "scan.yaml",
-    "scan-report.schema.yaml",
-    "lifecycle.yaml",
-    "authority.yaml",
-    "routing.yaml",
-  ];
+  const files = fs
+    .readdirSync(PROTOCOL_DIR, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith(".yaml"))
+    .map((entry) => entry.name)
+    .sort();
   const docs = {};
   for (const f of files) {
     try {
@@ -465,24 +515,16 @@ if (isMain()) {
     }
   }
   const taskSpec = docs["task-spec.schema.yaml"];
+  const specSynthesis = docs["spec-synthesis.schema.yaml"];
   if (taskSpec) {
     if (taskSpec.document_kind !== "kg.task_spec") {
       problems.push("task-spec: document_kind must be `kg.task_spec`");
     }
-    const expectedSections = [
-      "Context",
-      "Requirements",
-      "Constraints",
-      "References",
-      "Out of Scope",
-      "Acceptance Criteria",
-      "Open Questions",
-      "Session History",
-    ];
-    for (const section of expectedSections) {
-      if (!taskSpec.required_sections?.includes(section)) {
-        problems.push(`task-spec: required section \`${section}\` missing`);
-      }
+    if (
+      specSynthesis &&
+      JSON.stringify(taskSpec.required_sections ?? []) !== JSON.stringify(specSynthesis.section_order ?? [])
+    ) {
+      problems.push("task-spec: required_sections must equal spec-synthesis section_order");
     }
     if (
       taskSpec.constraint_source_path_pattern !==
@@ -494,6 +536,97 @@ if (isMain()) {
         !String(taskSpec.acceptance_format ?? "").includes("WHEN") ||
         !String(taskSpec.acceptance_format ?? "").includes("THEN")) {
       problems.push("task-spec: acceptance format must require GIVEN, WHEN, and THEN");
+    }
+  }
+  for (const [file, schema] of Object.entries(docs)) {
+    if (!schema?.fields) continue;
+    const topFields = Object.keys(schema.fields).filter((field) => !field.includes(".") && !field.includes("[]"));
+    if (!Array.isArray(schema.field_order) && (schema.script_owned_fields || schema.record_field_order)) {
+      problems.push(`${file}: fields require an explicit field_order`);
+    } else if (Array.isArray(schema.field_order) && JSON.stringify(topFields) !== JSON.stringify(schema.field_order)) {
+      problems.push(`${file}: field_order must match top-level fields insertion order`);
+    }
+    for (const [container, orderValue] of Object.entries(schema.record_field_order ?? {})) {
+      const prefix = schema.fields[container]?.type === "map_list" ? `${container}[].` : `${container}.`;
+      const actual = Object.keys(schema.fields)
+        .filter((field) => field.startsWith(prefix))
+        .map((field) => field.slice(prefix.length));
+      const expected = String(orderValue).split("|").filter(Boolean);
+      if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+        problems.push(`${file}: record_field_order.${container} must match nested fields insertion order`);
+      }
+    }
+    for (const [field, spec] of Object.entries(schema.fields)) {
+      if (spec.type === "enum_from" && resolveSchemaValue(schema, spec.values_from) === undefined) {
+        problems.push(`${file}: ${field}.values_from does not resolve: ${spec.values_from}`);
+      }
+    }
+    const owned = String(schema.script_owned_fields ?? "").split("|").filter(Boolean);
+    for (const field of owned) {
+      if (!schema.fields[field]) problems.push(`${file}: script_owned_fields names unknown field ${field}`);
+    }
+  }
+  const kickoffIndex = docs["kickoff-index.schema.yaml"];
+  if (kickoffIndex) {
+    for (const [sourceClass, row] of Object.entries(kickoffIndex.source_classes ?? {})) {
+      for (const field of ["discovery", "route_source", "index_fields", "deep_qualification"]) {
+        if (!row?.[field]) problems.push(`kickoff-index: source_classes.${sourceClass}.${field} missing`);
+      }
+    }
+  }
+  const kickoffScope = docs["kickoff-scope.schema.yaml"];
+  if (kickoffScope) {
+    for (const [reason, row] of Object.entries(kickoffScope.scope_reasons ?? {})) {
+      if (!row?.basis_type || !row?.description) problems.push(`kickoff-scope: scope_reasons.${reason} is incomplete`);
+    }
+  }
+  const adr = docs["adr-assessment.schema.yaml"];
+  if (adr && Object.keys(adr.criteria ?? {}).length !== adr.fields?.criteria?.min_items) {
+    problems.push("adr-assessment: criteria min_items must equal the protocol criterion count");
+  }
+  const rubric = docs["evaluation-rubric.schema.yaml"];
+  const oracle = docs["evaluation-oracle.schema.yaml"];
+  const scenario = docs["evaluation-scenario.schema.yaml"];
+  if (rubric) {
+    for (const [criterionId, row] of Object.entries(rubric.criteria ?? {})) {
+      const values = String(row?.values ?? "").split("|").map(Number);
+      if (!row?.evaluator || values.some((value) => !Number.isInteger(value)) || Math.max(...values) !== row?.max) {
+        problems.push(`evaluation-rubric: criterion ${criterionId} has invalid values or max`);
+      }
+    }
+    for (const evaluator of rubric.evaluator_values ?? []) {
+      const rows = Object.values(rubric.criteria ?? {}).filter((row) => row.evaluator === evaluator);
+      const rawMax = rows.reduce((sum, row) => sum + row.max, 0);
+      const normalization = rubric.normalization?.[evaluator];
+      const gate = rubric.fixture_gates?.[evaluator];
+      if (rows.length === 0 && normalization) {
+        problems.push(`evaluation-rubric: scored evaluator ${evaluator} has no criteria`);
+      }
+      if (rows.length > 0 && normalization?.raw_max !== rawMax) {
+        problems.push(`evaluation-rubric: ${evaluator} raw_max must equal criterion maxima`);
+      }
+      if (rows.length > 0 && normalization?.raw_max / normalization?.divisor !== normalization?.normalized_max) {
+        problems.push(`evaluation-rubric: ${evaluator} normalization is incoherent`);
+      }
+      if (rows.length > 0 && !gate) problems.push(`evaluation-rubric: ${evaluator} fixture gate missing`);
+      if (gate?.required_exact_criterion && rubric.criteria?.[gate.required_exact_criterion]?.evaluator !== evaluator) {
+        problems.push(`evaluation-rubric: ${evaluator} exact criterion points outside its rubric`);
+      }
+      for (const item of String(gate?.criterion_minimums ?? "").split("|").filter(Boolean)) {
+        const [criterionId, minimum] = item.split(":");
+        const row = rubric.criteria?.[criterionId];
+        if (row?.evaluator !== evaluator || !String(row.values).split("|").includes(minimum)) {
+          problems.push(`evaluation-rubric: ${evaluator} minimum ${item} is not an allowed criterion value`);
+        }
+      }
+    }
+  }
+  if (rubric && oracle && scenario) {
+    for (const evaluator of [scenario.fields?.evaluator, oracle.fields?.evaluator]) {
+      if (evaluator?.type !== "string") problems.push("evaluation fixture evaluator fields must be strings");
+    }
+    if (oracle.fields?.["expectations[].level"]?.type !== "string") {
+      problems.push("evaluation-oracle: expectation level must be validated against the rubric protocol by the loader");
     }
   }
   if (problems.length) {

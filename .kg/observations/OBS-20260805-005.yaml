@@ -1,0 +1,13 @@
+id: OBS-20260805-005
+at: 2026-08-05T03:37:17Z
+source: test_failure
+claim: "Machine-product validators must keep raw-input record field order separate from canonical product record field order when validation flattens nested records into scalar lists."
+context:
+  task: "kg-v2-refactor R5.1 machine contracts"
+  paths:
+    - "protocol/*synthesis*"
+    - scripts/lib/machine-contract.mjs
+    - skills/kg-spec/scripts/produce-spec.mjs
+evidence:
+  - { type: test, ref: "scripts/test-v2.mjs Part 6 spec_archives_compiled_context_transcript exposed map-list to string-list flattening" }
+urgency: batch

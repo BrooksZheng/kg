@@ -4,10 +4,11 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { documentAnchor, kyaml } from "./_lib.mjs";
+import { documentAnchor, kyaml, machineContract, protocol } from "./_lib.mjs";
 
-const RECORD_FIELDS = ["kind", "version", "conflicts"];
-const CONFLICT_FIELDS = ["summary", "source_path", "line"];
+const CONFLICT_SCHEMA = protocol.loadKickoffConflictSchema();
+const RECORD_FIELDS = CONFLICT_SCHEMA.legacy_field_order.split("|");
+const CONFLICT_FIELDS = CONFLICT_SCHEMA.legacy_record_field_order.conflicts.split("|");
 
 function fail(message) {
   console.error(`kg: 错误：${message}`);
@@ -98,11 +99,11 @@ function canonicalRecord(raw, projectRoot) {
     };
   });
 
-  return {
+  return machineContract.orderRecordByProtocol({
     kind: "kg.kickoff_conflicts",
     version: 1,
     conflicts,
-  };
+  }, CONFLICT_SCHEMA.legacy_field_order, CONFLICT_SCHEMA.legacy_record_field_order);
 }
 
 function writeRecord(file, record) {

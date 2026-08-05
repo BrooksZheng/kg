@@ -14,6 +14,9 @@ import * as compilePlan from "./lib/compile-plan.mjs";
 import * as inverseMap from "./lib/inverse-map.mjs";
 import * as proposal from "./lib/proposal.mjs";
 import * as host from "./lib/host.mjs";
+import * as machineContract from "./lib/machine-contract.mjs";
+import { loadSplitEvaluationFixture, scoreableOracle } from "./lib/eval-fixture.mjs";
+import { calculateRubricScore } from "./lib/eval-rubric.mjs";
 import {
   relativeProductPath as normalizeRunnerProjectProduct,
   resolveArtifactProduct as normalizeRunnerArtifactProduct,
@@ -4075,6 +4078,172 @@ function runPart4(context) {
 }
 
 function runPart5(context) {
+  testCase(context, "kickoff_scope_writer_rejects_unknown_fields_and_agent_owned_identity", () => {
+    const schema = protocol.loadKickoffScopeSchema();
+    const raw = {
+      selected_sources: [
+        {
+          source_path: "docs/architecture/overview.md",
+          reason: "direct_task_path",
+          basis_type: "transcript_literal",
+          basis_ref: "transcript.json#message=0",
+        },
+      ],
+    };
+    ensure(context, machineContract.validateRawInput(raw, schema).length === 0, "valid kickoff scope raw input failed");
+    ensure(
+      context,
+      machineContract.validateRawInput({ ...raw, invented: true }, schema).some((error) => error.includes("unknown field")),
+      "kickoff scope raw input accepted an unknown field",
+    );
+    ensure(
+      context,
+      machineContract.validateRawInput({ ...raw, scope_id: "KSCOPE-0123456789AB" }, schema).some((error) => error.includes("script-owned")),
+      "kickoff scope raw input accepted script-owned identity",
+    );
+    const nestedIdentity = structuredClone(raw);
+    nestedIdentity.selected_sources[0].source_sha256 = `sha256:${"a".repeat(64)}`;
+    ensure(
+      context,
+      machineContract.validateRawInput(nestedIdentity, schema).some((error) => error.includes("script-owned")),
+      "kickoff scope raw input accepted a nested script-owned hash",
+    );
+
+    const sourceSha = `sha256:${"b".repeat(64)}`;
+    const product = machineContract.buildCanonicalRecord(
+      raw,
+      {
+        kind: schema.product_kind,
+        version: schema.product_version,
+        scope_id: "KSCOPE-0123456789AB",
+        created_at: "2026-08-05T08:00:00Z",
+        index_sha256: `sha256:${"c".repeat(64)}`,
+        task_sha256: `sha256:${"d".repeat(64)}`,
+        selected_sources: [{ ...raw.selected_sources[0], source_sha256: sourceSha }],
+      },
+      schema,
+      "kickoff scope",
+    );
+    ensure(context, JSON.stringify(Object.keys(product)) === JSON.stringify(schema.field_order), "scope top-level canonical order drifted");
+    ensure(
+      context,
+      JSON.stringify(Object.keys(product.selected_sources[0])) ===
+        JSON.stringify(schema.record_field_order.selected_sources.split("|")),
+      "scope selection canonical order drifted",
+    );
+    const output = path.join(context.root, "machine-contract", "scope.json");
+    machineContract.writeCanonicalRecord(output, product, schema);
+    ensure(context, fs.existsSync(output), "canonical writer did not write the validated scope product");
+    const rejectedOutput = path.join(context.root, "machine-contract", "invalid-scope.json");
+    let invalidRejected = false;
+    try {
+      machineContract.writeCanonicalRecord(rejectedOutput, { ...product, invented: true }, schema);
+    } catch {
+      invalidRejected = true;
+    }
+    ensure(context, invalidRejected && !fs.existsSync(rejectedOutput), "canonical writer changed the target on validation failure");
+
+    const hostRoot = path.join(context.root, "machine-contract-host");
+    fs.mkdirSync(path.join(hostRoot, "docs"), { recursive: true });
+    fs.writeFileSync(path.join(hostRoot, "docs", "source.md"), "source bytes\n");
+    const identity = machineContract.canonicalFileIdentity(hostRoot, "docs/source.md");
+    ensure(context, identity.path === "docs/source.md" && identity.sha256.startsWith("sha256:"), "shared hash/path identity failed");
+    fs.symlinkSync(path.join(hostRoot, "docs", "source.md"), path.join(hostRoot, "docs", "alias.md"));
+    let symlinkRejected = false;
+    try {
+      machineContract.canonicalFileIdentity(hostRoot, "docs/alias.md");
+    } catch {
+      symlinkRejected = true;
+    }
+    ensure(context, symlinkRejected, "shared canonical path helper accepted a symlink identity");
+  });
+
+  testCase(context, "oracle_derivation_requires_fixture_bytes_and_excludes_advisory_from_score", () => {
+    const fixtureRoot = path.join(context.root, "split-oracle");
+    fs.mkdirSync(path.join(fixtureRoot, "project"), { recursive: true });
+    fs.mkdirSync(path.join(fixtureRoot, "artifacts"), { recursive: true });
+    fs.writeFileSync(path.join(fixtureRoot, "project", "source.md"), "supported expectation\nsecond line\n");
+    fs.writeFileSync(path.join(fixtureRoot, "artifacts", "product.json"), "{}\n");
+    const scenarioFile = path.join(fixtureRoot, "scenario.json");
+    writeJson(scenarioFile, {
+      kind: "kg.evaluation_scenario",
+      version: 1,
+      fixture_id: "fixture-r51",
+      evaluator: "kickoff",
+      task: "exercise split fixture loading",
+      source_roots: ["project", "artifacts"],
+      judged_artifact_roots: ["artifacts"],
+      visible_inputs: ["project/source.md"],
+      turns: [],
+      approvals: [],
+    });
+    const oracleFile = path.join(fixtureRoot, "oracle.json");
+    const oracle = {
+      kind: "kg.evaluation_oracle",
+      version: 1,
+      fixture_id: "fixture-r51",
+      evaluator: "kickoff",
+      expectations: [
+        {
+          expectation_id: "hard-source",
+          level: "hard",
+          criterion_id: "B5",
+          assertion: "source is selected",
+          expected: true,
+          derivation: "project/source.md#L1",
+        },
+        {
+          expectation_id: "advisory-style",
+          level: "advisory",
+          criterion_id: null,
+          assertion: "prose can be shorter",
+          expected: "shorter",
+        },
+      ],
+    };
+    writeJson(oracleFile, oracle);
+    const loaded = loadSplitEvaluationFixture({ scenarioFile, oracleFile });
+    ensure(context, loaded.hardExpectations.length === 1, "hard oracle expectation was not loaded");
+    ensure(context, loaded.advisoryExpectations.length === 1, "advisory oracle expectation was not loaded");
+    ensure(context, scoreableOracle(loaded).length === 1, "advisory expectation entered scoreable oracle input");
+
+    const missing = structuredClone(oracle);
+    delete missing.expectations[0].derivation;
+    const missingFile = path.join(fixtureRoot, "oracle-missing.json");
+    writeJson(missingFile, missing);
+    let missingRejected = false;
+    try {
+      loadSplitEvaluationFixture({ scenarioFile, oracleFile: missingFile });
+    } catch (error) {
+      missingRejected = error.message.includes("requires derivation");
+    }
+    ensure(context, missingRejected, "hard oracle expectation without derivation loaded successfully");
+
+    const outside = structuredClone(oracle);
+    outside.expectations[0].derivation = "../outside.md#L1";
+    const outsideFile = path.join(fixtureRoot, "oracle-outside.json");
+    writeJson(outsideFile, outside);
+    let outsideRejected = false;
+    try {
+      loadSplitEvaluationFixture({ scenarioFile, oracleFile: outsideFile });
+    } catch {
+      outsideRejected = true;
+    }
+    ensure(context, outsideRejected, "oracle derivation escaped the fixture root");
+
+    const selfAttesting = structuredClone(oracle);
+    selfAttesting.expectations[0].derivation = "artifacts/product.json#L1";
+    const selfAttestingFile = path.join(fixtureRoot, "oracle-self-attesting.json");
+    writeJson(selfAttestingFile, selfAttesting);
+    let selfAttestingRejected = false;
+    try {
+      loadSplitEvaluationFixture({ scenarioFile, oracleFile: selfAttestingFile });
+    } catch (error) {
+      selfAttestingRejected = error.message.includes("judged artifacts");
+    }
+    ensure(context, selfAttestingRejected, "oracle derivation accepted judged product bytes under KN-0035");
+  });
+
   testCase(context, "fixture_lint_rejects_all_out_of_range_anchors", () => {
     runNode(context, FIXTURE_LINT, [], { cwd: ROOT });
     const fixtureRoot = path.join(context.root, "fixture-lint-negative");
@@ -4224,7 +4393,7 @@ function runPart5(context) {
     ensure(context, record.recorded_at === "2026-07-31T05:00:00.000Z", "turn timestamp was not injected");
     ensure(context, typeof record.session_id === "string" && record.session_id.length > 0, "turn session_id missing");
     const text = fs.readFileSync(output, "utf8");
-    const canonicalKeys = ["kind:", "version:", "recorded_at:", "session_id:", "findings:", "question:"];
+    const canonicalKeys = protocol.loadKickoffTurnSchema().legacy_field_order.split("|").map((field) => `${field}:`);
     ensure(
       context,
       canonicalKeys.every(
@@ -4745,6 +4914,101 @@ function runMutatedSpecFixture(context, name, mutate, options = {}) {
 }
 
 function runPart6(context) {
+  testCase(context, "evaluation_rubric_uses_protocol_criterion_ids_values_and_gates", () => {
+    const rubric = protocol.loadProtocolFile("evaluation-rubric.schema.yaml");
+    const specRows = Object.entries(rubric.criteria).filter(([, row]) => row.evaluator === "spec");
+    const maximums = Object.fromEntries(specRows.map(([criterionId, row]) => [criterionId, row.max]));
+    const passing = calculateRubricScore({
+      evaluator: "spec",
+      criterionValues: maximums,
+      hardAssertions: [{ assertion_id: "hard-1", passed: true }],
+    });
+    ensure(context, passing.pass === true, "protocol maximum spec score did not pass its protocol gate");
+    ensure(
+      context,
+      JSON.stringify(passing.criteria.map((row) => row.criterion_id)) === JSON.stringify(specRows.map(([id]) => id)),
+      "rubric calculator criterion IDs differ from protocol order",
+    );
+    const exactCriterion = rubric.fixture_gates.spec.required_exact_criterion;
+    const failingValues = { ...maximums, [exactCriterion]: 0 };
+    const failing = calculateRubricScore({
+      evaluator: "spec",
+      criterionValues: failingValues,
+      hardAssertions: [{ assertion_id: "hard-1", passed: true }],
+    });
+    ensure(context, failing.pass === false, "protocol exact-criterion gate was ignored");
+  });
+
+  testCase(context, "spec_synthesis_contract_rejects_unknown_identity_and_uses_canonical_order", () => {
+    const schema = protocol.loadSpecSynthesisSchema();
+    const raw = {
+      task: { title: "Protocol-owned synthesis" },
+      context: [{ statement: "Context", source_refs: ["transcript.json#message=0"] }],
+      requirements: [{ statement: "Requirement", source_refs: ["transcript.json#message=0"] }],
+      constraints: [
+        {
+          constraint: "Keep the stable boundary",
+          source_path: "docs/architecture/overview.md#L1",
+          source_status: "accepted",
+          authority: "formal_decision",
+          finding_id: "KF-0123456789AB",
+        },
+      ],
+      references: [{ path: "src/index.mjs", purpose: "Implementation location" }],
+      out_of_scope: [],
+      acceptance_criteria: [
+        {
+          given: "a valid packet",
+          when: "synthesis is validated",
+          then: "a canonical product is produced",
+          requirement_ids: ["REQ-001"],
+        },
+      ],
+      open_questions: [],
+      session_history: [
+        { session_id: "runner-session", turn_ids: ["KTURN-0123456789AB-001"], product_kinds: ["kg.kickoff_turn"] },
+      ],
+    };
+    ensure(context, machineContract.validateRawInput(raw, schema).length === 0, "valid spec raw input failed");
+    ensure(
+      context,
+      machineContract.validateRawInput({ ...raw, invented: true }, schema).some((error) => error.includes("unknown field")),
+      "spec raw input accepted an unknown field",
+    );
+    const owned = structuredClone(raw);
+    owned.task.task_id = "TASK-20260805-001";
+    ensure(
+      context,
+      machineContract.validateRawInput(owned, schema).some((error) => error.includes("script-owned")),
+      "spec raw input accepted script-owned task identity",
+    );
+
+    const product = machineContract.buildCanonicalRecord(
+      raw,
+      {
+        kind: schema.product_kind,
+        version: schema.product_version,
+        synthesis_id: "KSYN-0123456789AB",
+        created_at: "2026-08-05T08:00:00Z",
+        packet_sha256: `sha256:${"e".repeat(64)}`,
+        task: { task_id: "TASK-20260805-001", status: "draft" },
+        context: [{ context_id: "CTX-001", ...raw.context[0] }],
+        requirements: [{ requirement_id: "REQ-001", ...raw.requirements[0] }],
+        constraints: [{ constraint_id: "CON-001", ...raw.constraints[0] }],
+        acceptance_criteria: [{ acceptance_id: "AC-001", ...raw.acceptance_criteria[0] }],
+      },
+      schema,
+      "spec synthesis",
+    );
+    ensure(context, JSON.stringify(Object.keys(product)) === JSON.stringify(schema.field_order), "spec canonical field order drifted");
+    ensure(
+      context,
+      JSON.stringify(Object.keys(product.acceptance_criteria[0])) ===
+        JSON.stringify(schema.record_field_order.acceptance_criteria.split("|").filter((field) => field !== "and")),
+      "spec acceptance canonical field order drifted",
+    );
+  });
+
   testCase(context, "spec_archives_compiled_context_transcript", () => {
     const setup = setupSpecArchiveCase(context, "archive-positive");
     const specsDir = path.join(setup.project, "docs", "specs");
@@ -5096,20 +5360,7 @@ function readStalenessReport(run) {
 function assertStalenessShape(context, report) {
   ensure(
     context,
-    JSON.stringify(Object.keys(report)) ===
-      JSON.stringify([
-        "kind",
-        "version",
-        "scanned_at",
-        "artifacts_scanned",
-        "findings",
-        "staleness_count",
-        "hard_error_count",
-        "warning_count",
-        "resident_surface",
-        "coverage_audit",
-        "scan_limits",
-      ]),
+    JSON.stringify(Object.keys(report)) === JSON.stringify(protocol.loadScanReportSchema().field_order),
     "staleness report fields or canonical order differ from R4.3",
   );
   ensure(context, report.kind === "kg.staleness_report" && report.version === 2, "staleness report kind/version invalid");

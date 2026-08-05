@@ -1,0 +1,40 @@
+# kg protocol: agent-visible half of a split evaluator fixture.
+
+kind: kg.evaluation_scenario_schema
+version: 1
+record_kind: kg.evaluation_scenario
+record_version: 1
+
+field_order:
+  - kind
+  - version
+  - fixture_id
+  - evaluator
+  - task
+  - source_roots
+  - judged_artifact_roots
+  - visible_inputs
+  - turns
+  - approvals
+
+record_field_order:
+  turns: "sequence|role|content"
+  approvals: "sequence|action|message_index"
+
+fields:
+  kind: { type: enum, required: true, values: "kg.evaluation_scenario" }
+  version: { type: integer, required: true, values: "1" }
+  fixture_id: { type: string, required: true }
+  evaluator: { type: string, required: true }
+  task: { type: string, required: true }
+  source_roots: { type: string_list, required: true, min_items: 1 }
+  judged_artifact_roots: { type: string_list, required: true }
+  visible_inputs: { type: string_list, required: true }
+  turns: { type: map_list, required: true, unique_by: sequence }
+  turns[].sequence: { type: integer, required: true, min: 1 }
+  turns[].role: { type: enum, required: true, values: "user" }
+  turns[].content: { type: string, required: true }
+  approvals: { type: map_list, required: true, unique_by: sequence }
+  approvals[].sequence: { type: integer, required: true, min: 1 }
+  approvals[].action: { type: string, required: true }
+  approvals[].message_index: { type: integer, required: true, min: 0 }

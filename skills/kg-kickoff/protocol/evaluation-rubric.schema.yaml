@@ -1,0 +1,84 @@
+# kg protocol: deterministic M5 evaluator score product and rubric tables.
+
+kind: kg.evaluation_rubric_schema
+version: 1
+product_kind: kg.evaluation_score
+product_version: 1
+evaluator_values: [kickoff, spec, docs, scan]
+expectation_level_values: [hard, advisory]
+
+# KN-0034: criterion IDs, permitted values, maxima, and score meanings live
+# only here. Evaluator code reads this table at runtime.
+criteria:
+  B1: { evaluator: kickoff, values: "0|2|4", max: 4, description: "Findings match hidden sources, status, authority, and anchors." }
+  B2: { evaluator: kickoff, values: "0|2|4", max: 4, description: "One structured question hits the expected clarification axis with grounded options." }
+  B3: { evaluator: kickoff, values: "0|2|4", max: 4, description: "Conflict bindings match task pointers and stable constraint anchors." }
+  B4: { evaluator: kickoff, values: "0|2|4", max: 4, description: "Expected documentation actions have validated products and successful tool events." }
+  B5: { evaluator: kickoff, values: "0|2|4", max: 4, description: "Catalog, scope basis, deep set, budgets, and distractors satisfy the oracle." }
+  C1: { evaluator: spec, values: "0|4", max: 4, description: "Synthesis performs no interview and consumes only its packet." }
+  C2: { evaluator: spec, values: "0|1|2|3", max: 3, description: "Sections, trace graph, structured GWT, boundaries, and open questions are valid." }
+  C3: { evaluator: spec, values: "0|1|2|3", max: 3, description: "Constraint anchors and source provenance match kickoff findings." }
+
+normalization:
+  kickoff: { raw_max: 20, normalized_max: 10, divisor: 2 }
+  spec: { raw_max: 10, normalized_max: 5, divisor: 2 }
+
+fixture_gates:
+  kickoff: { minimum_score: 6, requires_all_hard: true, required_exact_criterion: null, criterion_minimums: "" }
+  spec: { minimum_score: 3, requires_all_hard: true, required_exact_criterion: C1, criterion_minimums: "C2:2|C3:2" }
+
+field_order:
+  - kind
+  - version
+  - evaluated_at
+  - evaluator
+  - fixture_id
+  - oracle_sha256
+  - product_hashes
+  - criteria
+  - raw_score
+  - normalized_score
+  - hard_assertions
+  - hard_gate_pass
+  - advisory
+  - pass
+
+record_field_order:
+  product_hashes: "kind|path|sha256"
+  criteria: "criterion_id|value|max_value|passed_checks|failed_checks"
+  hard_assertions: "assertion_id|passed|expected_ref|actual_ref|message"
+  advisory: "advisory_id|message|source_refs"
+
+script_owned_fields: "kind|version|evaluated_at|evaluator|fixture_id|oracle_sha256|product_hashes|criteria|raw_score|normalized_score|hard_assertions|hard_gate_pass|advisory|pass"
+
+fields:
+  kind: { type: enum, required: true, values: "kg.evaluation_score" }
+  version: { type: integer, required: true, values: "1" }
+  evaluated_at: { type: timestamp, required: true }
+  evaluator: { type: enum_from, required: true, values_from: evaluator_values }
+  fixture_id: { type: string, required: true }
+  oracle_sha256: { type: string, required: true, pattern: "^sha256:[a-f0-9]{64}$" }
+  product_hashes: { type: map_list, required: true, min_items: 1 }
+  product_hashes[].kind: { type: string, required: true }
+  product_hashes[].path: { type: string, required: true }
+  product_hashes[].sha256: { type: string, required: true, pattern: "^sha256:[a-f0-9]{64}$" }
+  criteria: { type: map_list, required: true, min_items: 1, unique_by: criterion_id }
+  criteria[].criterion_id: { type: string, required: true }
+  criteria[].value: { type: integer, required: true, min: 0 }
+  criteria[].max_value: { type: integer, required: true, min: 1 }
+  criteria[].passed_checks: { type: string_list, required: true }
+  criteria[].failed_checks: { type: string_list, required: true }
+  raw_score: { type: integer, required: true, min: 0 }
+  normalized_score: { type: float, required: true, min: 0 }
+  hard_assertions: { type: map_list, required: true, unique_by: assertion_id }
+  hard_assertions[].assertion_id: { type: string, required: true }
+  hard_assertions[].passed: { type: boolean, required: true }
+  hard_assertions[].expected_ref: { type: string, required: true }
+  hard_assertions[].actual_ref: { type: string, required: true }
+  hard_assertions[].message: { type: string, required: true }
+  hard_gate_pass: { type: boolean, required: true }
+  advisory: { type: map_list, required: true, unique_by: advisory_id }
+  advisory[].advisory_id: { type: string, required: true }
+  advisory[].message: { type: string, required: true }
+  advisory[].source_refs: { type: string_list, required: true }
+  pass: { type: boolean, required: true }

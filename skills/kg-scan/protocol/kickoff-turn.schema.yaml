@@ -1,0 +1,58 @@
+# kg protocol: one ordered kickoff question and its evidence findings.
+
+kind: kg.kickoff_turn_schema
+version: 2
+legacy_versions: [1]
+product_kind: kg.kickoff_turn
+product_version: 2
+
+field_order:
+  - kind
+  - version
+  - recorded_at
+  - session_id
+  - turn_id
+  - sequence
+  - user_message_index
+  - user_message_sha256
+  - findings
+  - question
+
+record_field_order:
+  findings: "finding_id|source_path|line|status|authority"
+  question: "clarification_axis|question_text|options|recommendation|reason_refs|assistant_message_index|assistant_message|assistant_message_sha256"
+
+script_owned_fields: "kind|version|recorded_at|session_id|turn_id|sequence|user_message_sha256|findings[].finding_id|question.assistant_message|question.assistant_message_sha256"
+
+# Version 1 remains a saved-fixture compatibility surface until R5.2 migrates
+# the live writer. Its shape is still protocol-owned.
+legacy_field_order: "kind|version|recorded_at|session_id|findings|question"
+legacy_input_field_order: "findings|question"
+legacy_record_field_order:
+  findings: "source_path|line|status|authority"
+  question: "question_text|assistant_message_index"
+
+fields:
+  kind: { type: enum, required: true, values: "kg.kickoff_turn" }
+  version: { type: integer, required: true, values: "2" }
+  recorded_at: { type: timestamp, required: true }
+  session_id: { type: string, required: true, pattern: "^KSESSION-[A-F0-9]{12}$" }
+  turn_id: { type: string, required: true, pattern: "^KTURN-[A-F0-9]{12}-[0-9]{3}$" }
+  sequence: { type: integer, required: true, min: 1 }
+  user_message_index: { type: integer, required: true, min: 0 }
+  user_message_sha256: { type: string, required: true, pattern: "^sha256:[a-f0-9]{64}$" }
+  findings: { type: map_list, required: true, min_items: 1, unique_by: finding_id }
+  findings[].finding_id: { type: string, required: true, pattern: "^KF-[A-F0-9]{12}$" }
+  findings[].source_path: { type: string, required: true }
+  findings[].line: { type: integer, required: true, min: 1 }
+  findings[].status: { type: string, required: true }
+  findings[].authority: { type: string, required: true }
+  question: { type: map, required: true }
+  question.clarification_axis: { type: string, required: true }
+  question.question_text: { type: string, required: true }
+  question.options: { type: string_list, required: true, min_items: 2 }
+  question.recommendation: { type: string, required: true }
+  question.reason_refs: { type: string_list, required: true, min_items: 1 }
+  question.assistant_message_index: { type: integer, required: true, min: 0 }
+  question.assistant_message: { type: string, required: true }
+  question.assistant_message_sha256: { type: string, required: true, pattern: "^sha256:[a-f0-9]{64}$" }

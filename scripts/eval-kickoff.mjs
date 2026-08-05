@@ -12,9 +12,11 @@ import * as documentAnchor from "./lib/document-anchor.mjs";
 import * as harness from "./lib/harness.mjs";
 import * as host from "./lib/host.mjs";
 import * as protocol from "./lib/protocol.mjs";
+import { loadSavedEvaluationFixture } from "./lib/eval-fixture.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const KICKOFF_SOURCE = path.join(ROOT, "skills", "kg-kickoff");
+const KICKOFF_TURN_SCHEMA = protocol.loadKickoffTurnSchema();
 const FIXTURE_FIELDS = [
   "kind",
   "version",
@@ -26,9 +28,9 @@ const FIXTURE_FIELDS = [
   "must_report",
   "distractors",
 ];
-const TURN_FIELDS = ["kind", "version", "recorded_at", "session_id", "findings", "question"];
-const FINDING_FIELDS = ["source_path", "line", "status", "authority"];
-const QUESTION_FIELDS = ["question_text", "assistant_message_index"];
+const TURN_FIELDS = KICKOFF_TURN_SCHEMA.legacy_field_order.split("|");
+const FINDING_FIELDS = KICKOFF_TURN_SCHEMA.legacy_record_field_order.findings.split("|");
+const QUESTION_FIELDS = KICKOFF_TURN_SCHEMA.legacy_record_field_order.question.split("|");
 
 function fail(message) {
   console.error(`kg: 错误：${message}`);
@@ -86,7 +88,7 @@ function loadFixture(value) {
   }
   let fixture;
   try {
-    fixture = parse(fs.readFileSync(fixtureFile, "utf8"));
+    ({ fixture } = loadSavedEvaluationFixture(fixtureFile, "kg.eval_kickoff_fixture", [2]));
     exactFields(fixture, FIXTURE_FIELDS, "kickoff fixture");
     if (fixture.kind !== "kg.eval_kickoff_fixture" || fixture.version !== 2) {
       throw new Error("kind/version must be kg.eval_kickoff_fixture/2");

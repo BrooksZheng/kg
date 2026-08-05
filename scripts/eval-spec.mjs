@@ -13,20 +13,14 @@ import { parse } from "./lib/kyaml.mjs";
 import * as documentAnchor from "./lib/document-anchor.mjs";
 import * as host from "./lib/host.mjs";
 import * as protocol from "./lib/protocol.mjs";
+import { loadSavedEvaluationFixture } from "./lib/eval-fixture.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PRODUCE = path.join(ROOT, "skills", "kg-spec", "scripts", "produce-spec.mjs");
 const FIXED_NOW = "2026-07-31T08:00:00.000Z";
-const REQUIRED_SECTIONS = [
-  "Context",
-  "Requirements",
-  "Constraints",
-  "References",
-  "Out of Scope",
-  "Acceptance Criteria",
-  "Open Questions",
-  "Session History",
-];
+const SPEC_SYNTHESIS_SCHEMA = protocol.loadSpecSynthesisSchema();
+const KICKOFF_TURN_SCHEMA = protocol.loadKickoffTurnSchema();
+const REQUIRED_SECTIONS = protocol.loadTaskSpecSchema().required_sections;
 const M2_FIXTURE_FIELDS = [
   "kind",
   "version",
@@ -55,13 +49,11 @@ const M1_FIXTURE_FIELDS = [
   "c1_zero_interview_score",
   "forbid_user_questions",
 ];
-const KICKOFF_PRODUCT_KINDS = [
-  "kg.kickoff_context_index",
-  "kg.kickoff_context",
-  "kg.kickoff_turn",
-];
-const TURN_FIELDS = ["kind", "version", "recorded_at", "session_id", "findings", "question"];
-const FINDING_FIELDS = ["source_path", "line", "status", "authority"];
+const KICKOFF_PRODUCT_KINDS = SPEC_SYNTHESIS_SCHEMA.legacy_kickoff_product_kinds
+  .split("|")
+  .filter((kind) => kind !== "kg.kickoff_conflicts");
+const TURN_FIELDS = KICKOFF_TURN_SCHEMA.legacy_field_order.split("|");
+const FINDING_FIELDS = KICKOFF_TURN_SCHEMA.legacy_record_field_order.findings.split("|");
 
 function fail(message) {
   console.error(`kg: 错误：${message}`);
@@ -134,7 +126,7 @@ function requirePath(value, label, type) {
 
 function loadFixture(value) {
   const fixtureFile = requirePath(value, "fixture", "file");
-  const fixture = parse(fs.readFileSync(fixtureFile, "utf8"));
+  const { fixture } = loadSavedEvaluationFixture(fixtureFile, "kg.eval_spec_fixture", [1, 2]);
   if (fixture.kind !== "kg.eval_spec_fixture") throw new Error("fixture kind must be kg.eval_spec_fixture");
   if (fixture.version === 1) {
     exactFields(fixture, M1_FIXTURE_FIELDS, "M1 spec fixture");

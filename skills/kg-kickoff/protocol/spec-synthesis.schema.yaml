@@ -1,0 +1,103 @@
+# kg protocol: versioned structured task-spec synthesis product.
+
+kind: kg.spec_synthesis_schema
+version: 3
+legacy_versions: [1, 2]
+product_kind: kg.spec_synthesis
+product_version: 3
+
+section_order: [Context, Requirements, Constraints, References, Out of Scope, Acceptance Criteria, Open Questions, Session History]
+out_of_scope_source_classes:
+  explicit_no: { pointer_type: transcript_message, description: "A human explicitly rejects the item." }
+  conflict: { pointer_type: kickoff_conflict, description: "A validated kickoff conflict creates the boundary." }
+  dmz_decision: { pointer_type: decision_anchor, description: "A stable boundary or DMZ decision excludes the item." }
+
+field_order:
+  - kind
+  - version
+  - synthesis_id
+  - created_at
+  - packet_sha256
+  - task
+  - context
+  - requirements
+  - constraints
+  - references
+  - out_of_scope
+  - acceptance_criteria
+  - open_questions
+  - session_history
+
+record_field_order:
+  task: "task_id|status|title"
+  context: "context_id|statement|source_refs"
+  requirements: "requirement_id|statement|source_refs"
+  constraints: "constraint_id|constraint|source_path|source_status|authority|finding_id"
+  references: "path|purpose"
+  out_of_scope: "out_of_scope_id|statement|source_class|source_ref"
+  acceptance_criteria: "acceptance_id|given|when|then|and|requirement_ids"
+  open_questions: "question_id|question|source_refs"
+  session_history: "session_id|turn_ids|product_kinds"
+
+script_owned_fields: "kind|version|synthesis_id|created_at|packet_sha256|task.task_id|task.status|context[].context_id|requirements[].requirement_id|constraints[].constraint_id|out_of_scope[].out_of_scope_id|acceptance_criteria[].acceptance_id|open_questions[].question_id"
+
+legacy_field_order: "kind|version|task|context|requirements|constraints|references|out_of_scope|acceptance_criteria|open_questions|session_history"
+legacy_v1_record_field_order:
+  task: "task_id|status|title"
+  constraints: "constraint|source_path|source_status|authority"
+legacy_v2_record_field_order:
+  task: "title"
+  constraints: "constraint|source_path|source_status|authority"
+legacy_v2_input_record_field_order:
+  out_of_scope: "statement|conflict_source_path"
+  session_history: "session_id|turn_session_id|product_kinds"
+legacy_kickoff_product_kinds: "kg.kickoff_context_index|kg.kickoff_context|kg.kickoff_turn|kg.kickoff_conflicts"
+
+fields:
+  kind: { type: enum, required: true, values: "kg.spec_synthesis" }
+  version: { type: integer, required: true, values: "3" }
+  synthesis_id: { type: string, required: true, pattern: "^KSYN-[A-F0-9]{12}$" }
+  created_at: { type: timestamp, required: true }
+  packet_sha256: { type: string, required: true, pattern: "^sha256:[a-f0-9]{64}$" }
+  task: { type: map, required: true }
+  task.task_id: { type: string, required: true, pattern: "^TASK-[0-9]{8}-[0-9]{3}$" }
+  task.status: { type: enum, required: true, values: "draft" }
+  task.title: { type: string, required: true }
+  context: { type: map_list, required: true, min_items: 1, unique_by: context_id }
+  context[].context_id: { type: string, required: true, pattern: "^CTX-[0-9]{3}$" }
+  context[].statement: { type: string, required: true }
+  context[].source_refs: { type: string_list, required: true, min_items: 1 }
+  requirements: { type: map_list, required: true, min_items: 1, unique_by: requirement_id }
+  requirements[].requirement_id: { type: string, required: true, pattern: "^REQ-[0-9]{3}$" }
+  requirements[].statement: { type: string, required: true }
+  requirements[].source_refs: { type: string_list, required: true, min_items: 1 }
+  constraints: { type: map_list, required: true, min_items: 1, unique_by: constraint_id }
+  constraints[].constraint_id: { type: string, required: true, pattern: "^CON-[0-9]{3}$" }
+  constraints[].constraint: { type: string, required: true }
+  constraints[].source_path: { type: string, required: true }
+  constraints[].source_status: { type: string, required: true }
+  constraints[].authority: { type: string, required: true }
+  constraints[].finding_id: { type: string, required: true }
+  references: { type: map_list, required: true }
+  references[].path: { type: string, required: true }
+  references[].purpose: { type: string, required: true }
+  out_of_scope: { type: map_list, required: true, unique_by: out_of_scope_id }
+  out_of_scope[].out_of_scope_id: { type: string, required: true, pattern: "^OOS-[0-9]{3}$" }
+  out_of_scope[].statement: { type: string, required: true }
+  out_of_scope[].source_class: { type: enum_from, required: true, values_from: out_of_scope_source_classes }
+  out_of_scope[].source_ref: { type: string, required: true }
+  acceptance_criteria: { type: map_list, required: true, min_items: 1, unique_by: acceptance_id }
+  acceptance_criteria[].acceptance_id: { type: string, required: true, pattern: "^AC-[0-9]{3}$" }
+  acceptance_criteria[].given: { type: string, required: true }
+  acceptance_criteria[].when: { type: string, required: true }
+  acceptance_criteria[].then: { type: string, required: true }
+  acceptance_criteria[].and: { type: string_list, required: false }
+  acceptance_criteria[].requirement_ids: { type: string_list, required: true, min_items: 1 }
+  open_questions: { type: map_list, required: true, unique_by: question_id }
+  open_questions[].question_id: { type: string, required: true, pattern: "^OQ-[0-9]{3}$" }
+  open_questions[].question: { type: string, required: true }
+  open_questions[].source_refs: { type: string_list, required: true, min_items: 1 }
+  session_history: { type: map_list, required: true, min_items: 1 }
+  session_history[].session_id: { type: string, required: true }
+  session_history[].turn_ids: { type: string_list, required: true, min_items: 1 }
+  session_history[].product_kinds: { type: string_list, required: true, min_items: 1 }

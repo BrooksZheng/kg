@@ -5,32 +5,16 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { documentAnchor, host, kyaml, protocol } from "./_lib.mjs";
+import { documentAnchor, host, kyaml, machineContract, protocol } from "./_lib.mjs";
 
-const SYNTHESIS_FIELDS = [
-  "kind",
-  "version",
-  "task",
-  "context",
-  "requirements",
-  "constraints",
-  "references",
-  "out_of_scope",
-  "acceptance_criteria",
-  "open_questions",
-  "session_history",
-];
-const TASK_FIELDS = ["task_id", "status", "title"];
-const ARCHIVE_TASK_FIELDS = ["title"];
-const CONSTRAINT_FIELDS = ["constraint", "source_path", "source_status", "authority"];
-const OUT_OF_SCOPE_FIELDS = ["statement", "conflict_source_path"];
-const SESSION_HISTORY_FIELDS = ["session_id", "turn_session_id", "product_kinds"];
-const KICKOFF_PRODUCT_KINDS = [
-  "kg.kickoff_context_index",
-  "kg.kickoff_context",
-  "kg.kickoff_turn",
-  "kg.kickoff_conflicts",
-];
+const SYNTHESIS_SCHEMA = protocol.loadSpecSynthesisSchema();
+const SYNTHESIS_FIELDS = SYNTHESIS_SCHEMA.legacy_field_order.split("|");
+const TASK_FIELDS = SYNTHESIS_SCHEMA.legacy_v1_record_field_order.task.split("|");
+const ARCHIVE_TASK_FIELDS = SYNTHESIS_SCHEMA.legacy_v2_record_field_order.task.split("|");
+const CONSTRAINT_FIELDS = SYNTHESIS_SCHEMA.legacy_v2_record_field_order.constraints.split("|");
+const OUT_OF_SCOPE_FIELDS = SYNTHESIS_SCHEMA.legacy_v2_input_record_field_order.out_of_scope.split("|");
+const SESSION_HISTORY_FIELDS = SYNTHESIS_SCHEMA.legacy_v2_input_record_field_order.session_history.split("|");
+const KICKOFF_PRODUCT_KINDS = SYNTHESIS_SCHEMA.legacy_kickoff_product_kinds.split("|");
 
 function fail(message) {
   console.error(`kg: 错误：${message}`);
@@ -136,7 +120,7 @@ function canonicalLegacySynthesis(raw) {
       authority: requireString(item.authority, `synthesis.constraints[${index}].authority`),
     };
   });
-  return {
+  return machineContract.orderRecordByProtocol({
     kind: "kg.spec_synthesis",
     version: 1,
     task: {
@@ -152,7 +136,7 @@ function canonicalLegacySynthesis(raw) {
     acceptance_criteria: stringList(raw.acceptance_criteria, "synthesis.acceptance_criteria"),
     open_questions: stringList(raw.open_questions, "synthesis.open_questions", { allowEmpty: true }),
     session_history: stringList(raw.session_history, "synthesis.session_history"),
-  };
+  }, SYNTHESIS_SCHEMA.legacy_field_order, SYNTHESIS_SCHEMA.legacy_v1_record_field_order);
 }
 
 function exactStringSet(actual, expected, label) {
@@ -317,7 +301,7 @@ function canonicalArchiveSynthesis(raw, packet, root) {
     }
   }
 
-  return {
+  return machineContract.orderRecordByProtocol({
     kind: "kg.spec_synthesis",
     version: 2,
     task: {
@@ -334,7 +318,7 @@ function canonicalArchiveSynthesis(raw, packet, root) {
       (item) =>
         `kickoff session ${item.session_id}; turn session ${item.turn_session_id}; products ${item.product_kinds.join(", ")}`,
     ),
-  };
+  }, SYNTHESIS_SCHEMA.legacy_field_order, SYNTHESIS_SCHEMA.legacy_v2_record_field_order);
 }
 
 function markdownCell(value) {
@@ -350,12 +334,13 @@ function numbered(items) {
 }
 
 export function renderSpec(synthesis, envelope = {}) {
-  const frontmatter = {
+  const taskSpecSchema = protocol.loadTaskSpecSchema();
+  const frontmatter = machineContract.orderRecordByProtocol({
     kind: "kg.task_spec",
     task_id: envelope.taskId ?? synthesis.task.task_id,
     created_at: envelope.createdAt ?? new Date().toISOString(),
     status: envelope.status ?? synthesis.task.status,
-  };
+  }, taskSpecSchema.field_order);
   const constraints = synthesis.constraints
     .map(
       (item) =>

@@ -1,0 +1,54 @@
+# kg protocol: agent-assisted semantic findings kept separate from scan gates.
+
+kind: kg.scan_agent_report_schema
+version: 1
+product_kind: kg.scan_agent_report
+product_version: 1
+detection_mode_values: [agent_assisted]
+finding_type_values: [semantic_contradiction, semantic_coverage_gap]
+severity_values: [advisory, warning, critical]
+
+field_order:
+  - kind
+  - version
+  - report_id
+  - generated_at
+  - base_report_path
+  - base_report_sha256
+  - evidence_packet_path
+  - evidence_packet_sha256
+  - detection_mode
+  - model
+  - session_id
+  - findings
+
+record_field_order:
+  findings: "finding_id|detection_mode|type|severity|confidence|subject|source_refs|analysis|recommendation|module_identity|coverage_evidence|missing_evidence"
+
+script_owned_fields: "kind|version|report_id|generated_at|base_report_path|base_report_sha256|evidence_packet_path|evidence_packet_sha256|detection_mode|findings[].finding_id|findings[].detection_mode"
+
+fields:
+  kind: { type: enum, required: true, values: "kg.scan_agent_report" }
+  version: { type: integer, required: true, values: "1" }
+  report_id: { type: string, required: true, pattern: "^SCAN-A-[A-F0-9]{12}$" }
+  generated_at: { type: timestamp, required: true }
+  base_report_path: { type: string, required: true }
+  base_report_sha256: { type: string, required: true, pattern: "^sha256:[a-f0-9]{64}$" }
+  evidence_packet_path: { type: string, required: true }
+  evidence_packet_sha256: { type: string, required: true, pattern: "^sha256:[a-f0-9]{64}$" }
+  detection_mode: { type: enum_from, required: true, values_from: detection_mode_values }
+  model: { type: string, required: true }
+  session_id: { type: string, required: true }
+  findings: { type: map_list, required: true, unique_by: finding_id }
+  findings[].finding_id: { type: string, required: true, pattern: "^SAF-[A-F0-9]{12}$" }
+  findings[].detection_mode: { type: enum_from, required: true, values_from: detection_mode_values }
+  findings[].type: { type: enum_from, required: true, values_from: finding_type_values }
+  findings[].severity: { type: enum_from, required: true, values_from: severity_values }
+  findings[].confidence: { type: float, required: true, min: 0, max: 1 }
+  findings[].subject: { type: string, required: true }
+  findings[].source_refs: { type: string_list, required: true, min_items: 1 }
+  findings[].analysis: { type: string, required: true }
+  findings[].recommendation: { type: string, required: true }
+  findings[].module_identity: { type: string_or_null, required: true }
+  findings[].coverage_evidence: { type: string_list, required: true }
+  findings[].missing_evidence: { type: string_list, required: true }

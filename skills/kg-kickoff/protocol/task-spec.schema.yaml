@@ -8,6 +8,8 @@ version: 1
 document_kind: kg.task_spec
 file_pattern: "docs/specs/TASK-YYYYMMDD-NNN.md"
 
+field_order: [kind, task_id, created_at, status]
+
 fields:
   kind: { type: enum, required: true, values: "kg.task_spec" }
   task_id: { type: string, required: true, pattern: "^TASK-[0-9]{8}-[0-9]{3}$" }

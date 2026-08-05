@@ -1,0 +1,43 @@
+# kg protocol: script-bound deep-read scope selected from a kickoff index.
+
+kind: kg.kickoff_scope_schema
+version: 1
+product_kind: kg.kickoff_scope
+product_version: 1
+
+# KN-0034: selection code accepts only these reasons and their basis types.
+scope_reasons:
+  direct_task_path: { basis_type: transcript_literal, description: "The task or a human message names the project path." }
+  direct_domain_key: { basis_type: transcript_literal, description: "The task or a human message names an indexed domain key." }
+  knowledge_scope_intersection: { basis_type: scope_intersection, description: "An indexed knowledge scope intersects a confirmed task path." }
+  document_map_edge: { basis_type: graph_edge, description: "A document-map edge connects the source to confirmed scope." }
+  harness_graph_edge: { basis_type: graph_edge, description: "A harness, knowledge, or carrier edge connects the source to confirmed scope." }
+  human_confirmed_domain: { basis_type: transcript_pointer, description: "A human reply confirms the indexed domain." }
+
+field_order:
+  - kind
+  - version
+  - scope_id
+  - created_at
+  - index_sha256
+  - task_sha256
+  - selected_sources
+
+record_field_order:
+  selected_sources: "source_path|source_sha256|reason|basis_type|basis_ref"
+
+script_owned_fields: "kind|version|scope_id|created_at|index_sha256|task_sha256|selected_sources[].source_sha256"
+
+fields:
+  kind: { type: enum, required: true, values: "kg.kickoff_scope" }
+  version: { type: integer, required: true, values: "1" }
+  scope_id: { type: string, required: true, pattern: "^KSCOPE-[A-F0-9]{12}$" }
+  created_at: { type: timestamp, required: true }
+  index_sha256: { type: string, required: true, pattern: "^sha256:[a-f0-9]{64}$" }
+  task_sha256: { type: string, required: true, pattern: "^sha256:[a-f0-9]{64}$" }
+  selected_sources: { type: map_list, required: true, min_items: 1, unique_by: source_path }
+  selected_sources[].source_path: { type: string, required: true }
+  selected_sources[].source_sha256: { type: string, required: true, pattern: "^sha256:[a-f0-9]{64}$" }
+  selected_sources[].reason: { type: enum_from, required: true, values_from: scope_reasons }
+  selected_sources[].basis_type: { type: enum_from, required: true, values_from: scope_reasons.*.basis_type }
+  selected_sources[].basis_ref: { type: string, required: true }

@@ -1,0 +1,29 @@
+# kg protocol: hidden expectations for a split evaluator fixture.
+
+kind: kg.evaluation_oracle_schema
+version: 1
+record_kind: kg.evaluation_oracle
+record_version: 1
+
+field_order:
+  - kind
+  - version
+  - fixture_id
+  - evaluator
+  - expectations
+
+record_field_order:
+  expectations: "expectation_id|level|criterion_id|assertion|expected|derivation"
+
+fields:
+  kind: { type: enum, required: true, values: "kg.evaluation_oracle" }
+  version: { type: integer, required: true, values: "1" }
+  fixture_id: { type: string, required: true }
+  evaluator: { type: string, required: true }
+  expectations: { type: map_list, required: true, min_items: 1, unique_by: expectation_id }
+  expectations[].expectation_id: { type: string, required: true }
+  expectations[].level: { type: string, required: true }
+  expectations[].criterion_id: { type: string_or_null, required: true }
+  expectations[].assertion: { type: string, required: true }
+  expectations[].expected: { type: json, required: true }
+  expectations[].derivation: { type: string, required: false, pattern: "^[^#]+#L[1-9][0-9]*$" }

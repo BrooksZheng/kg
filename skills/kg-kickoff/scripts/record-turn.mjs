@@ -6,11 +6,12 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { documentAnchor, host, kyaml, protocol } from "./_lib.mjs";
+import { documentAnchor, host, kyaml, machineContract, protocol } from "./_lib.mjs";
 
-const INPUT_FIELDS = ["findings", "question"];
-const FINDING_FIELDS = ["source_path", "line", "status", "authority"];
-const QUESTION_FIELDS = ["question_text", "assistant_message_index"];
+const TURN_SCHEMA = protocol.loadKickoffTurnSchema();
+const INPUT_FIELDS = TURN_SCHEMA.legacy_input_field_order.split("|");
+const FINDING_FIELDS = TURN_SCHEMA.legacy_record_field_order.findings.split("|");
+const QUESTION_FIELDS = TURN_SCHEMA.legacy_record_field_order.question.split("|");
 
 function fail(message) {
   console.error(`kg: 错误：${message}`);
@@ -259,7 +260,7 @@ function canonicalRecord(raw, transcriptEnvelope, projectRoot, membership, now) 
     throw new Error(`question.question_text 必须在指定 assistant 消息中恰好出现一次，实际 ${occurrences} 次`);
   }
 
-  return {
+  return machineContract.orderRecordByProtocol({
     kind: "kg.kickoff_turn",
     version: 1,
     recorded_at: now.toISOString(),
@@ -269,7 +270,7 @@ function canonicalRecord(raw, transcriptEnvelope, projectRoot, membership, now) 
       question_text: questionText,
       assistant_message_index: messageIndex,
     },
-  };
+  }, TURN_SCHEMA.legacy_field_order, TURN_SCHEMA.legacy_record_field_order);
 }
 
 function writeRecord(file, record) {
