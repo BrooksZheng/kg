@@ -1,0 +1,14 @@
+id: OBS-20260805-008
+at: 2026-08-05T07:04:11Z
+source: task_outcome
+claim: "kg-spec archive must consume only canonical version 3 synthesis products bound to packet bytes; saved version 2 replay compatibility belongs in evaluator-owned preflight adapters."
+context:
+  task: "R5.3 kg-spec completeness and machine scoring"
+  paths:
+    - skills/kg-spec/scripts/produce-spec.mjs
+    - scripts/eval-spec.mjs
+    - scripts/test-v2.mjs
+evidence:
+  - { type: test, ref: "scripts/test-v2.mjs Part 6 validate_synthesis_and_archive_share_one_protocol_validator" }
+  - { type: test, ref: "scripts/test-v2.mjs Part 7 seven_step_pipeline_consumes_real_outputs" }
+urgency: batch

@@ -24,6 +24,8 @@ import {
   runnerEnvelopeConformanceProfile,
   validateRunnerResponse,
 } from "./eval-bootstrap.mjs";
+import { scoreSpecMachineProducts } from "./eval-spec.mjs";
+import { parseStructuredSpecText } from "../skills/kg-spec/scripts/produce-spec.mjs";
 import { computeMigrationPlanId } from "../skills/kg-init/scripts/migration-lib.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -86,6 +88,7 @@ const COMPILE_FIXTURE = path.join(ROOT, "scripts", "fixtures", "m2", "compile-fi
 const R42_SCAN_FIXTURE = path.join(ROOT, "scripts", "fixtures", "m4", "compile-update-ownership", "host");
 const M5_KICKOFF_FIXTURE = path.join(ROOT, "scripts", "fixtures", "m5", "kickoff-full-surface");
 const M5_DOCS_FIXTURE = path.join(ROOT, "scripts", "fixtures", "m5", "docs-adr-scaffold");
+const M5_SPEC_OOS_FIXTURE = path.join(ROOT, "scripts", "fixtures", "m5", "spec-oos-provenance");
 const KICKOFF_FIXTURES = [
   path.join(ROOT, "scripts", "fixtures", "m1", "kickoff.fixture.yaml"),
   path.join(ROOT, "scripts", "fixtures", "m1", "kickoff-no-conflict.fixture.yaml"),
@@ -5564,7 +5567,123 @@ function setupSpecArchiveCase(context, name, fixtureIndex = 2) {
   };
 }
 
+function packetMachineProduct(packet, kind) {
+  const product = packet.intermediate_products.find((item) => item.kind === kind);
+  if (!product) return null;
+  return product.path.endsWith(".json") || product.content.trimStart().startsWith("{")
+    ? JSON.parse(product.content)
+    : kyaml.parse(product.content);
+}
+
+function legacySpecDraft(packet, legacy) {
+  const turn = packetMachineProduct(packet, "kg.kickoff_turn");
+  const conflicts = packetMachineProduct(packet, "kg.kickoff_conflicts")?.conflicts ?? [];
+  const findingId = (finding) => `KF-${machineContract.sha256CanonicalJson({
+    source_path: finding.source_path,
+    line: finding.line,
+  }).slice(-12).toUpperCase()}`;
+  const conflictId = (conflict) => `KC-${machineContract.sha256CanonicalJson({
+    source_path: conflict.source_path,
+    line: conflict.line,
+  }).slice(-12).toUpperCase()}`;
+  const draft = {
+    task: { title: legacy.task.title },
+    context: legacy.context.map((statement) => ({ statement, source_refs: ["transcript#message=0"] })),
+    requirements: legacy.requirements.map((statement) => ({ statement, source_refs: ["transcript#message=0"] })),
+    constraints: legacy.constraints.map((item) => {
+      const finding = turn.findings.find((candidate) => `${candidate.source_path}#L${candidate.line}` === item.source_path);
+      return { ...item, finding_id: finding ? findingId(finding) : "KF-000000000000" };
+    }),
+    references: legacy.references.map((referencePath) => ({ path: referencePath, purpose: "Implementation reference" })),
+    out_of_scope: legacy.out_of_scope.map((item) => {
+      const conflict = conflicts.find((candidate) => candidate.source_path === item.conflict_source_path);
+      return {
+        statement: item.statement,
+        source_class: conflict ? "conflict" : "explicit_no",
+        source_ref: conflict
+          ? `kg.kickoff_conflicts#conflict=${conflictId(conflict)}`
+          : "transcript#message=0",
+      };
+    }),
+    acceptance_criteria: legacy.acceptance_criteria.map((item) => {
+      const match = /^GIVEN (.+) WHEN (.+) THEN (.+)$/.exec(item);
+      return {
+        given: match?.[1] ?? "",
+        when: match?.[2] ?? "",
+        then: match?.[3] ?? "",
+        requirement_ids: legacy.requirements.map((unused, index) => `REQ-${String(index + 1).padStart(3, "0")}`),
+      };
+    }),
+    open_questions: legacy.open_questions.map((question) => ({ question, source_refs: ["transcript#message=0"] })),
+    session_history: legacy.session_history.map((item) => ({
+      session_id: item.session_id,
+      turn_ids: [item.turn_session_id],
+      product_kinds: item.product_kinds,
+    })),
+  };
+  for (const key of Object.keys(legacy)) {
+    if (!["kind", "version", "task", "context", "requirements", "constraints", "references", "out_of_scope", "acceptance_criteria", "open_questions", "session_history"].includes(key)) {
+      draft[key] = legacy[key];
+    }
+  }
+  for (const key of Object.keys(legacy.task)) {
+    if (key !== "title") draft.task[key] = legacy.task[key];
+  }
+  return draft;
+}
+
+function nextSpecArtifact(setup, prefix) {
+  let sequence = 1;
+  let file;
+  do {
+    file = path.join(setup.artifacts, `${prefix}-${sequence}.json`);
+    sequence += 1;
+  } while (fs.existsSync(file));
+  return file;
+}
+
 function archiveSpec(context, setup, synthesis = setup.synthesis, options = {}) {
+  let validated = synthesis;
+  const synthesisText = fs.readFileSync(synthesis, "utf8");
+  let input;
+  try {
+    input = JSON.parse(synthesisText);
+  } catch {
+    return runNode(
+      context,
+      SPEC_PRODUCE,
+      ["--archive", "--project-root", setup.project, "--packet", setup.packet, "--synthesis", synthesis],
+      { cwd: setup.project, expectFailure: options.expectFailure },
+    );
+  }
+  if (input.version !== protocol.loadSpecSynthesisSchema().product_version) {
+    const draft = nextSpecArtifact(setup, "draft");
+    validated = nextSpecArtifact(setup, "validated");
+    writeJson(draft, legacySpecDraft(readJson(setup.packet), input));
+    const validateArgs = [
+      "--validate-synthesis",
+      "--project-root",
+      setup.project,
+      "--packet",
+      setup.packet,
+      "--synthesis",
+      draft,
+      "--output",
+      validated,
+      "--now",
+      "2026-07-31T08:00:00Z",
+    ];
+    if (options.expectFailure) {
+      const validation = spawnSync(process.execPath, [SPEC_PRODUCE, ...validateArgs], {
+        cwd: setup.project,
+        encoding: "utf8",
+        maxBuffer: 16 * 1024 * 1024,
+      });
+      if (validation.status !== 0 || validation.error) return validation;
+    } else {
+      runNode(context, SPEC_PRODUCE, validateArgs, { cwd: setup.project });
+    }
+  }
   const run = runNode(
     context,
     SPEC_PRODUCE,
@@ -5575,9 +5694,7 @@ function archiveSpec(context, setup, synthesis = setup.synthesis, options = {}) 
       "--packet",
       setup.packet,
       "--synthesis",
-      synthesis,
-      "--now",
-      "2026-07-31T08:00:00Z",
+      validated,
     ],
     { cwd: setup.project, expectFailure: options.expectFailure },
   );
@@ -5617,6 +5734,242 @@ function runMutatedSpecFixture(context, name, mutate, options = {}) {
   return runNode(context, EVAL_SPEC, ["--check-fixture", fixtureFile], {
     cwd: ROOT,
     expectFailure: options.expectFailure === true,
+  });
+}
+
+function setupR53SpecCase(context, name) {
+  const caseRoot = path.join(context.root, name);
+  const project = path.join(caseRoot, "project");
+  const kickoffArtifacts = path.join(caseRoot, "kickoff-artifacts");
+  const artifacts = path.join(caseRoot, "artifacts");
+  fs.cpSync(path.join(M5_SPEC_OOS_FIXTURE, "project"), project, { recursive: true });
+  fs.mkdirSync(kickoffArtifacts, { recursive: true });
+  fs.mkdirSync(artifacts, { recursive: true });
+  const transcript = readJson(path.join(M5_SPEC_OOS_FIXTURE, "source", "transcript.json"));
+  const decision = path.join(project, "docs", "decisions", "0001-notification-boundary.md");
+  const sessionId = "KSESSION-ABCDEF123456";
+  const turnId = "KTURN-ABCDEF123456-001";
+  const conflictId = "KC-ABCDEF123456";
+  const findings = [
+    {
+      finding_id: "KF-111111111111",
+      source_path: "docs/decisions/0001-notification-boundary.md",
+      line: 13,
+      status: "accepted",
+      authority: "formal_decision",
+    },
+    {
+      finding_id: "KF-222222222222",
+      source_path: "docs/decisions/0001-notification-boundary.md",
+      line: 15,
+      status: "accepted",
+      authority: "formal_decision",
+    },
+  ];
+  const turn = {
+    kind: "kg.kickoff_turn",
+    version: 2,
+    recorded_at: "2026-08-05T09:00:00Z",
+    session_id: sessionId,
+    turn_id: turnId,
+    sequence: 1,
+    user_message_index: 0,
+    user_message_sha256: machineContract.sha256Bytes(transcript[0].content),
+    findings,
+    question: {
+      clarification_axis: "notification_retry_boundary",
+      question_text: "Should retries stay on the accepted queue boundary?",
+      options: ["Retry through the queue", "Write provider state directly"],
+      recommendation: "Retry through the queue",
+      reason_refs: ["docs/decisions/0001-notification-boundary.md#L13"],
+      assistant_message_index: 6,
+      assistant_message: transcript[6].content,
+      assistant_message_sha256: machineContract.sha256Bytes(transcript[6].content),
+    },
+  };
+  const conflicts = {
+    kind: "kg.kickoff_conflicts",
+    version: 2,
+    recorded_at: "2026-08-05T09:01:00Z",
+    session_id: sessionId,
+    assessment: "conflict",
+    conflicts: [
+      {
+        conflict_id: conflictId,
+        summary: "Direct provider-state writes violate the accepted queue boundary.",
+        task_message_index: 0,
+        task_message_sha256: machineContract.sha256Bytes(transcript[0].content),
+        constraint_source_path: "docs/decisions/0001-notification-boundary.md",
+        constraint_line: 13,
+        constraint_sha256: machineContract.sha256File(decision),
+        finding_id: findings[0].finding_id,
+      },
+    ],
+    no_conflict_reason_refs: [],
+  };
+  writeJson(path.join(kickoffArtifacts, "kickoff-index.json"), {
+    kind: "kg.kickoff_context_index",
+    version: 2,
+  });
+  writeJson(path.join(kickoffArtifacts, "kickoff-context.json"), {
+    kind: "kg.kickoff_context",
+    version: 2,
+  });
+  writeJson(path.join(kickoffArtifacts, "kickoff-turn.json"), turn);
+  writeJson(path.join(kickoffArtifacts, "kickoff-conflicts.json"), conflicts);
+  const kickoffResponse = path.join(caseRoot, "kickoff-response.json");
+  const productKinds = [
+    "kg.kickoff_context_index",
+    "kg.kickoff_context",
+    "kg.kickoff_turn",
+    "kg.kickoff_conflicts",
+  ];
+  writeJson(kickoffResponse, {
+    session_id: "runner-spec-oos-01",
+    transcript,
+    file_reads: [],
+    citations: [],
+    products: [
+      { kind: productKinds[0], path: "kickoff-index.json" },
+      { kind: productKinds[1], path: "kickoff-context.json" },
+      { kind: productKinds[2], path: "kickoff-turn.json" },
+      { kind: productKinds[3], path: "kickoff-conflicts.json" },
+    ],
+    tool_events: [],
+    permission_denials: [],
+  });
+  const packet = path.join(artifacts, "spec-packet.json");
+  runNode(context, SPEC_PRODUCE, [
+    "--prepare",
+    "--project-root",
+    project,
+    "--transcript",
+    kickoffResponse,
+    "--kickoff-artifacts",
+    kickoffArtifacts,
+    "--output",
+    packet,
+  ], { cwd: project });
+  const draft = path.join(artifacts, "draft.json");
+  writeJson(draft, {
+    task: { title: "Retry notification delivery through the accepted queue" },
+    context: [
+      { statement: "Notification retry behavior is bounded by the accepted queue decision.", source_refs: ["transcript#message=0"] },
+    ],
+    requirements: [
+      {
+        statement: "Retry notification delivery through the queue and preserve the original idempotency key.",
+        source_refs: ["transcript#message=5", "docs/decisions/0001-notification-boundary.md#L11"],
+      },
+    ],
+    constraints: [
+      {
+        constraint: "Workers must never write provider delivery state directly.",
+        source_path: "docs/decisions/0001-notification-boundary.md#L13",
+        source_status: "accepted",
+        authority: "formal_decision",
+        finding_id: findings[0].finding_id,
+      },
+      {
+        constraint: "The credentials vault stays outside the notification worker DMZ.",
+        source_path: "docs/decisions/0001-notification-boundary.md#L15",
+        source_status: "accepted",
+        authority: "formal_decision",
+        finding_id: findings[1].finding_id,
+      },
+    ],
+    references: [
+      { path: "src/notifications/retry.mjs", purpose: "Implementation path" },
+    ],
+    out_of_scope: [
+      { statement: "SMS delivery", source_class: "explicit_no", source_ref: "transcript#message=1" },
+      { statement: "Direct provider-state writes", source_class: "conflict", source_ref: `kg.kickoff_conflicts#conflict=${conflictId}` },
+      { statement: "Credentials vault changes", source_class: "dmz_decision", source_ref: "docs/decisions/0001-notification-boundary.md#L15" },
+    ],
+    acceptance_criteria: [
+      {
+        given: "a transient notification delivery failure",
+        when: "the worker retries delivery",
+        then: "the retry uses the queue with the original idempotency key",
+        and: ["provider delivery state is not written directly"],
+        requirement_ids: ["REQ-001"],
+      },
+    ],
+    open_questions: [
+      { question: "Whether analytics dashboard changes need a separate task.", source_refs: ["transcript#message=4"] },
+    ],
+    session_history: [
+      { session_id: "runner-spec-oos-01", turn_ids: [turnId], product_kinds: productKinds },
+    ],
+  });
+  const response = {
+    session_id: "r53-spec-session",
+    transcript: [
+      { role: "user", content: "Synthesize the packet." },
+      { role: "assistant", content: "The packet-bound synthesis product is ready.", tool_calls: [] },
+    ],
+    file_reads: [],
+    citations: [],
+    products: [{ kind: "kg.spec_synthesis", path: "validated.json" }],
+    tool_events: [
+      { name: "Read", command: `Read ${packet}`, at_step: 1, ok: true },
+      { name: "Bash", command: "node produce-spec.mjs --validate-synthesis", at_step: 2, ok: true },
+    ],
+    permission_denials: [],
+  };
+  return { caseRoot, project, artifacts, packet, draft, response, conflictId, turnId, productKinds };
+}
+
+function validateR53Spec(context, setup, options = {}) {
+  const draft = options.draft ?? setup.draft;
+  const output = options.output ?? nextSpecArtifact(setup, "validated");
+  const run = runNode(context, SPEC_PRODUCE, [
+    "--validate-synthesis",
+    "--project-root",
+    setup.project,
+    "--packet",
+    setup.packet,
+    "--synthesis",
+    draft,
+    "--output",
+    output,
+    "--now",
+    "2026-08-05T10:00:00Z",
+  ], { cwd: setup.project, expectFailure: options.expectFailure === true });
+  return { run, output, product: options.expectFailure ? null : readJson(output) };
+}
+
+function archiveR53Spec(context, setup, validated, options = {}) {
+  const run = runNode(context, SPEC_PRODUCE, [
+    "--archive",
+    "--project-root",
+    setup.project,
+    "--packet",
+    setup.packet,
+    "--synthesis",
+    validated,
+  ], { cwd: setup.project, expectFailure: options.expectFailure === true });
+  if (options.expectFailure) return { run, result: null, specFile: null };
+  const result = JSON.parse(run.stdout);
+  return { run, result, specFile: path.join(setup.project, ...result.path.split("/")) };
+}
+
+function mutateR53Draft(setup, name, mutate) {
+  const draft = path.join(setup.artifacts, `${name}.json`);
+  const value = readJson(setup.draft);
+  mutate(value);
+  writeJson(draft, value);
+  return draft;
+}
+
+function scoreR53Spec(setup, validated, specFile, response = setup.response) {
+  return scoreSpecMachineProducts({
+    fixtureRoot: M5_SPEC_OOS_FIXTURE,
+    synthesisFile: validated,
+    specFile,
+    packetFile: setup.packet,
+    response,
+    projectRoot: setup.project,
   });
 }
 
@@ -5714,6 +6067,238 @@ function runPart6(context) {
         JSON.stringify(schema.record_field_order.acceptance_criteria.split("|").filter((field) => field !== "and")),
       "spec acceptance canonical field order drifted",
     );
+  });
+
+  testCase(context, "validate_synthesis_writes_canonical_product_without_host_mutation", () => {
+    const setup = setupR53SpecCase(context, "r53-validate-product");
+    const before = treeHash(setup.project);
+    const validated = validateR53Spec(context, setup);
+    ensure(context, treeHash(setup.project) === before, "synthesis preflight mutated the host project");
+    ensure(context, validated.product.version === 3, "synthesis preflight did not write version 3");
+    ensure(
+      context,
+      validated.product.packet_sha256 === machineContract.sha256File(setup.packet),
+      "validated synthesis is not bound to packet bytes",
+    );
+    ensure(
+      context,
+      fs.readFileSync(validated.output, "utf8") === `${JSON.stringify(validated.product, null, 2)}\n`,
+      "validated synthesis bytes are not canonical JSON",
+    );
+    validateR53Spec(context, setup, {
+      output: path.join(setup.project, "docs", "specs", "invalid-product.json"),
+      expectFailure: true,
+    });
+    ensure(context, treeHash(setup.project) === before, "rejected in-project preflight output mutated the host");
+  });
+
+  testCase(context, "validate_synthesis_and_archive_share_one_protocol_validator", () => {
+    const setup = setupR53SpecCase(context, "r53-shared-validator");
+    const validated = validateR53Spec(context, setup);
+    archiveR53Spec(context, setup, validated.output);
+
+    const tamperedSetup = setupR53SpecCase(context, "r53-shared-validator-tampered");
+    const tampered = validateR53Spec(context, tamperedSetup);
+    const product = readJson(tampered.output);
+    product.task.title = "Tampered after validation";
+    writeJson(tampered.output, product);
+    archiveR53Spec(context, tamperedSetup, tampered.output, { expectFailure: true });
+    ensure(context, !fs.existsSync(path.join(tamperedSetup.project, "docs", "specs")), "tampered product wrote an archive");
+  });
+
+  testCase(context, "spec_requires_all_protocol_sections_exactly_once_and_in_order", () => {
+    const setup = setupR53SpecCase(context, "r53-section-order");
+    const validated = validateR53Spec(context, setup);
+    const archived = archiveR53Spec(context, setup, validated.output);
+    const text = fs.readFileSync(archived.specFile, "utf8");
+    const headings = text.split(/\r?\n/).filter((line) => line.startsWith("## ")).map((line) => line.slice(3));
+    ensure(
+      context,
+      JSON.stringify(headings) === JSON.stringify(protocol.loadTaskSpecSchema().required_sections),
+      "rendered section set or order differs from protocol",
+    );
+    const reordered = text.replace("## Context", "## TEMP").replace("## Requirements", "## Context").replace("## TEMP", "## Requirements");
+    const badSpec = path.join(setup.artifacts, "reordered.md");
+    fs.writeFileSync(badSpec, reordered);
+    runNode(context, SPEC_PRODUCE, ["--check", badSpec, "--project-root", setup.project], { cwd: setup.project, expectFailure: true });
+  });
+
+  testCase(context, "spec_assigns_requirement_and_acceptance_ids_deterministically", () => {
+    const setup = setupR53SpecCase(context, "r53-deterministic-ids");
+    const first = validateR53Spec(context, setup);
+    const second = validateR53Spec(context, setup);
+    for (const field of ["context", "requirements", "constraints", "out_of_scope", "acceptance_criteria", "open_questions"]) {
+      ensure(context, canonicalJsonForTest(first.product[field]) === canonicalJsonForTest(second.product[field]), `${field} IDs changed across replay`);
+    }
+    ensure(context, first.product.synthesis_id === second.product.synthesis_id, "synthesis identity changed across replay");
+  });
+
+  testCase(context, "spec_acceptance_records_trace_every_requirement_both_directions", () => {
+    const setup = setupR53SpecCase(context, "r53-trace-bidirectional");
+    validateR53Spec(context, setup);
+    const unknown = mutateR53Draft(setup, "unknown-requirement", (draft) => {
+      draft.acceptance_criteria[0].requirement_ids = ["REQ-999"];
+    });
+    validateR53Spec(context, setup, { draft: unknown, expectFailure: true });
+    const orphan = mutateR53Draft(setup, "orphan-requirement", (draft) => {
+      draft.requirements.push({ statement: "Send a delivery audit record.", source_refs: ["transcript#message=5"] });
+    });
+    validateR53Spec(context, setup, { draft: orphan, expectFailure: true });
+  });
+
+  testCase(context, "spec_rejects_freeform_or_incomplete_given_when_then_records", () => {
+    const setup = setupR53SpecCase(context, "r53-structured-gwt");
+    const freeform = mutateR53Draft(setup, "freeform-gwt", (draft) => {
+      draft.acceptance_criteria = ["GIVEN a failure WHEN retrying THEN use the queue"];
+    });
+    validateR53Spec(context, setup, { draft: freeform, expectFailure: true });
+    const incomplete = mutateR53Draft(setup, "incomplete-gwt", (draft) => {
+      draft.acceptance_criteria[0].then = "";
+    });
+    validateR53Spec(context, setup, { draft: incomplete, expectFailure: true });
+  });
+
+  testCase(context, "spec_renderer_checker_round_trip_preserves_structured_acceptance", () => {
+    const setup = setupR53SpecCase(context, "r53-round-trip");
+    const validated = validateR53Spec(context, setup);
+    const archived = archiveR53Spec(context, setup, validated.output);
+    const parsed = parseStructuredSpecText(fs.readFileSync(archived.specFile, "utf8"));
+    ensure(
+      context,
+      canonicalJsonForTest(parsed.acceptance) === canonicalJsonForTest(validated.product.acceptance_criteria),
+      "checker did not recover the canonical structured acceptance records",
+    );
+    runNode(context, SPEC_PRODUCE, ["--check", archived.specFile, "--project-root", setup.project], { cwd: setup.project });
+  });
+
+  testCase(context, "spec_out_of_scope_binds_explicit_no_conflict_and_dmz_sources", () => {
+    const setup = setupR53SpecCase(context, "r53-oos-three-sources");
+    const validated = validateR53Spec(context, setup);
+    ensure(
+      context,
+      canonicalJsonForTest(validated.product.out_of_scope.map((item) => item.source_class).sort()) ===
+        canonicalJsonForTest(Object.keys(protocol.loadSpecSynthesisSchema().out_of_scope_source_classes).sort()),
+      "validated Out of Scope does not cover the three protocol source classes",
+    );
+    const loaded = loadSplitEvaluationFixture({
+      scenarioFile: path.join(M5_SPEC_OOS_FIXTURE, "scenario.json"),
+      oracleFile: path.join(M5_SPEC_OOS_FIXTURE, "oracle.json"),
+    });
+    ensure(context, loaded.hardExpectations.every((item) => item.derivation_pointer), "spec oracle has a hard item without source-byte derivation");
+  });
+
+  testCase(context, "spec_out_of_scope_rejects_unbound_omitted_and_invented_items", () => {
+    const omittedSetup = setupR53SpecCase(context, "r53-oos-omitted");
+    const omittedDraft = mutateR53Draft(omittedSetup, "omitted", (draft) => {
+      draft.out_of_scope = draft.out_of_scope.filter((item) => item.source_class !== "explicit_no");
+    });
+    const omitted = validateR53Spec(context, omittedSetup, { draft: omittedDraft });
+    const omittedArchive = archiveR53Spec(context, omittedSetup, omitted.output);
+    ensure(context, scoreR53Spec(omittedSetup, omitted.output, omittedArchive.specFile).pass === false, "omitted OOS item passed the hidden oracle");
+
+    const extraSetup = setupR53SpecCase(context, "r53-oos-extra");
+    const extraDraft = mutateR53Draft(extraSetup, "extra", (draft) => {
+      draft.out_of_scope.push({ statement: "Analytics dashboard redesign", source_class: "explicit_no", source_ref: "transcript#message=4" });
+    });
+    const extra = validateR53Spec(context, extraSetup, { draft: extraDraft });
+    const extraArchive = archiveR53Spec(context, extraSetup, extra.output);
+    ensure(context, scoreR53Spec(extraSetup, extra.output, extraArchive.specFile).pass === false, "invented OOS item passed the hidden oracle");
+
+    const wrongKindSetup = setupR53SpecCase(context, "r53-oos-wrong-kind");
+    const wrongKind = mutateR53Draft(wrongKindSetup, "wrong-kind", (draft) => {
+      draft.out_of_scope[1].source_class = "explicit_no";
+    });
+    validateR53Spec(context, wrongKindSetup, { draft: wrongKind, expectFailure: true });
+
+    const orphanSetup = setupR53SpecCase(context, "r53-oos-orphan-requirement");
+    const orphan = mutateR53Draft(orphanSetup, "orphan", (draft) => {
+      draft.requirements.push({ statement: "An orphan requirement.", source_refs: ["transcript#message=5"] });
+    });
+    validateR53Spec(context, orphanSetup, { draft: orphan, expectFailure: true });
+  });
+
+  testCase(context, "spec_constraints_match_kickoff_findings_status_and_authority", () => {
+    const setup = setupR53SpecCase(context, "r53-constraint-provenance");
+    validateR53Spec(context, setup);
+    const statusLie = mutateR53Draft(setup, "status-lie", (draft) => {
+      draft.constraints[0].source_status = "draft";
+    });
+    validateR53Spec(context, setup, { draft: statusLie, expectFailure: true });
+    const findingLie = mutateR53Draft(setup, "finding-lie", (draft) => {
+      draft.constraints[0].finding_id = "KF-222222222222";
+    });
+    validateR53Spec(context, setup, { draft: findingLie, expectFailure: true });
+  });
+
+  testCase(context, "spec_references_allow_implementation_paths_while_constraints_reject_them", () => {
+    const setup = setupR53SpecCase(context, "r53-reference-boundary");
+    const validated = validateR53Spec(context, setup);
+    ensure(context, validated.product.references[0].path.startsWith("src/"), "implementation path was rejected from References");
+    const implementationConstraint = mutateR53Draft(setup, "implementation-constraint", (draft) => {
+      draft.constraints[0].source_path = "src/notifications/retry.mjs#L1";
+    });
+    validateR53Spec(context, setup, { draft: implementationConstraint, expectFailure: true });
+  });
+
+  testCase(context, "spec_missing_information_enters_open_questions_without_interaction", () => {
+    const setup = setupR53SpecCase(context, "r53-open-questions");
+    const validated = validateR53Spec(context, setup);
+    const archived = archiveR53Spec(context, setup, validated.output);
+    const score = scoreR53Spec(setup, validated.output, archived.specFile);
+    ensure(context, validated.product.open_questions.length === 1, "missing information did not enter Open Questions");
+    ensure(context, score.criteria.find((item) => item.criterion_id === "C1").value === 4, "zero-interaction C1 did not receive full score");
+  });
+
+  testCase(context, "spec_archive_uses_script_owned_identity_and_collision_safe_sequence", () => {
+    const setup = setupR53SpecCase(context, "r53-archive-identity");
+    const specs = path.join(setup.project, "docs", "specs");
+    fs.mkdirSync(specs, { recursive: true });
+    fs.writeFileSync(path.join(specs, "TASK-20260805-001.md"), "sentinel\n");
+    const validated = validateR53Spec(context, setup);
+    ensure(context, validated.product.task.task_id === "TASK-20260805-002", "preflight did not allocate around an existing task ID");
+    const archived = archiveR53Spec(context, setup, validated.output);
+    ensure(context, archived.result.task_id === validated.product.task.task_id, "archive changed the validated task identity");
+    const owned = mutateR53Draft(setup, "owned-task-id", (draft) => {
+      draft.task.task_id = "TASK-20260805-777";
+    });
+    validateR53Spec(context, setup, { draft: owned, expectFailure: true });
+  });
+
+  testCase(context, "spec_evaluator_scores_c1_through_c3_from_machine_products", () => {
+    const setup = setupR53SpecCase(context, "r53-machine-score");
+    const validated = validateR53Spec(context, setup);
+    const archived = archiveR53Spec(context, setup, validated.output);
+    const first = scoreR53Spec(setup, validated.output, archived.specFile);
+    const second = scoreR53Spec(setup, validated.output, archived.specFile);
+    ensure(context, first.pass === true && first.normalized_score === 5, "spec machine score did not clear the protocol gate");
+    ensure(context, canonicalJsonForTest(first) === canonicalJsonForTest(second), "same machine products produced a different score product");
+  });
+
+  testCase(context, "spec_evaluator_does_not_mine_agent_prose_for_quality", () => {
+    const setup = setupR53SpecCase(context, "r53-prose-invariance");
+    const validated = validateR53Spec(context, setup);
+    const archived = archiveR53Spec(context, setup, validated.output);
+    const before = scoreR53Spec(setup, validated.output, archived.specFile);
+    const mutatedResponse = structuredClone(setup.response);
+    mutatedResponse.transcript[1].content = "Arbitrary agent prose with misleading score claims and many question marks???";
+    const after = scoreR53Spec(setup, validated.output, archived.specFile, mutatedResponse);
+    ensure(context, canonicalJsonForTest(before) === canonicalJsonForTest(after), "agent prose changed the machine score");
+  });
+
+  testCase(context, "spec_score_oracle_stays_out_of_prompt_project_and_artifact_root", () => {
+    const setup = setupR53SpecCase(context, "r53-oracle-isolation");
+    const visibleBytes = [
+      fs.readFileSync(setup.packet, "utf8"),
+      fs.readFileSync(setup.draft, "utf8"),
+      JSON.stringify(setup.response),
+      JSON.stringify(treeHash(setup.project)),
+    ].join("\n");
+    ensure(context, !visibleBytes.includes("oos-explicit-no") && !visibleBytes.includes("oracle.json"), "hidden oracle leaked into visible inputs");
+    const loaded = loadSplitEvaluationFixture({
+      scenarioFile: path.join(M5_SPEC_OOS_FIXTURE, "scenario.json"),
+      oracleFile: path.join(M5_SPEC_OOS_FIXTURE, "oracle.json"),
+    });
+    ensure(context, scoreableOracle(loaded).every((item) => item.level === "hard"), "advisory oracle leaf entered scoreable projection");
   });
 
   testCase(context, "spec_archives_compiled_context_transcript", () => {
@@ -6050,7 +6635,7 @@ function runPart6(context) {
     );
   });
 
-  testCase(context, "all_six_m2_fixtures_pass_current_evaluators", () => {
+  testCase(context, "all_six_fixtures_pass_m5_evaluators", () => {
     for (const fixture of KICKOFF_FIXTURES) {
       runNode(context, EVAL_KICKOFF, ["--check-fixture", fixture], { cwd: ROOT });
     }
@@ -6429,41 +7014,49 @@ function runSevenStepChain(context) {
   );
   const specSynthesis = path.join(artifacts, "spec-synthesis.json");
   writeJson(specSynthesis, {
-    kind: "kg.spec_synthesis",
-    version: 2,
     task: {
       title: "Preserve bootstrap facts in the compile-managed runbook",
     },
     context: [
-      observation.claim,
-      `The kickoff selected ${turn.findings.length} structured sources.`,
+      { statement: observation.claim, source_refs: ["transcript#message=0"] },
+      { statement: `The kickoff selected ${turn.findings.length} structured sources.`, source_refs: ["transcript#message=0"] },
     ],
     requirements: [
-      "Update the managed compile runbook block from the compiled knowledge entry.",
+      { statement: "Update the managed compile runbook block from the compiled knowledge entry.", source_refs: ["transcript#message=0"] },
     ],
     constraints: turn.findings.map((finding) => ({
       constraint: `Preserve the constraint recorded by ${finding.source_path}.`,
       source_path: `${finding.source_path}#L${finding.line}`,
       source_status: finding.status,
       authority: finding.authority,
+      finding_id: `KF-${machineContract.sha256CanonicalJson({
+        source_path: finding.source_path,
+        line: finding.line,
+      }).slice(-12).toUpperCase()}`,
     })),
     references: [
-      "harness/artifacts/HAR-COMPILE-NOTES.yaml",
+      { path: "harness/artifacts/HAR-COMPILE-NOTES.yaml", purpose: "Managed carrier sidecar" },
     ],
     out_of_scope: [
       {
         statement: "Changing text outside the managed runbook block.",
-        conflict_source_path: null,
+        source_class: "explicit_no",
+        source_ref: "transcript#message=0",
       },
     ],
     acceptance_criteria: [
-      "GIVEN the compiled knowledge entry WHEN the spec is archived THEN the managed runbook constraint remains cited.",
+      {
+        given: "the compiled knowledge entry",
+        when: "the spec is archived",
+        then: "the managed runbook constraint remains cited",
+        requirement_ids: ["REQ-001"],
+      },
     ],
     open_questions: [],
     session_history: [
       {
         session_id: kickoffSessionId,
-        turn_session_id: turn.session_id,
+        turn_ids: [turn.session_id],
         product_kinds: [
           "kg.kickoff_context_index",
           "kg.kickoff_context",
@@ -6472,6 +7065,25 @@ function runSevenStepChain(context) {
       },
     ],
   });
+  const validatedSpecSynthesis = path.join(artifacts, "validated-spec-synthesis.json");
+  runNode(
+    context,
+    installed("kg-spec", "produce-spec.mjs"),
+    [
+      "--validate-synthesis",
+      "--project-root",
+      project,
+      "--packet",
+      specPacket,
+      "--synthesis",
+      specSynthesis,
+      "--output",
+      validatedSpecSynthesis,
+      "--now",
+      "2026-07-31T06:40:00Z",
+    ],
+    { cwd: project },
+  );
   const archived = runNode(
     context,
     installed("kg-spec", "produce-spec.mjs"),
@@ -6482,9 +7094,7 @@ function runSevenStepChain(context) {
       "--packet",
       specPacket,
       "--synthesis",
-      specSynthesis,
-      "--now",
-      "2026-07-31T06:40:00Z",
+      validatedSpecSynthesis,
     ],
     { cwd: project },
   );

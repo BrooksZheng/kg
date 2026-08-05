@@ -2,6 +2,7 @@
 // normalization, and fixture gates are read from protocol under KN-0034.
 
 import { loadProtocolFile } from "./protocol.mjs";
+import { canonicalizeRecord } from "./machine-contract.mjs";
 
 function rubricProtocol() {
   return loadProtocolFile("evaluation-rubric.schema.yaml");
@@ -70,4 +71,48 @@ export function calculateRubricScore({ evaluator, criterionValues, hardAssertion
     hard_gate_pass: hardGatePass,
     pass,
   };
+}
+
+export function buildEvaluationScore({
+  evaluator,
+  fixtureId,
+  oracleSha256,
+  productHashes,
+  criterionChecks,
+  hardAssertions = [],
+  advisory = [],
+  evaluatedAt,
+}) {
+  const criterionValues = Object.fromEntries(
+    Object.entries(criterionChecks).map(([criterionId, checks]) => [criterionId, checks.value]),
+  );
+  const calculated = calculateRubricScore({ evaluator, criterionValues, hardAssertions });
+  const criteria = calculated.criteria.map((criterion) => {
+    const checks = criterionChecks[criterion.criterion_id];
+    return {
+      ...criterion,
+      passed_checks: [...(checks.passed_checks ?? [])],
+      failed_checks: [...(checks.failed_checks ?? [])],
+    };
+  });
+  return canonicalizeRecord(
+    {
+      kind: "kg.evaluation_score",
+      version: 1,
+      evaluated_at: evaluatedAt,
+      evaluator,
+      fixture_id: fixtureId,
+      oracle_sha256: oracleSha256,
+      product_hashes: productHashes,
+      criteria,
+      raw_score: calculated.raw_score,
+      normalized_score: calculated.normalized_score,
+      hard_assertions: hardAssertions,
+      hard_gate_pass: calculated.hard_gate_pass,
+      advisory,
+      pass: calculated.pass,
+    },
+    rubricProtocol(),
+    "evaluation score",
+  );
 }

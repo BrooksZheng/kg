@@ -1,0 +1,6 @@
+Add retry handling for notification delivery while preserving the accepted queue boundary.
+SMS delivery is explicitly out of scope for this task.
+Direct provider-state writes conflict with the accepted queue boundary.
+Credentials vault changes remain outside the notification worker DMZ.
+Analytics dashboard redesign may be useful, but the user has not rejected it.
+Retry notification delivery through the queue and preserve the original idempotency key.

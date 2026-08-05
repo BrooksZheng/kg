@@ -13,8 +13,10 @@ import { parse } from "./lib/kyaml.mjs";
 import * as documentAnchor from "./lib/document-anchor.mjs";
 import { isScriptInvocation, isUserInteractionToolName, normalizedToolName } from "./lib/eval-tool-audit.mjs";
 import * as host from "./lib/host.mjs";
+import * as machineContract from "./lib/machine-contract.mjs";
 import * as protocol from "./lib/protocol.mjs";
-import { loadSavedEvaluationFixture } from "./lib/eval-fixture.mjs";
+import { loadSavedEvaluationFixture, loadSplitEvaluationFixture, scoreableOracle } from "./lib/eval-fixture.mjs";
+import { buildEvaluationScore, calculateRubricScore } from "./lib/eval-rubric.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PRODUCE = path.join(ROOT, "skills", "kg-spec", "scripts", "produce-spec.mjs");
@@ -497,6 +499,156 @@ function questionAudit(response) {
   return failures;
 }
 
+function interactionToolAudit(response) {
+  const failures = [];
+  for (const [index, message] of (response.transcript ?? []).entries()) {
+    for (const call of message?.tool_calls ?? []) {
+      const name = String(call?.name ?? call?.function?.name ?? "");
+      if (isUserInteractionToolName(name)) failures.push(`assistant message ${index} called ${name}`);
+    }
+  }
+  for (const [index, event] of [...(response.events ?? []), ...(response.tool_events ?? [])].entries()) {
+    if (isUserInteractionToolName(event?.type ?? event?.name ?? "")) {
+      failures.push(`interaction event ${index} called ${event.type ?? event.name}`);
+    }
+  }
+  return failures;
+}
+
+function subsetMatches(actual, expected) {
+  if (expected === null || typeof expected !== "object" || Array.isArray(expected)) {
+    return actual === expected;
+  }
+  return Object.entries(expected).every(([key, value]) => machineContract.canonicalJson(actual?.[key]) === machineContract.canonicalJson(value));
+}
+
+function evaluateSpecExpectation(expectation, synthesis) {
+  if (expectation.assertion === "out_of_scope_item") {
+    const match = synthesis.out_of_scope.find((item) => subsetMatches(item, expectation.expected));
+    return { passed: Boolean(match), actualRef: match?.out_of_scope_id ?? "out_of_scope:none" };
+  }
+  if (expectation.assertion === "out_of_scope_absent") {
+    const match = synthesis.out_of_scope.find((item) => item.statement === expectation.expected);
+    return { passed: !match, actualRef: match?.out_of_scope_id ?? "out_of_scope:absent" };
+  }
+  if (expectation.assertion === "requirement_covered") {
+    const requirement = synthesis.requirements.find((item) => item.statement === expectation.expected);
+    const acceptance = requirement
+      ? synthesis.acceptance_criteria.find((item) => item.requirement_ids.includes(requirement.requirement_id))
+      : null;
+    return {
+      passed: Boolean(requirement && acceptance),
+      actualRef: requirement && acceptance ? `${requirement.requirement_id}->${acceptance.acceptance_id}` : "trace:none",
+    };
+  }
+  if (expectation.assertion === "constraint_anchor_present") {
+    const actual = synthesis.constraints.map((item) => item.source_path);
+    return {
+      passed: actual.includes(expectation.expected),
+      actualRef: actual.includes(expectation.expected) ? expectation.expected : actual.join("|"),
+    };
+  }
+  return { passed: false, actualRef: `unsupported:${expectation.assertion}` };
+}
+
+export function scoreSpecMachineProducts({
+  fixtureRoot,
+  synthesisFile,
+  specFile,
+  packetFile,
+  response,
+  projectRoot,
+}) {
+  const loaded = loadSplitEvaluationFixture({
+    scenarioFile: path.join(fixtureRoot, "scenario.json"),
+    oracleFile: path.join(fixtureRoot, "oracle.json"),
+  });
+  if (loaded.scenario.evaluator !== "spec") throw new Error("split fixture evaluator must be spec");
+  const synthesis = readJson(synthesisFile, "validated synthesis");
+  const synthesisErrors = protocol.validateRecord(synthesis, SPEC_SYNTHESIS_SCHEMA);
+  const packetBytes = fs.readFileSync(packetFile);
+  if (synthesis.packet_sha256 !== machineContract.sha256Bytes(packetBytes)) {
+    synthesisErrors.push("packet hash binding differs from packet bytes");
+  }
+  const specCheck = runNode([PRODUCE, "--check", specFile, "--project-root", projectRoot]);
+  const interactionFailures = interactionToolAudit(response);
+  const productKinds = (response.products ?? []).map((item) => item.kind);
+  const packetOnlyFailures = [];
+  if (!hasPacketReadEvidence(response, packetFile)) packetOnlyFailures.push("packet read tool event missing");
+  if (productKinds.length !== 1 || productKinds[0] !== "kg.spec_synthesis") {
+    packetOnlyFailures.push("spec response must register only kg.spec_synthesis");
+  }
+  if (productKinds.some((kind) => kind.startsWith("kg.kickoff_"))) {
+    packetOnlyFailures.push("spec response registered a kickoff product");
+  }
+
+  const expectationResults = scoreableOracle(loaded).map((expectation) => ({
+    expectation,
+    result: evaluateSpecExpectation(expectation, synthesis),
+  }));
+  const hardAssertions = expectationResults.map(({ expectation, result }) => ({
+    assertion_id: expectation.expectation_id,
+    passed: result.passed,
+    expected_ref: expectation.derivation,
+    actual_ref: result.actualRef,
+    message: expectation.assertion,
+  }));
+  hardAssertions.push({
+    assertion_id: "c1-packet-only",
+    passed: interactionFailures.length === 0 && packetOnlyFailures.length === 0,
+    expected_ref: "protocol/evaluation-rubric.schema.yaml#C1",
+    actual_ref: `interaction=${interactionFailures.length};packet=${packetOnlyFailures.length}`,
+    message: "Synthesis uses no interaction tool and registers only the packet-bound synthesis product.",
+  });
+  hardAssertions.push({
+    assertion_id: "structured-product-and-render",
+    passed: synthesisErrors.length === 0 && specCheck.status === 0,
+    expected_ref: "protocol/spec-synthesis.schema.yaml#version=3",
+    actual_ref: `schema=${synthesisErrors.length};checker=${specCheck.status}`,
+    message: "Structured synthesis and rendered spec pass their protocol checkers.",
+  });
+  const c2Expectations = expectationResults.filter(({ expectation }) => expectation.criterion_id === "C2");
+  const c3Expectations = expectationResults.filter(({ expectation }) => expectation.criterion_id === "C3");
+  const structurePass = synthesisErrors.length === 0 && specCheck.status === 0;
+  const c2Pass = structurePass && c2Expectations.every(({ result }) => result.passed);
+  const c3Pass = structurePass && c3Expectations.every(({ result }) => result.passed);
+  const criterionChecks = {
+    C1: {
+      value: interactionFailures.length === 0 && packetOnlyFailures.length === 0 ? 4 : 0,
+      passed_checks: interactionFailures.length === 0 && packetOnlyFailures.length === 0 ? ["packet_only", "zero_interaction"] : [],
+      failed_checks: [...interactionFailures, ...packetOnlyFailures],
+    },
+    C2: {
+      value: c2Pass ? 3 : structurePass ? 2 : 0,
+      passed_checks: c2Expectations.filter(({ result }) => result.passed).map(({ expectation }) => expectation.expectation_id),
+      failed_checks: c2Expectations.filter(({ result }) => !result.passed).map(({ expectation }) => expectation.expectation_id),
+    },
+    C3: {
+      value: c3Pass ? 3 : structurePass ? 2 : 0,
+      passed_checks: c3Expectations.filter(({ result }) => result.passed).map(({ expectation }) => expectation.expectation_id),
+      failed_checks: c3Expectations.filter(({ result }) => !result.passed).map(({ expectation }) => expectation.expectation_id),
+    },
+  };
+  return buildEvaluationScore({
+    evaluator: "spec",
+    fixtureId: loaded.scenario.fixture_id,
+    oracleSha256: loaded.oracleSha256,
+    productHashes: [
+      { kind: "kg.spec_synthesis_packet", path: path.basename(packetFile), sha256: machineContract.sha256File(packetFile) },
+      { kind: "kg.spec_synthesis", path: path.basename(synthesisFile), sha256: machineContract.sha256File(synthesisFile) },
+      { kind: "kg.task_spec", path: path.basename(specFile), sha256: machineContract.sha256File(specFile) },
+    ],
+    criterionChecks,
+    hardAssertions,
+    advisory: loaded.advisoryExpectations.map((item) => ({
+      advisory_id: item.expectation_id,
+      message: item.assertion,
+      source_refs: item.derivation ? [item.derivation] : [],
+    })),
+    evaluatedAt: synthesis.created_at,
+  });
+}
+
 function citationAudit(response, projectRoot, expectedSources) {
   const failures = [];
   const warnings = [];
@@ -569,6 +721,62 @@ function fileSnapshot(root, { excludeSpecs = false } = {}) {
   return records;
 }
 
+function packetRecord(packet, kind) {
+  const product = packet.intermediate_products.find((item) => item.kind === kind);
+  if (!product) return null;
+  return product.path.endsWith(".json") || product.content.trimStart().startsWith("{")
+    ? JSON.parse(product.content)
+    : parse(product.content);
+}
+
+function legacyReplayDraft(packet, legacy) {
+  const turn = packetRecord(packet, "kg.kickoff_turn");
+  const conflicts = packetRecord(packet, "kg.kickoff_conflicts")?.conflicts ?? [];
+  const findingId = (finding) => `KF-${machineContract.sha256CanonicalJson({
+    source_path: finding.source_path,
+    line: finding.line,
+  }).slice(-12).toUpperCase()}`;
+  const conflictId = (conflict) => `KC-${machineContract.sha256CanonicalJson({
+    source_path: conflict.source_path,
+    line: conflict.line,
+  }).slice(-12).toUpperCase()}`;
+  return {
+    task: { title: legacy.task.title },
+    context: legacy.context.map((statement) => ({ statement, source_refs: ["transcript#message=0"] })),
+    requirements: legacy.requirements.map((statement) => ({ statement, source_refs: ["transcript#message=0"] })),
+    constraints: legacy.constraints.map((item) => {
+      const finding = turn.findings.find((candidate) => `${candidate.source_path}#L${candidate.line}` === item.source_path);
+      return { ...item, finding_id: finding ? findingId(finding) : "KF-000000000000" };
+    }),
+    references: legacy.references.map((referencePath) => ({ path: referencePath, purpose: "Implementation reference" })),
+    out_of_scope: legacy.out_of_scope.map((item) => {
+      const conflict = conflicts.find((candidate) => candidate.source_path === item.conflict_source_path);
+      return {
+        statement: item.statement,
+        source_class: conflict ? "conflict" : "explicit_no",
+        source_ref: conflict
+          ? `kg.kickoff_conflicts#conflict=${conflictId(conflict)}`
+          : "transcript#message=0",
+      };
+    }),
+    acceptance_criteria: legacy.acceptance_criteria.map((item) => {
+      const match = /^GIVEN (.+) WHEN (.+) THEN (.+)$/.exec(item);
+      return {
+        given: match?.[1] ?? "",
+        when: match?.[2] ?? "",
+        then: match?.[3] ?? "",
+        requirement_ids: legacy.requirements.map((unused, index) => `REQ-${String(index + 1).padStart(3, "0")}`),
+      };
+    }),
+    open_questions: legacy.open_questions.map((question) => ({ question, source_refs: ["transcript#message=0"] })),
+    session_history: legacy.session_history.map((item) => ({
+      session_id: item.session_id,
+      turn_ids: [item.turn_session_id],
+      product_kinds: item.product_kinds,
+    })),
+  };
+}
+
 function archiveSynthesis(loaded, kickoffResponseFile, specResponse, synthesisFile, projectRoot, tempRoot) {
   const packet = path.join(tempRoot, "spec-packet.json");
   requireRunOk(
@@ -593,6 +801,38 @@ function archiveSynthesis(loaded, kickoffResponseFile, specResponse, synthesisFi
     throw new Error("session ran archive; the evaluator owns the archive step");
   }
   const before = fileSnapshot(projectRoot, { excludeSpecs: true });
+  let archiveInput = synthesisFile;
+  const submitted = readJson(synthesisFile, "spec synthesis");
+  if (submitted.version === 2) {
+    const replayDraft = path.join(tempRoot, "legacy-replay-draft.json");
+    const validated = path.join(tempRoot, "validated-spec-synthesis.json");
+    writeJson(replayDraft, legacyReplayDraft(readJson(packet, "spec packet"), submitted));
+    requireRunOk(
+      runNode([
+        PRODUCE,
+        "--validate-synthesis",
+        "--project-root",
+        projectRoot,
+        "--packet",
+        packet,
+        "--synthesis",
+        replayDraft,
+        "--output",
+        validated,
+        "--now",
+        FIXED_NOW,
+      ]),
+      "validate synthesis",
+    );
+    archiveInput = validated;
+  } else if (
+    submitted.version === SPEC_SYNTHESIS_SCHEMA.product_version &&
+    !(specResponse.tool_events ?? []).some(
+      (event) => isScriptInvocation(event, "produce-spec.mjs") && event.command.includes("--validate-synthesis"),
+    )
+  ) {
+    throw new Error("version 3 synthesis lacks a successful --validate-synthesis tool event");
+  }
   const archived = runNode([
     PRODUCE,
     "--archive",
@@ -601,9 +841,7 @@ function archiveSynthesis(loaded, kickoffResponseFile, specResponse, synthesisFi
     "--packet",
     packet,
     "--synthesis",
-    synthesisFile,
-    "--now",
-    FIXED_NOW,
+    archiveInput,
   ]);
   requireRunOk(archived, "archive");
   let archiveResult;
@@ -658,6 +896,7 @@ function archiveSynthesis(loaded, kickoffResponseFile, specResponse, synthesisFi
 function evaluateSpecResponse(loaded, kickoffResponseFile, response, specArtifactsRoot, projectRoot, tempRoot) {
   const schemaFailures = validateRunnerResponse(response, "spec response");
   const questionFailures = questionAudit(response);
+  const scoreInteractionFailures = interactionToolAudit(response);
   const executionFailures = (response.permission_denials ?? []).map(
     (denial) => `permission denied for ${denial.tool} at step ${denial.at_step}: ${denial.detail}`,
   );
@@ -703,6 +942,7 @@ function evaluateSpecResponse(loaded, kickoffResponseFile, response, specArtifac
     lifecycle_pass: productFailures.length === 0,
     no_followup_pass: questionFailures.length === 0,
     runner_execution_pass: executionFailures.length === 0,
+    score_interaction_failures: scoreInteractionFailures,
     failures: {
       runner_schema: schemaFailures,
       runner_execution: executionFailures,
@@ -716,6 +956,21 @@ function evaluateSpecResponse(loaded, kickoffResponseFile, response, specArtifac
 }
 
 function finishResult(result) {
+  result.score = calculateRubricScore({
+    evaluator: "spec",
+    criterionValues: {
+      C1: result.score_interaction_failures.length === 0 ? 4 : 0,
+      C2: result.lifecycle_pass && result.session_history_pass ? 3 : 0,
+      C3: result.source_set_pass ? 3 : 0,
+    },
+    hardAssertions: [
+      result.schema_pass,
+      result.source_set_pass,
+      result.session_history_pass,
+      result.lifecycle_pass,
+      result.runner_execution_pass,
+    ].map((passed) => ({ passed })),
+  });
   result.pass =
     result.c1_zero_interview_score === 4 &&
     result.schema_pass &&
@@ -723,7 +978,8 @@ function finishResult(result) {
     result.session_history_pass &&
     result.lifecycle_pass &&
     result.no_followup_pass &&
-    result.runner_execution_pass;
+    result.runner_execution_pass &&
+    result.score.pass;
   return result;
 }
 
@@ -866,18 +1122,20 @@ function runReal(loaded, artifactsValue) {
     prompt:
       "Read the read-only spec-packet.json in artifacts_dir and produce zero-interview semantic synthesis. " +
       "Do not ask the user any question and do not call request-user-input. " +
-      "This session must only produce the synthesis JSON. Do not run --archive; " +
+      "Write a strict JSON version 3 synthesis draft with no kind, version, ID, timestamp, status, or hash fields. " +
+      "Requirements, acceptance criteria, Out of Scope, Open Questions, and Session History must use the structured protocol records. " +
+      `Run ${PRODUCE} --validate-synthesis with the supplied packet, pass --now ${FIXED_NOW}, and write the canonical result to artifacts_dir/spec-synthesis.json. ` +
+      "This session must only produce the validated synthesis JSON. Do not run --archive; " +
       "the evaluator owns the archive step and will run it with a fixed clock. " +
-      "Write strict JSON kg.spec_synthesis version 2 to artifacts_dir/spec-synthesis.json. " +
-      "The task object contains title only. Preserve machine conflict links, constraint source metadata, " +
-      "and the structured kickoff session record. " +
-      "conflict_source_path and source_path fields must be byte-equal to the recorded machine values: " +
-      "bare project-relative paths with no #L line anchors. " +
+      "Preserve packet conflict IDs, transcript message pointers, DMZ decision anchors, constraint source metadata, " +
+      "finding IDs, and the structured kickoff session record. Constraint source_path values include stable #L line anchors. " +
       "Register exactly one kg.spec_synthesis product.",
     project_root: projectRoot,
     artifacts_dir: sessionArtifacts,
     config: {
       packet_path: packet,
+      validator_path: PRODUCE,
+      draft_path: path.join(sessionArtifacts, "spec-synthesis-draft.json"),
       synthesis_path: path.join(sessionArtifacts, "spec-synthesis.json"),
       zero_interview_required: true,
     },

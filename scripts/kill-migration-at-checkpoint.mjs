@@ -38,8 +38,17 @@ function parseArgs(argv) {
   };
 }
 
-function waitForReady(file, child) {
-  if (fs.existsSync(file)) return Promise.resolve();
+function readyMatches(file, checkpoint) {
+  try {
+    return fs.readFileSync(file, "utf8").trim() === checkpoint;
+  } catch (error) {
+    if (error?.code === "ENOENT") return false;
+    throw error;
+  }
+}
+
+function waitForReady(file, child, checkpoint) {
+  if (readyMatches(file, checkpoint)) return Promise.resolve();
   fs.mkdirSync(path.dirname(file), { recursive: true });
   return new Promise((resolve, reject) => {
     let settled = false;
@@ -52,7 +61,7 @@ function waitForReady(file, child) {
       callback(value);
     };
     const inspect = () => {
-      if (fs.existsSync(file)) finish(resolve);
+      if (readyMatches(file, checkpoint)) finish(resolve);
     };
     const poll = setInterval(inspect, 5);
     const timeout = setTimeout(() => finish(reject, new Error(`checkpoint was not reached: ${file}`)), 30000);
@@ -87,7 +96,7 @@ child.stdout.on("data", (chunk) => { stdout += chunk; });
 child.stderr.on("data", (chunk) => { stderr += chunk; });
 
 try {
-  await waitForReady(args.ready, child);
+  await waitForReady(args.ready, child, args.checkpoint);
 } catch (error) {
   child.kill("SIGKILL");
   if (stderr) process.stderr.write(stderr);

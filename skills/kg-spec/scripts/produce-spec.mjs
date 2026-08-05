@@ -25,7 +25,7 @@ function parseArgs(argv) {
   const out = { mode: null };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
-    if (arg === "--prepare" || arg === "--finalize" || arg === "--archive") {
+    if (arg === "--prepare" || arg === "--finalize" || arg === "--validate-synthesis" || arg === "--archive") {
       if (out.mode) fail("只能选择一个模式");
       out.mode = arg.slice(2);
       continue;
@@ -45,7 +45,7 @@ function parseArgs(argv) {
     out[arg.slice(2).replaceAll("-", "_")] = value;
     i += 1;
   }
-  if (!out.mode) fail("需要 --prepare、--finalize、--archive 或 --check");
+  if (!out.mode) fail("需要 --prepare、--finalize、--validate-synthesis、--archive 或 --check");
   return out;
 }
 
@@ -180,6 +180,367 @@ function sourceMetadata(file, sourcePath) {
     frontmatter.authority ??
     (status === "accepted" ? "formal_decision" : status === "active" ? "project_knowledge" : "reference_only");
   return { status, authority };
+}
+
+function readStructuredPacket(packetFile, root) {
+  const content = fs.readFileSync(packetFile, "utf8");
+  let packet;
+  try {
+    packet = JSON.parse(content);
+  } catch (error) {
+    throw new Error(`packet must be strict JSON: ${error.message}`);
+  }
+  if (
+    packet?.kind !== "kg.spec_synthesis_packet" ||
+    packet.version !== 2 ||
+    packet.readonly !== true ||
+    !Array.isArray(packet.transcript) ||
+    !Array.isArray(packet.intermediate_products)
+  ) {
+    throw new Error("packet must be a version 2 read-only synthesis packet");
+  }
+  if (host.canonicalPath(packet.project_root) !== root) {
+    throw new Error("packet project root differs from --project-root");
+  }
+  return { packet, sha256: machineContract.sha256Bytes(content) };
+}
+
+function productSchemaErrors(record, schema, label) {
+  const errors = protocol.validateRecord(record, schema);
+  if (errors.length > 0) throw new Error(`${label} is invalid: ${errors.join("; ")}`);
+}
+
+function legacyFindingId(finding) {
+  const seed = machineContract.sha256CanonicalJson({
+    source_path: finding.source_path,
+    line: finding.line,
+  });
+  return `KF-${seed.slice(-12).toUpperCase()}`;
+}
+
+function legacyConflictId(conflict) {
+  const seed = machineContract.sha256CanonicalJson({
+    source_path: conflict.source_path,
+    line: conflict.line,
+  });
+  return `KC-${seed.slice(-12).toUpperCase()}`;
+}
+
+function structuredPacketFacts(packet, root) {
+  const turn = readMachineProduct(productByKind(packet, "kg.kickoff_turn"));
+  let findings;
+  let turnIds;
+  if (turn.version === protocol.loadKickoffTurnSchema().product_version) {
+    productSchemaErrors(turn, protocol.loadKickoffTurnSchema(), "packet kg.kickoff_turn");
+    const userMessage = packet.transcript[turn.user_message_index];
+    if (
+      !userMessage ||
+      userMessage.role !== "user" ||
+      machineContract.sha256Bytes(userMessage.content) !== turn.user_message_sha256
+    ) {
+      throw new Error("packet kg.kickoff_turn user pointer does not match transcript bytes");
+    }
+    const assistantMessage = packet.transcript[turn.question.assistant_message_index];
+    if (
+      !assistantMessage ||
+      assistantMessage.role !== "assistant" ||
+      assistantMessage.content !== turn.question.assistant_message ||
+      machineContract.sha256Bytes(assistantMessage.content) !== turn.question.assistant_message_sha256
+    ) {
+      throw new Error("packet kg.kickoff_turn assistant pointer does not match transcript bytes");
+    }
+    findings = turn.findings;
+    turnIds = [turn.turn_id];
+  } else if (turn.version === 1) {
+    findings = (turn.findings ?? []).map((finding) => ({
+      finding_id: legacyFindingId(finding),
+      ...finding,
+    }));
+    turnIds = [turn.session_id];
+  } else {
+    throw new Error("packet kg.kickoff_turn version is unsupported");
+  }
+  if (findings.length === 0) throw new Error("packet kg.kickoff_turn findings must not be empty");
+  const findingById = new Map();
+  const findingByAnchor = new Map();
+  for (const finding of findings) {
+    const anchor = `${finding.source_path}#L${finding.line}`;
+    documentAnchor.validateConstraintAnchor(anchor, root, protocol.loadTaskSpecSchema().constraint_source_path_pattern);
+    const sourceFile = host.resolveSafeRelative(root, finding.source_path).full;
+    const metadata = sourceMetadata(sourceFile, finding.source_path);
+    if (finding.status !== metadata.status || finding.authority !== metadata.authority) {
+      throw new Error(`packet kickoff finding metadata differs from source bytes: ${anchor}`);
+    }
+    if (findingById.has(finding.finding_id) || findingByAnchor.has(anchor)) {
+      throw new Error(`packet kickoff finding is duplicated: ${anchor}`);
+    }
+    findingById.set(finding.finding_id, { ...finding, anchor });
+    findingByAnchor.set(anchor, { ...finding, anchor });
+  }
+
+  const conflictProduct = productByKind(packet, "kg.kickoff_conflicts", { required: false });
+  const conflictById = new Map();
+  if (conflictProduct) {
+    const conflicts = readMachineProduct(conflictProduct);
+    if (conflicts.version === protocol.loadKickoffConflictSchema().product_version) {
+      productSchemaErrors(conflicts, protocol.loadKickoffConflictSchema(), "packet kg.kickoff_conflicts");
+      for (const conflict of conflicts.conflicts) {
+        const message = packet.transcript[conflict.task_message_index];
+        const finding = findingById.get(conflict.finding_id);
+        const sourceFile = host.resolveSafeRelative(root, conflict.constraint_source_path).full;
+        if (!message || message.role !== "user" || machineContract.sha256Bytes(message.content) !== conflict.task_message_sha256) {
+          throw new Error(`packet conflict task pointer is invalid: ${conflict.conflict_id}`);
+        }
+        if (
+          !finding ||
+          finding.source_path !== conflict.constraint_source_path ||
+          finding.line !== conflict.constraint_line ||
+          machineContract.sha256File(sourceFile) !== conflict.constraint_sha256
+        ) {
+          throw new Error(`packet conflict constraint pointer is invalid: ${conflict.conflict_id}`);
+        }
+        conflictById.set(conflict.conflict_id, conflict);
+      }
+    } else if (conflicts.version === 1 && Array.isArray(conflicts.conflicts)) {
+      for (const conflict of conflicts.conflicts) {
+        conflictById.set(legacyConflictId(conflict), conflict);
+      }
+    } else {
+      throw new Error("packet kg.kickoff_conflicts version is unsupported");
+    }
+  }
+  return {
+    turn,
+    findings,
+    findingById,
+    findingByAnchor,
+    turnIds,
+    conflictById,
+    productKinds: packet.intermediate_products.map((product) => product.kind),
+  };
+}
+
+function normalizedStringList(value, label, options = {}) {
+  return stringList(value, label, options).map((item) => item.trim());
+}
+
+function portableReference(value, label) {
+  const reference = requireString(value, label).replaceAll("\\", "/");
+  if (
+    path.posix.isAbsolute(reference) ||
+    reference.split("/").includes("..") ||
+    reference.split("/").some((segment) => segment.toLowerCase() === ".kg")
+  ) {
+    throw new Error(`${label} must be a safe project-relative reference`);
+  }
+  return reference;
+}
+
+function numberedRecords(records, prefix, idField) {
+  return records.map((record, index) => ({
+    [idField]: `${prefix}-${String(index + 1).padStart(3, "0")}`,
+    ...record,
+  }));
+}
+
+function rawFromStructuredProduct(product) {
+  return {
+    task: { title: product.task.title },
+    context: product.context.map(({ statement, source_refs }) => ({ statement, source_refs })),
+    requirements: product.requirements.map(({ statement, source_refs }) => ({ statement, source_refs })),
+    constraints: product.constraints.map(({ constraint, source_path, source_status, authority, finding_id }) => ({
+      constraint,
+      source_path,
+      source_status,
+      authority,
+      finding_id,
+    })),
+    references: product.references.map(({ path: referencePath, purpose }) => ({ path: referencePath, purpose })),
+    out_of_scope: product.out_of_scope.map(({ statement, source_class, source_ref }) => ({
+      statement,
+      source_class,
+      source_ref,
+    })),
+    acceptance_criteria: product.acceptance_criteria.map(({ given, when, then, and, requirement_ids }) => ({
+      given,
+      when,
+      then,
+      ...(and === undefined ? {} : { and }),
+      requirement_ids,
+    })),
+    open_questions: product.open_questions.map(({ question, source_refs }) => ({ question, source_refs })),
+    session_history: product.session_history.map(({ session_id, turn_ids, product_kinds }) => ({
+      session_id,
+      turn_ids,
+      product_kinds,
+    })),
+  };
+}
+
+function canonicalStructuredSynthesis(raw, packetInfo, root, envelope) {
+  machineContract.assertRawInput(raw, SYNTHESIS_SCHEMA, "spec synthesis");
+  const facts = structuredPacketFacts(packetInfo.packet, root);
+  const task = { title: requireString(raw.task.title, "synthesis.task.title") };
+  const context = numberedRecords(raw.context.map((item, index) => ({
+    statement: requireString(item.statement, `synthesis.context[${index}].statement`),
+    source_refs: normalizedStringList(item.source_refs, `synthesis.context[${index}].source_refs`),
+  })), "CTX", "context_id");
+  const requirements = numberedRecords(raw.requirements.map((item, index) => ({
+    statement: requireString(item.statement, `synthesis.requirements[${index}].statement`),
+    source_refs: normalizedStringList(item.source_refs, `synthesis.requirements[${index}].source_refs`),
+  })), "REQ", "requirement_id");
+  const requirementIds = new Set(requirements.map((item) => item.requirement_id));
+
+  const constraints = numberedRecords(raw.constraints.map((item, index) => {
+    const sourcePath = requireString(item.source_path, `synthesis.constraints[${index}].source_path`);
+    documentAnchor.validateConstraintAnchor(sourcePath, root, protocol.loadTaskSpecSchema().constraint_source_path_pattern);
+    const findingId = requireString(item.finding_id, `synthesis.constraints[${index}].finding_id`);
+    const finding = facts.findingById.get(findingId);
+    if (!finding || finding.anchor !== sourcePath) {
+      throw new Error(`synthesis.constraints[${index}] does not bind its kickoff finding`);
+    }
+    const status = requireString(item.source_status, `synthesis.constraints[${index}].source_status`);
+    const authority = requireString(item.authority, `synthesis.constraints[${index}].authority`);
+    if (status !== finding.status || authority !== finding.authority) {
+      throw new Error(`synthesis.constraints[${index}] metadata differs from its kickoff finding`);
+    }
+    return {
+      constraint: requireString(item.constraint, `synthesis.constraints[${index}].constraint`),
+      source_path: sourcePath,
+      source_status: status,
+      authority,
+      finding_id: findingId,
+    };
+  }), "CON", "constraint_id");
+  exactStringSet(constraints.map((item) => item.finding_id), [...facts.findingById.keys()], "constraint finding set");
+
+  const references = raw.references.map((item, index) => ({
+    path: portableReference(item.path, `synthesis.references[${index}].path`),
+    purpose: requireString(item.purpose, `synthesis.references[${index}].purpose`),
+  }));
+  const sourceClasses = SYNTHESIS_SCHEMA.out_of_scope_source_classes;
+  const outOfScope = numberedRecords(raw.out_of_scope.map((item, index) => {
+    const sourceClass = requireString(item.source_class, `synthesis.out_of_scope[${index}].source_class`);
+    const sourceRef = requireString(item.source_ref, `synthesis.out_of_scope[${index}].source_ref`);
+    const policy = sourceClasses[sourceClass];
+    if (!policy || !new RegExp(policy.source_ref_pattern).test(sourceRef)) {
+      throw new Error(`synthesis.out_of_scope[${index}] source_ref does not match ${sourceClass}`);
+    }
+    if (policy.pointer_type === "transcript_message") {
+      const messageIndex = Number.parseInt(sourceRef.split("=").at(-1), 10);
+      const message = packetInfo.packet.transcript[messageIndex];
+      if (!message || message.role !== "user" || typeof message.content !== "string") {
+        throw new Error(`synthesis.out_of_scope[${index}] must point to a user transcript message`);
+      }
+    } else if (policy.pointer_type === "kickoff_conflict") {
+      const conflictId = sourceRef.split("=").at(-1);
+      if (!facts.conflictById.has(conflictId)) {
+        throw new Error(`synthesis.out_of_scope[${index}] names an absent kickoff conflict`);
+      }
+    } else if (policy.pointer_type === "decision_anchor") {
+      documentAnchor.validateConstraintAnchor(sourceRef, root, protocol.loadTaskSpecSchema().constraint_source_path_pattern);
+      const match = /^(.*)#L[1-9][0-9]*$/.exec(sourceRef);
+      const metadata = sourceMetadata(host.resolveSafeRelative(root, match[1]).full, match[1]);
+      if (!new Set(["accepted", "active"]).has(metadata.status) && metadata.authority !== "project_instruction") {
+        throw new Error(`synthesis.out_of_scope[${index}] DMZ source is not a stable decision`);
+      }
+    }
+    return {
+      statement: requireString(item.statement, `synthesis.out_of_scope[${index}].statement`),
+      source_class: sourceClass,
+      source_ref: sourceRef,
+    };
+  }), "OOS", "out_of_scope_id");
+  exactStringSet(outOfScope.map((item) => item.source_ref), outOfScope.map((item) => item.source_ref), "Out of Scope source refs");
+  exactStringSet(
+    outOfScope
+      .filter((item) => item.source_class === "conflict")
+      .map((item) => item.source_ref.split("=").at(-1)),
+    [...facts.conflictById.keys()],
+    "Out of Scope conflict set",
+  );
+
+  const acceptanceCriteria = numberedRecords(raw.acceptance_criteria.map((item, index) => {
+    const traced = normalizedStringList(item.requirement_ids, `synthesis.acceptance_criteria[${index}].requirement_ids`);
+    if (traced.some((requirementId) => !requirementIds.has(requirementId))) {
+      throw new Error(`synthesis.acceptance_criteria[${index}] traces an unknown requirement`);
+    }
+    return {
+      given: requireString(item.given, `synthesis.acceptance_criteria[${index}].given`),
+      when: requireString(item.when, `synthesis.acceptance_criteria[${index}].when`),
+      then: requireString(item.then, `synthesis.acceptance_criteria[${index}].then`),
+      ...(item.and === undefined ? {} : {
+        and: normalizedStringList(item.and, `synthesis.acceptance_criteria[${index}].and`, { allowEmpty: true }),
+      }),
+      requirement_ids: traced,
+    };
+  }), "AC", "acceptance_id");
+  const coveredRequirements = new Set(acceptanceCriteria.flatMap((item) => item.requirement_ids));
+  const orphanRequirements = [...requirementIds].filter((requirementId) => !coveredRequirements.has(requirementId));
+  if (orphanRequirements.length > 0) {
+    throw new Error(`requirements lack acceptance coverage: ${orphanRequirements.join(", ")}`);
+  }
+
+  const openQuestions = numberedRecords(raw.open_questions.map((item, index) => ({
+    question: requireString(item.question, `synthesis.open_questions[${index}].question`),
+    source_refs: normalizedStringList(item.source_refs, `synthesis.open_questions[${index}].source_refs`),
+  })), "OQ", "question_id");
+  const sessionHistory = raw.session_history.map((item, index) => ({
+    session_id: requireString(item.session_id, `synthesis.session_history[${index}].session_id`),
+    turn_ids: normalizedStringList(item.turn_ids, `synthesis.session_history[${index}].turn_ids`),
+    product_kinds: normalizedStringList(item.product_kinds, `synthesis.session_history[${index}].product_kinds`),
+  }));
+  const matchingHistory = sessionHistory.filter((item) => item.session_id === packetInfo.packet.session_id);
+  if (matchingHistory.length !== 1) {
+    throw new Error("Session History must bind the packet runner session exactly once");
+  }
+  exactStringSet(matchingHistory[0].turn_ids, facts.turnIds, "Session History turn_ids");
+  exactStringSet(matchingHistory[0].product_kinds, facts.productKinds, "Session History product_kinds");
+
+  const normalizedRaw = {
+    task,
+    context: context.map(({ context_id: ignored, ...item }) => item),
+    requirements: requirements.map(({ requirement_id: ignored, ...item }) => item),
+    constraints: constraints.map(({ constraint_id: ignored, ...item }) => item),
+    references,
+    out_of_scope: outOfScope.map(({ out_of_scope_id: ignored, ...item }) => item),
+    acceptance_criteria: acceptanceCriteria.map(({ acceptance_id: ignored, ...item }) => item),
+    open_questions: openQuestions.map(({ question_id: ignored, ...item }) => item),
+    session_history: sessionHistory,
+  };
+  const synthesisSeed = machineContract.sha256CanonicalJson({
+    packet_sha256: packetInfo.sha256,
+    synthesis: normalizedRaw,
+  });
+  const scriptValues = {
+    kind: SYNTHESIS_SCHEMA.product_kind,
+    version: SYNTHESIS_SCHEMA.product_version,
+    synthesis_id: `KSYN-${synthesisSeed.slice(-12).toUpperCase()}`,
+    created_at: envelope.createdAt,
+    packet_sha256: packetInfo.sha256,
+    task: { task_id: envelope.taskId, status: "draft" },
+    context,
+    requirements,
+    constraints,
+    out_of_scope: outOfScope,
+    acceptance_criteria: acceptanceCriteria,
+    open_questions: openQuestions,
+  };
+  return machineContract.buildCanonicalRecord(normalizedRaw, scriptValues, SYNTHESIS_SCHEMA, "spec synthesis");
+}
+
+function validateStructuredProduct(product, packetInfo, root) {
+  const schemaErrors = protocol.validateRecord(product, SYNTHESIS_SCHEMA);
+  if (schemaErrors.length > 0) throw new Error(`validated synthesis is invalid: ${schemaErrors.join("; ")}`);
+  if (product.packet_sha256 !== packetInfo.sha256) throw new Error("validated synthesis packet hash differs from packet bytes");
+  const rebuilt = canonicalStructuredSynthesis(rawFromStructuredProduct(product), packetInfo, root, {
+    taskId: product.task.task_id,
+    createdAt: product.created_at,
+  });
+  if (machineContract.canonicalJson(rebuilt) !== machineContract.canonicalJson(product)) {
+    throw new Error("validated synthesis differs from the shared canonical validator output");
+  }
+  return rebuilt;
 }
 
 function canonicalArchiveSynthesis(raw, packet, root) {
@@ -333,6 +694,78 @@ function numbered(items) {
   return items.map((item, index) => `${index + 1}. ${item}`).join("\n");
 }
 
+function recordMarker(type, record) {
+  return `<!-- kg:${type} ${Buffer.from(JSON.stringify(record), "utf8").toString("base64url")} -->`;
+}
+
+function sourceSuffix(sourceRefs) {
+  return `_(Sources: ${sourceRefs.join("; ")})_`;
+}
+
+function renderStructuredList(records, type, display) {
+  return records
+    .map((record, index) => `${display(record, index)}\n${recordMarker(type, record)}`)
+    .join("\n");
+}
+
+function acceptanceDisplay(record, index) {
+  const andText = (record.and ?? []).map((item) => ` AND ${item}`).join("");
+  return `${index + 1}. [${record.acceptance_id}] GIVEN ${record.given} WHEN ${record.when} THEN ${record.then}${andText} _(Requirements: ${record.requirement_ids.join(", ")})_`;
+}
+
+function structuredSpecSections(synthesis) {
+  const constraintRows = synthesis.constraints.map(
+    (item) =>
+      `| ${markdownCell(`[${item.constraint_id}] ${item.constraint}`)} | ${markdownCell(item.source_path)} | ${markdownCell(item.source_status)} | ${markdownCell(item.authority)} |`,
+  );
+  const constraintMarkers = synthesis.constraints.map((item) => recordMarker("constraint", item));
+  return {
+    Context: renderStructuredList(
+      synthesis.context,
+      "context",
+      (item) => `- [${item.context_id}] ${item.statement} ${sourceSuffix(item.source_refs)}`,
+    ),
+    Requirements: renderStructuredList(
+      synthesis.requirements,
+      "requirement",
+      (item, index) => `${index + 1}. [${item.requirement_id}] ${item.statement} ${sourceSuffix(item.source_refs)}`,
+    ),
+    Constraints: [
+      "| Constraint | Source | Source Status | Authority |",
+      "| --- | --- | --- | --- |",
+      ...constraintRows,
+      ...constraintMarkers,
+    ].join("\n"),
+    References: synthesis.references.length
+      ? renderStructuredList(
+          synthesis.references,
+          "reference",
+          (item) => `- ${item.path} _(Purpose: ${item.purpose})_`,
+        )
+      : "- None.",
+    "Out of Scope": synthesis.out_of_scope.length
+      ? renderStructuredList(
+          synthesis.out_of_scope,
+          "out_of_scope",
+          (item, index) => `${index + 1}. [${item.out_of_scope_id}] ${item.statement} _(Source: ${item.source_class} ${item.source_ref})_`,
+        )
+      : "- None.",
+    "Acceptance Criteria": renderStructuredList(synthesis.acceptance_criteria, "acceptance", acceptanceDisplay),
+    "Open Questions": synthesis.open_questions.length
+      ? renderStructuredList(
+          synthesis.open_questions,
+          "open_question",
+          (item) => `- [${item.question_id}] ${item.question} ${sourceSuffix(item.source_refs)}`,
+        )
+      : "- None.",
+    "Session History": renderStructuredList(
+      synthesis.session_history,
+      "session_history",
+      (item) => `- Session ${item.session_id}; turns ${item.turn_ids.join(", ")}; products ${item.product_kinds.join(", ")}`,
+    ),
+  };
+}
+
 export function renderSpec(synthesis, envelope = {}) {
   const taskSpecSchema = protocol.loadTaskSpecSchema();
   const frontmatter = machineContract.orderRecordByProtocol({
@@ -341,6 +774,23 @@ export function renderSpec(synthesis, envelope = {}) {
     created_at: envelope.createdAt ?? new Date().toISOString(),
     status: envelope.status ?? synthesis.task.status,
   }, taskSpecSchema.field_order);
+  if (synthesis.version === SYNTHESIS_SCHEMA.product_version) {
+    const renderedSections = structuredSpecSections(synthesis);
+    return [
+      "---",
+      kyaml.stringify(frontmatter).trimEnd(),
+      "---",
+      "",
+      `# ${synthesis.task.title}`,
+      "",
+      ...taskSpecSchema.required_sections.flatMap((section) => [
+        `## ${section}`,
+        "",
+        renderedSections[section],
+        "",
+      ]),
+    ].join("\n");
+  }
   const constraints = synthesis.constraints
     .map(
       (item) =>
@@ -391,6 +841,59 @@ export function renderSpec(synthesis, envelope = {}) {
   ].join("\n");
 }
 
+export function parseStructuredSpecText(text) {
+  const records = {
+    context: [],
+    requirement: [],
+    constraint: [],
+    reference: [],
+    out_of_scope: [],
+    acceptance: [],
+    open_question: [],
+    session_history: [],
+  };
+  const markerPattern = /<!-- kg:([a-z_]+) ([A-Za-z0-9_-]+) -->/g;
+  let match;
+  while ((match = markerPattern.exec(text)) !== null) {
+    if (!Object.prototype.hasOwnProperty.call(records, match[1])) {
+      throw new Error(`unknown structured spec marker: ${match[1]}`);
+    }
+    let record;
+    try {
+      record = JSON.parse(Buffer.from(match[2], "base64url").toString("utf8"));
+    } catch (error) {
+      throw new Error(`invalid structured spec marker ${match[1]}: ${error.message}`);
+    }
+    records[match[1]].push(record);
+  }
+  return records;
+}
+
+function visibleStructuredRecordErrors(body, records) {
+  const errors = [];
+  const displays = [
+    ...records.context.map((item) => `- [${item.context_id}] ${item.statement} ${sourceSuffix(item.source_refs)}`),
+    ...records.requirement.map((item, index) => `${index + 1}. [${item.requirement_id}] ${item.statement} ${sourceSuffix(item.source_refs)}`),
+    ...records.constraint.map(
+      (item) => `| ${markdownCell(`[${item.constraint_id}] ${item.constraint}`)} | ${markdownCell(item.source_path)} | ${markdownCell(item.source_status)} | ${markdownCell(item.authority)} |`,
+    ),
+    ...records.reference.map((item) => `- ${item.path} _(Purpose: ${item.purpose})_`),
+    ...records.out_of_scope.map(
+      (item, index) => `${index + 1}. [${item.out_of_scope_id}] ${item.statement} _(Source: ${item.source_class} ${item.source_ref})_`,
+    ),
+    ...records.acceptance.map(acceptanceDisplay),
+    ...records.open_question.map((item) => `- [${item.question_id}] ${item.question} ${sourceSuffix(item.source_refs)}`),
+    ...records.session_history.map(
+      (item) => `- Session ${item.session_id}; turns ${item.turn_ids.join(", ")}; products ${item.product_kinds.join(", ")}`,
+    ),
+  ];
+  for (const display of displays) {
+    const count = body.split(/\r?\n/).filter((line) => line === display).length;
+    if (count !== 1) errors.push(`structured record display must appear exactly once: ${display}`);
+  }
+  return errors;
+}
+
 function sectionBody(body, section, allSections) {
   const lines = body.split(/\r?\n/);
   const start = lines.findIndex((line) => line.trim() === `## ${section}`);
@@ -410,12 +913,30 @@ export function validateSpecText(text, root) {
   const { frontmatter, body } = protocol.splitFrontmatter(text);
   const errors = protocol.validateRecord(frontmatter, schema);
   const sections = schema.required_sections;
+  const sectionHeadings = body
+    .split(/\r?\n/)
+    .filter((line) => /^## /.test(line))
+    .map((line) => line.slice(3).trim());
+  if (JSON.stringify(sectionHeadings) !== JSON.stringify(sections)) {
+    errors.push(`section order must be exactly: ${sections.join(" | ")}`);
+  }
   for (const section of sections) {
     const matches = body.split(/\r?\n/).filter((line) => line.trim() === `## ${section}`).length;
     if (matches !== 1) errors.push(`section \`${section}\` must appear exactly once`);
   }
+  let structured = null;
+  try {
+    structured = parseStructuredSpecText(body);
+  } catch (error) {
+    errors.push(error.message);
+  }
+  const structuredCount = structured
+    ? Object.values(structured).reduce((sum, records) => sum + records.length, 0)
+    : 0;
   const outOfScope = sectionBody(body, "Out of Scope", sections);
-  if (!outOfScope || !/^\d+\.\s+\S/m.test(outOfScope)) errors.push("Out of Scope must contain at least one numbered item");
+  if (structuredCount === 0 && (!outOfScope || !/^\d+\.\s+\S/m.test(outOfScope))) {
+    errors.push("Out of Scope must contain at least one numbered item");
+  }
   const acceptance = sectionBody(body, "Acceptance Criteria", sections);
   const acceptanceItems = acceptance?.split(/\r?\n/).filter((line) => /^\d+\.\s+/.test(line)) ?? [];
   if (acceptanceItems.length === 0) {
@@ -449,6 +970,58 @@ export function validateSpecText(text, root) {
       }
     } catch (error) {
       errors.push(error.message);
+    }
+  }
+  if (structuredCount > 0 && structured) {
+    errors.push(...visibleStructuredRecordErrors(body, structured));
+    const titleMatch = /^# (.+)$/m.exec(body);
+    const assembled = {
+      kind: SYNTHESIS_SCHEMA.product_kind,
+      version: SYNTHESIS_SCHEMA.product_version,
+      synthesis_id: "KSYN-000000000000",
+      created_at: frontmatter.created_at,
+      packet_sha256: `sha256:${"0".repeat(64)}`,
+      task: {
+        task_id: frontmatter.task_id,
+        status: frontmatter.status,
+        title: titleMatch?.[1] ?? "",
+      },
+      context: structured.context,
+      requirements: structured.requirement,
+      constraints: structured.constraint,
+      references: structured.reference,
+      out_of_scope: structured.out_of_scope,
+      acceptance_criteria: structured.acceptance,
+      open_questions: structured.open_question,
+      session_history: structured.session_history,
+    };
+    errors.push(...protocol.validateRecord(assembled, SYNTHESIS_SCHEMA));
+    const requirementIds = new Set(assembled.requirements.map((item) => item.requirement_id));
+    const covered = new Set();
+    for (const [index, acceptanceRecord] of assembled.acceptance_criteria.entries()) {
+      for (const requirementId of acceptanceRecord.requirement_ids ?? []) {
+        if (!requirementIds.has(requirementId)) {
+          errors.push(`acceptance marker ${index} traces unknown requirement ${requirementId}`);
+        } else {
+          covered.add(requirementId);
+        }
+      }
+    }
+    for (const requirementId of requirementIds) {
+      if (!covered.has(requirementId)) errors.push(`requirement marker ${requirementId} lacks acceptance coverage`);
+    }
+    for (const [index, item] of assembled.out_of_scope.entries()) {
+      const policy = SYNTHESIS_SCHEMA.out_of_scope_source_classes[item.source_class];
+      if (!policy || !new RegExp(policy.source_ref_pattern).test(item.source_ref)) {
+        errors.push(`Out of Scope marker ${index} has an invalid ${item.source_class} source ref`);
+      }
+      if (policy?.pointer_type === "decision_anchor") {
+        try {
+          documentAnchor.validateConstraintAnchor(item.source_ref, root, schema.constraint_source_path_pattern);
+        } catch (error) {
+          errors.push(error.message);
+        }
+      }
     }
   }
   return errors;
@@ -532,16 +1105,65 @@ function runFinalize(args) {
   console.log(`kg: task spec 已写入 ${output}，八个章节与文档锚点校验通过`);
 }
 
+function runValidateSynthesis(args) {
+  const root = requireRoot(args.project_root);
+  const packetFile = requireFile(args.packet, "--packet");
+  const synthesisFile = requireFile(args.synthesis, "--synthesis");
+  if (!args.output) fail("缺少 --output");
+  const outputFile = path.resolve(args.output);
+  if (!host.isOutside(root, outputFile)) fail("--output 必须位于项目根目录之外");
+  let packetInfo;
+  let raw;
+  try {
+    packetInfo = readStructuredPacket(packetFile, root);
+    const content = fs.readFileSync(synthesisFile, "utf8");
+    if (!content.trimStart().startsWith("{")) throw new Error("synthesis draft must be strict JSON");
+    raw = JSON.parse(content);
+  } catch (error) {
+    fail(`synthesis 预检输入无效：${error.message}`);
+  }
+  const now = args.now ? new Date(args.now) : new Date();
+  if (Number.isNaN(now.getTime())) fail(`--now 无效：${args.now}`);
+  let archive;
+  let product;
+  try {
+    archive = nextTaskArchive(root, now);
+    product = canonicalStructuredSynthesis(raw, packetInfo, root, {
+      taskId: archive.taskId,
+      createdAt: now.toISOString(),
+    });
+  } catch (error) {
+    fail(`synthesis 预检失败：${error.message}`);
+  }
+  let written;
+  try {
+    written = machineContract.writeCanonicalRecord(outputFile, product, SYNTHESIS_SCHEMA, {
+      label: "validated spec synthesis",
+    });
+  } catch (error) {
+    fail(error.message);
+  }
+  console.log(JSON.stringify({
+    kind: "kg.spec_synthesis_validation_result",
+    version: 1,
+    synthesis_id: product.synthesis_id,
+    packet_sha256: product.packet_sha256,
+    product_sha256: written.sha256,
+    path: written.file,
+  }));
+}
+
 function nextTaskArchive(root, now) {
   const day = now.toISOString().slice(0, 10).replaceAll("-", "");
   const specs = host.resolveSafeRelative(root, "docs/specs", { mustExist: false });
-  fs.mkdirSync(specs.full, { recursive: true });
   const pattern = new RegExp(`^TASK-${day}-([0-9]{3})\\.md$`);
   let max = 0;
-  for (const entry of fs.readdirSync(specs.full, { withFileTypes: true })) {
-    if (!entry.isFile()) continue;
-    const match = pattern.exec(entry.name);
-    if (match) max = Math.max(max, Number.parseInt(match[1], 10));
+  if (fs.existsSync(specs.full)) {
+    for (const entry of fs.readdirSync(specs.full, { withFileTypes: true })) {
+      if (!entry.isFile()) continue;
+      const match = pattern.exec(entry.name);
+      if (match) max = Math.max(max, Number.parseInt(match[1], 10));
+    }
   }
   if (max >= 999) throw new Error(`task id space exhausted for ${day}`);
   const taskId = `TASK-${day}-${String(max + 1).padStart(3, "0")}`;
@@ -555,45 +1177,37 @@ function runArchive(args) {
   const root = requireRoot(args.project_root);
   const packetFile = requireFile(args.packet, "--packet");
   const synthesisFile = requireFile(args.synthesis, "--synthesis");
-  const packet = JSON.parse(fs.readFileSync(packetFile, "utf8"));
-  if (
-    packet.kind !== "kg.spec_synthesis_packet" ||
-    packet.version !== 2 ||
-    packet.readonly !== true ||
-    !Array.isArray(packet.intermediate_products)
-  ) {
-    fail("--packet 不是 v2 只读 synthesis packet");
-  }
-  if (host.canonicalPath(packet.project_root) !== root) {
-    fail("--packet 的项目根目录与 --project-root 不一致");
-  }
+  let packetInfo;
   let synthesis;
   try {
+    packetInfo = readStructuredPacket(packetFile, root);
     const content = fs.readFileSync(synthesisFile, "utf8");
-    if (!content.trimStart().startsWith("{")) {
-      throw new Error("archive synthesis must be JSON");
-    }
+    if (!content.trimStart().startsWith("{")) throw new Error("archive synthesis must be JSON");
     const raw = JSON.parse(content);
-    synthesis = canonicalArchiveSynthesis(raw, packet, root);
+    const canonical = machineContract.canonicalizeRecord(raw, SYNTHESIS_SCHEMA, "validated spec synthesis");
+    const expectedBytes = `${JSON.stringify(canonical, null, 2)}\n`;
+    if (content !== expectedBytes) throw new Error("archive synthesis is not a canonical writer product");
+    synthesis = validateStructuredProduct(canonical, packetInfo, root);
   } catch (error) {
     fail(`archive synthesis 校验失败：${error.message}`);
   }
-  const now = args.now ? new Date(args.now) : new Date();
-  if (Number.isNaN(now.getTime())) fail(`--now 无效：${args.now}`);
-  let archive;
-  try {
-    archive = nextTaskArchive(root, now);
-  } catch (error) {
-    fail(error.message);
+  const taskDay = synthesis.created_at.slice(0, 10).replaceAll("-", "");
+  if (!synthesis.task.task_id.startsWith(`TASK-${taskDay}-`)) {
+    fail("validated synthesis task ID date differs from its script-owned timestamp");
   }
+  const archive = {
+    taskId: synthesis.task.task_id,
+    file: host.resolveSafeRelative(root, `docs/specs/${synthesis.task.task_id}.md`, { mustExist: false }).full,
+  };
   const rendered = renderSpec(synthesis, {
     taskId: archive.taskId,
-    createdAt: now.toISOString(),
+    createdAt: synthesis.created_at,
     status: "draft",
   });
   const errors = validateSpecText(rendered, root);
   if (errors.length) fail(`task spec 校验失败：\n  ${errors.join("\n  ")}`);
   try {
+    fs.mkdirSync(path.dirname(archive.file), { recursive: true });
     fs.writeFileSync(archive.file, rendered, { flag: "wx" });
   } catch (error) {
     fail(error.code === "EEXIST" ? `拒绝覆盖已有 archive：${archive.file}` : error.message);
@@ -602,7 +1216,7 @@ function runArchive(args) {
     kind: "kg.spec_archive_result",
     version: 1,
     task_id: archive.taskId,
-    created_at: now.toISOString(),
+    created_at: synthesis.created_at,
     status: "draft",
     path: path.relative(root, archive.file).split(path.sep).join("/"),
   }));
@@ -634,6 +1248,7 @@ export function main(argv = process.argv.slice(2)) {
   const args = parseArgs(argv);
   if (args.mode === "prepare") runPrepare(args);
   else if (args.mode === "finalize") runFinalize(args);
+  else if (args.mode === "validate-synthesis") runValidateSynthesis(args);
   else if (args.mode === "archive") runArchive(args);
   else runCheck(args);
 }

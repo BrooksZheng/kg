@@ -14,6 +14,7 @@ import * as host from "./lib/host.mjs";
 import * as protocol from "./lib/protocol.mjs";
 import { isScriptInvocation } from "./lib/eval-tool-audit.mjs";
 import { loadSavedEvaluationFixture } from "./lib/eval-fixture.mjs";
+import { calculateRubricScore } from "./lib/eval-rubric.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const KICKOFF_SOURCE = path.join(ROOT, "skills", "kg-kickoff");
@@ -356,7 +357,7 @@ function auditToolChain(response, findings, conflicts) {
   ) {
     failures.push("tool chain order must be index, deep, turn recorder");
   }
-  // D48: the recorder-vs-recorder order carries no integrity function — the
+  // D48: the recorder-vs-recorder order carries no integrity function, so the
   // conflict-sources-in-findings relation is checked deterministically on the
   // final products, so only "after deep" is an invariant. Requiring the
   // conflict recorder to precede the turn recorder over-read the contract's
@@ -723,7 +724,32 @@ function evaluate(fixture, response, projectRoot, artifactsRoot) {
     result.runner_schema,
     result.runner_execution,
   ].every((item) => item.pass);
-  result.pass = result.hard_gate_pass;
+  result.score = calculateRubricScore({
+    evaluator: "kickoff",
+    criterionValues: {
+      B1: result.must_find.pass ? 4 : 0,
+      B2: turn !== null ? 4 : 0,
+      B3: result.must_report.pass ? 4 : 0,
+      B4: result.products.pass && result.tool_chain.pass ? 4 : 0,
+      B5:
+        result.forbid_fabrication.pass && result.file_read_policy.pass && result.citations.pass
+          ? 4
+          : 0,
+    },
+    hardAssertions: [
+      result.must_find,
+      result.must_ask,
+      result.must_report,
+      result.forbid_fabrication,
+      result.products,
+      result.tool_chain,
+      result.file_read_policy,
+      result.citations,
+      result.runner_schema,
+      result.runner_execution,
+    ].map((item) => ({ passed: item.pass })),
+  });
+  result.pass = result.hard_gate_pass && result.score.pass;
   return result;
 }
 

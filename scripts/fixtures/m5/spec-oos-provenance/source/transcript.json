@@ -1,0 +1,9 @@
+[
+  {"role":"user","content":"Add retry handling for notification delivery while preserving the accepted queue boundary."},
+  {"role":"user","content":"SMS delivery is explicitly out of scope for this task."},
+  {"role":"user","content":"Direct provider-state writes conflict with the accepted queue boundary."},
+  {"role":"user","content":"Credentials vault changes remain outside the notification worker DMZ."},
+  {"role":"user","content":"Analytics dashboard redesign may be useful, but the user has not rejected it."},
+  {"role":"user","content":"Retry notification delivery through the queue and preserve the original idempotency key."},
+  {"role":"assistant","content":"The kickoff evidence and user boundaries are ready for zero-interview synthesis."}
+]

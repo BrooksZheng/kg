@@ -8,9 +8,9 @@ product_version: 3
 
 section_order: [Context, Requirements, Constraints, References, Out of Scope, Acceptance Criteria, Open Questions, Session History]
 out_of_scope_source_classes:
-  explicit_no: { pointer_type: transcript_message, description: "A human explicitly rejects the item." }
-  conflict: { pointer_type: kickoff_conflict, description: "A validated kickoff conflict creates the boundary." }
-  dmz_decision: { pointer_type: decision_anchor, description: "A stable boundary or DMZ decision excludes the item." }
+  explicit_no: { pointer_type: transcript_message, source_ref_pattern: "^transcript#message=[0-9]+$", description: "A human explicitly rejects the item." }
+  conflict: { pointer_type: kickoff_conflict, source_ref_pattern: "^kg\\.kickoff_conflicts#conflict=KC-[A-F0-9]{12}$", description: "A validated kickoff conflict creates the boundary." }
+  dmz_decision: { pointer_type: decision_anchor, source_ref_pattern: "^(docs/.+\\.md|knowledge/KN-[^/]+\\.md|AGENTS\\.md)#L[1-9][0-9]*$", description: "A stable boundary or DMZ decision excludes the item." }
 
 field_order:
   - kind

@@ -1,0 +1,14 @@
+{
+  "kind": "kg.evaluation_scenario",
+  "version": 1,
+  "fixture_id": "m5-spec-oos-provenance",
+  "evaluator": "spec",
+  "task": "Synthesize the notification retry task from the supplied packet without interviewing the user.",
+  "source_roots": ["source", "project"],
+  "judged_artifact_roots": ["artifacts"],
+  "visible_inputs": ["source/transcript.json", "project/request.txt", "project/docs/decisions/0001-notification-boundary.md"],
+  "turns": [
+    {"sequence": 1, "role": "user", "content": "Use the supplied kickoff transcript and products to write the task spec."}
+  ],
+  "approvals": []
+}
