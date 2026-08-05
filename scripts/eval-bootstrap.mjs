@@ -9,6 +9,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import * as host from "./lib/host.mjs";
 import * as protocol from "./lib/protocol.mjs";
+import { isScriptInvocation, isShellToolName } from "./lib/eval-tool-audit.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const BOOTSTRAP_SOURCE = path.join(ROOT, "skills", "kg-docs");
@@ -494,31 +495,19 @@ export function resolveArtifactProduct(product, artifactRoot, label) {
   return host.resolveProductPath(artifactRoot, product.path, { label: `${label} product` }).declared;
 }
 
-function isShellToolName(name) {
-  const normalized = String(name ?? "")
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_");
-  const shellTokens = new Set(["bash", "sh", "zsh", "fish", "shell", "powershell", "pwsh", "terminal", "cmd", "exec"]);
-  return normalized
-    .split("_")
-    .filter(Boolean)
-    .some((token) => shellTokens.has(token));
-}
-
 function toolChainAudit(response, inventoryFile, planFile) {
   const events = response.tool_events ?? [];
   const inventoryIndex = events.findIndex(
     (event) =>
       event?.ok === true &&
-      event.command.includes("inventory.mjs") &&
+      isScriptInvocation(event, "inventory.mjs") &&
       event.command.includes("--root") &&
       event.command.includes("--output"),
   );
   const bootstrapIndex = events.findIndex(
     (event) =>
       event?.ok === true &&
-      event.command.includes("bootstrap.mjs") &&
+      isScriptInvocation(event, "bootstrap.mjs") &&
       event.command.includes("--project-root") &&
       event.command.includes("--inventory") &&
       event.command.includes("--plan"),

@@ -5,6 +5,7 @@ version: 1
 product_kind: kg.adr_assessment
 product_version: 1
 detection_mode_values: [agent_assisted]
+approval_action_prefix: "draft:"
 
 # KN-0034: this is the only machine criterion table for ADR assessment.
 criteria:

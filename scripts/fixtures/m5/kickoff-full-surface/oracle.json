@@ -1,0 +1,88 @@
+{
+  "kind": "kg.evaluation_oracle",
+  "version": 1,
+  "fixture_id": "m5-kickoff-full-surface",
+  "evaluator": "kickoff",
+  "expectations": [
+    {
+      "expectation_id": "catalog-project-instruction",
+      "level": "hard",
+      "criterion_id": "B5",
+      "assertion": "project_instruction enters the index",
+      "expected": "AGENTS.md",
+      "derivation": "project/AGENTS.md#L1"
+    },
+    {
+      "expectation_id": "catalog-document-map",
+      "level": "hard",
+      "criterion_id": "B5",
+      "assertion": "document_map enters the index",
+      "expected": "docs/README.md",
+      "derivation": "project/docs/README.md#L1"
+    },
+    {
+      "expectation_id": "catalog-taxonomy-api",
+      "level": "hard",
+      "criterion_id": "B5",
+      "assertion": "taxonomy API documents enter the index",
+      "expected": "docs/api/orders.md",
+      "derivation": "project/docs/api/orders.md#L3"
+    },
+    {
+      "expectation_id": "catalog-knowledge",
+      "level": "hard",
+      "criterion_id": "B5",
+      "assertion": "knowledge ledger entries enter the index",
+      "expected": "knowledge/KN-0001-orders-retry.md",
+      "derivation": "project/knowledge/KN-0001-orders-retry.md#L2"
+    },
+    {
+      "expectation_id": "catalog-harness-inventory",
+      "level": "hard",
+      "criterion_id": "B5",
+      "assertion": "harness sidecars enter the index",
+      "expected": "harness/artifacts/HAR-COMPILE-NOTES.yaml",
+      "derivation": "project/harness/artifacts/HAR-COMPILE-NOTES.yaml#L1"
+    },
+    {
+      "expectation_id": "catalog-harness-target-closure",
+      "level": "hard",
+      "criterion_id": "B5",
+      "assertion": "the harness target enters graph closure",
+      "expected": "docs/runbooks/compile-notes.md",
+      "derivation": "project/harness/artifacts/HAR-COMPILE-NOTES.yaml#L3"
+    },
+    {
+      "expectation_id": "catalog-harness-source-closure",
+      "level": "hard",
+      "criterion_id": "B5",
+      "assertion": "the harness source ref enters graph closure",
+      "expected": "docs/accepted-compile-contract.md",
+      "derivation": "project/harness/artifacts/HAR-COMPILE-NOTES.yaml#L7"
+    },
+    {
+      "expectation_id": "tail-survives-budget",
+      "level": "hard",
+      "criterion_id": "B5",
+      "assertion": "tail identity survives metadata budget exhaustion",
+      "expected": "docs/runbooks/zz-tail.md",
+      "derivation": "project/docs/runbooks/zz-tail.md#L13"
+    },
+    {
+      "expectation_id": "required-deep-source",
+      "level": "hard",
+      "criterion_id": "B5",
+      "assertion": "the direct task path is eligible for exact-set deep reading",
+      "expected": ["docs/api/orders.md"],
+      "derivation": "project/request.txt#L1"
+    },
+    {
+      "expectation_id": "mixed-case-kg-excluded",
+      "level": "hard",
+      "criterion_id": "B5",
+      "assertion": "the declared mixed-case isolation path is excluded",
+      "expected": "docs/api/.KG/uncompiled.md",
+      "derivation": "project/docs/README.md#L13"
+    }
+  ]
+}

@@ -1,0 +1,38 @@
+{
+  "kind": "kg.adr_evidence_packet",
+  "version": 1,
+  "candidates": [
+    {
+      "candidate_ref": "CAND-QUEUE-OWNERSHIP",
+      "evidence_refs": [
+        "docs/decision-evidence.md#L4",
+        "docs/decision-evidence.md#L5",
+        "docs/decision-evidence.md#L6"
+      ]
+    },
+    {
+      "candidate_ref": "CAND-REVERSIBLE",
+      "evidence_refs": [
+        "docs/decision-evidence.md#L9",
+        "docs/decision-evidence.md#L10",
+        "docs/decision-evidence.md#L11"
+      ]
+    },
+    {
+      "candidate_ref": "CAND-CODE-CONTEXT",
+      "evidence_refs": [
+        "docs/decision-evidence.md#L14",
+        "docs/decision-evidence.md#L15",
+        "docs/decision-evidence.md#L16"
+      ]
+    },
+    {
+      "candidate_ref": "CAND-NO-TRADEOFF",
+      "evidence_refs": [
+        "docs/decision-evidence.md#L19",
+        "docs/decision-evidence.md#L20",
+        "docs/decision-evidence.md#L21"
+      ]
+    }
+  ]
+}

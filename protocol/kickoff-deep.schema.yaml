@@ -1,0 +1,50 @@
+# kg protocol: exact-set deep-read product bound to one validated scope.
+
+kind: kg.kickoff_deep_schema
+version: 1
+product_kind: kg.kickoff_context
+product_version: 2
+
+field_order:
+  - kind
+  - version
+  - read_at
+  - project_root
+  - index_sha256
+  - scope_sha256
+  - documents
+  - budget
+
+record_field_order:
+  documents: "path|source_id|source_class|sha256|status|authority|content|bytes|original_bytes|truncated"
+  budget: "limit_bytes|consumed_bytes|remaining_bytes|truncated"
+
+script_owned_fields: "kind|version|read_at|project_root|index_sha256|scope_sha256|documents|budget"
+
+fields:
+  kind: { type: enum, required: true, values: "kg.kickoff_context" }
+  version: { type: integer, required: true, values: "2" }
+  read_at: { type: timestamp, required: true }
+  project_root: { type: string, required: true }
+  index_sha256: { type: string, required: true, pattern: "^sha256:[a-f0-9]{64}$" }
+  scope_sha256: { type: string, required: true, pattern: "^sha256:[a-f0-9]{64}$" }
+  documents: { type: map_list, required: true, min_items: 1, unique_by: path }
+  documents[].path: { type: string, required: true }
+  documents[].source_id: { type: string, required: true, pattern: "^SRC-[A-F0-9]{12}$" }
+  documents[].source_class: { type: enum_from, required: true, values_from: "index_schema.source_classes" }
+  documents[].sha256: { type: string, required: true, pattern: "^sha256:[a-f0-9]{64}$" }
+  documents[].status: { type: string, required: true }
+  documents[].authority: { type: string, required: true }
+  documents[].content: { type: string_allow_empty, required: true }
+  documents[].bytes: { type: integer, required: true, min: 0 }
+  documents[].original_bytes: { type: integer, required: true, min: 0 }
+  documents[].truncated: { type: boolean, required: true }
+  budget: { type: map, required: true }
+  budget.limit_bytes: { type: integer, required: true, min: 1 }
+  budget.consumed_bytes: { type: integer, required: true, min: 0 }
+  budget.remaining_bytes: { type: integer, required: true, min: 0 }
+  budget.truncated: { type: boolean, required: true }
+
+# Cross-protocol enum projection. protocol.mjs resolves this before generic
+# validation so the source-class table remains owned by kickoff-index.
+index_schema: kickoff-index.schema.yaml

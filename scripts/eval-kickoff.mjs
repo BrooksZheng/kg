@@ -12,6 +12,7 @@ import * as documentAnchor from "./lib/document-anchor.mjs";
 import * as harness from "./lib/harness.mjs";
 import * as host from "./lib/host.mjs";
 import * as protocol from "./lib/protocol.mjs";
+import { isScriptInvocation } from "./lib/eval-tool-audit.mjs";
 import { loadSavedEvaluationFixture } from "./lib/eval-fixture.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -328,8 +329,8 @@ function occurrenceCount(content, needle) {
   return count;
 }
 
-function commandHas(event, ...needles) {
-  return event?.ok === true && needles.every((needle) => event.command.includes(needle));
+function scriptCommandHas(event, scriptPath, ...needles) {
+  return isScriptInvocation(event, scriptPath) && needles.every((needle) => event.command.includes(needle));
 }
 
 function canonicalProductProjectRoot(value) {
@@ -339,10 +340,10 @@ function canonicalProductProjectRoot(value) {
 function auditToolChain(response, findings, conflicts) {
   const failures = [];
   const events = response.tool_events ?? [];
-  const indexEvent = events.find((event) => commandHas(event, "gather-context.mjs", "--phase", "index"));
-  const deepEvent = events.find((event) => commandHas(event, "gather-context.mjs", "--phase", "deep"));
-  const turnEvent = events.find((event) => commandHas(event, "record-turn.mjs", "--index"));
-  const conflictEvent = events.find((event) => commandHas(event, "record-conflicts.mjs"));
+  const indexEvent = events.find((event) => scriptCommandHas(event, "gather-context.mjs", "--phase", "index"));
+  const deepEvent = events.find((event) => scriptCommandHas(event, "gather-context.mjs", "--phase", "deep"));
+  const turnEvent = events.find((event) => scriptCommandHas(event, "record-turn.mjs", "--index"));
+  const conflictEvent = events.find((event) => scriptCommandHas(event, "record-conflicts.mjs"));
   if (!indexEvent) failures.push("index gather-context.mjs tool event missing");
   if (!deepEvent) failures.push("deep gather-context.mjs tool event missing");
   if (!turnEvent) failures.push("record-turn.mjs --index tool event missing");

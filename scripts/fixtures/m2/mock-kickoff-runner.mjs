@@ -154,6 +154,7 @@ const cases = {
 const selected = cases[caseName];
 
 const indexArgs = [
+  "--compat-v1",
   "--root",
   request.project_root,
   "--task",
@@ -185,6 +186,7 @@ if (process.env.KG_FAKE_READ_DISTRACTOR === "1") {
 }
 
 const deepArgs = [
+  "--compat-v1",
   "--root",
   request.project_root,
   "--phase",

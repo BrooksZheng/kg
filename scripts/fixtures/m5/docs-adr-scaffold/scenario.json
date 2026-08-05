@@ -1,0 +1,24 @@
+{
+  "kind": "kg.evaluation_scenario",
+  "version": 1,
+  "fixture_id": "m5-docs-adr-scaffold",
+  "evaluator": "docs",
+  "task": "Assess four decision candidates and scaffold only the eligible approved decision.",
+  "source_roots": ["host", "evidence"],
+  "judged_artifact_roots": ["artifacts"],
+  "visible_inputs": ["evidence/adr-evidence-packet.json", "evidence/transcript.json", "host/docs/decision-evidence.md"],
+  "turns": [
+    {
+      "sequence": 1,
+      "role": "user",
+      "content": "Draft only the candidate that satisfies all three ADR criteria."
+    }
+  ],
+  "approvals": [
+    {
+      "sequence": 1,
+      "action": "scaffold:decision",
+      "message_index": 0
+    }
+  ]
+}

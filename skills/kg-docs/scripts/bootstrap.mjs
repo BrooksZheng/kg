@@ -7,7 +7,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { host, kyaml, protocol, repository } from "./_lib.mjs";
+import { docsCore, host, kyaml, protocol, repository } from "./_lib.mjs";
 
 const SKILL_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const V1_TARGET = "docs/architecture/overview.md";
@@ -109,77 +109,15 @@ function sourceReference(source) {
 }
 
 function documentSourceRefs(document) {
-  const refs = [];
-  for (const section of document.sections) {
-    for (const finding of section.findings) {
-      for (const source of finding.sources) refs.push(sourceReference(source));
-    }
-  }
-  return [...new Set(refs)];
+  return docsCore.documentSourceRefs(document);
 }
 
 function markdownText(value) {
-  return String(value).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+  return docsCore.markdownText(value);
 }
 
 function loadTaxonomyAndTemplates() {
-  const taxonomy = protocol.loadDocumentTaxonomy();
-  if (taxonomy.kind !== "kg.document_taxonomy" || taxonomy.version !== 1) {
-    throw new Error("document taxonomy kind or version is invalid");
-  }
-  if (!Array.isArray(taxonomy.core_types) || taxonomy.core_types.length === 0) {
-    throw new Error("document taxonomy core_types must be a non-empty list");
-  }
-  if (new Set(taxonomy.core_types).size !== taxonomy.core_types.length) {
-    throw new Error("document taxonomy core_types contains duplicates");
-  }
-  const templates = new Map();
-  for (const docType of taxonomy.core_types) {
-    const record = taxonomy.documents?.[docType];
-    if (!record || typeof record !== "object") throw new Error(`taxonomy document record missing: ${docType}`);
-    for (const field of ["path", "template_path", "create_target_pattern"]) {
-      if (typeof record[field] !== "string" || record[field].trim() === "") {
-        throw new Error(`taxonomy ${docType}.${field} is missing`);
-      }
-    }
-    const prefix = "skills/kg-docs/";
-    if (!record.template_path.startsWith(prefix)) {
-      throw new Error(`taxonomy ${docType}.template_path must stay inside skills/kg-docs`);
-    }
-    const templateRelative = record.template_path.slice(prefix.length);
-    const template = host.resolveSafeRelative(SKILL_ROOT, templateRelative);
-    if (!fs.statSync(template.full).isFile()) throw new Error(`template is not a file: ${record.template_path}`);
-    const text = fs.readFileSync(template.full, "utf8");
-    const titleMatches = [...text.matchAll(/^# \{\{title\}\}$/gm)];
-    if (titleMatches.length !== 1) throw new Error(`template ${record.template_path} must contain one title placeholder`);
-    const sections = [...text.matchAll(/^<!-- kg:section ([a-z][a-z0-9_]*) -->\r?\n## ([^\r\n]+)$/gm)].map(
-      (match) => ({ key: match[1], heading: match[2] }),
-    );
-    const placeholders = [...text.matchAll(/\{\{findings:([a-z][a-z0-9_]*)\}\}/g)].map((match) => match[1]);
-    if (sections.length === 0 || new Set(sections.map((item) => item.key)).size !== sections.length) {
-      throw new Error(`template ${record.template_path} has missing or duplicate section markers`);
-    }
-    if (JSON.stringify(placeholders) !== JSON.stringify(sections.map((item) => item.key))) {
-      throw new Error(`template ${record.template_path} finding placeholders do not match section markers`);
-    }
-    const placeholdersInTarget = [...record.create_target_pattern.matchAll(/\{([^}]+)\}/g)].map((match) => match[1]);
-    if (placeholdersInTarget.some((item) => !["slug", "sequence"].includes(item))) {
-      throw new Error(`taxonomy ${docType}.create_target_pattern has an unknown placeholder`);
-    }
-    if (placeholdersInTarget.filter((item) => item === "slug").length > 1 || placeholdersInTarget.filter((item) => item === "sequence").length > 1) {
-      throw new Error(`taxonomy ${docType}.create_target_pattern repeats a placeholder`);
-    }
-    const sampleTarget = record.create_target_pattern.replace("{slug}", "sample").replace("{sequence}", "0001");
-    if (!sampleTarget.endsWith(".md") || path.isAbsolute(sampleTarget) || sampleTarget.split("/").includes("..")) {
-      throw new Error(`taxonomy ${docType}.create_target_pattern is unsafe`);
-    }
-    const routePrefix = record.path.endsWith("/") ? record.path : `${record.path}/`;
-    if (record.path.endsWith("/") ? !sampleTarget.startsWith(routePrefix) : sampleTarget !== record.path) {
-      throw new Error(`taxonomy ${docType}.create_target_pattern is outside its declared path`);
-    }
-    templates.set(docType, { ...record, sections, targetPlaceholders: placeholdersInTarget });
-  }
-  return { taxonomy, templates };
+  return docsCore.loadTaxonomyAndTemplates(SKILL_ROOT);
 }
 
 function canonicalPlanV1(raw, inventory, inventoryState) {
@@ -395,7 +333,7 @@ function renderV1Document(plan) {
 }
 
 function evidenceMarker(payload) {
-  return `<!-- kg:evidence ${Buffer.from(JSON.stringify(payload), "utf8").toString("base64url")} -->`;
+  return docsCore.evidenceMarker(payload);
 }
 
 function humanFinding(finding) {
@@ -413,48 +351,7 @@ function humanFinding(finding) {
 }
 
 function renderV2Document(plan, document, template, targetPath) {
-  const frontmatter = {
-    kind: "kg.project_document",
-    title: document.title,
-    doc_type: document.doc_type,
-    status: "draft",
-    owners: [],
-    supersedes: null,
-    source_refs: documentSourceRefs(document),
-    coverage_limitations: document.coverage_limitations,
-  };
-  const errors = protocol.validateRecord(frontmatter, protocol.loadProjectDocumentSchema());
-  if (errors.length) throw new Error(`rendered ${document.doc_type} frontmatter is invalid: ${errors.join("; ")}`);
-  const documentMarker = evidenceMarker({
-    kind: "kg.bootstrap_document",
-    version: 2,
-    inventory_sha256: plan.inventory_sha256,
-    doc_type: document.doc_type,
-    target_path: targetPath,
-    coverage_limitations: document.coverage_limitations,
-  });
-  const lines = [
-    "---",
-    kyaml.stringify(frontmatter).trimEnd(),
-    "---",
-    "",
-    `# ${markdownText(document.title)}`,
-    "",
-    documentMarker,
-    "",
-  ];
-  if (document.coverage_limitations.length) {
-    lines.push("## Coverage Limitations", "", ...document.coverage_limitations.map((item) => `- ${markdownText(item)}`), "");
-  }
-  for (const sectionTemplate of template.sections) {
-    const section = document.sections.find((item) => item.key === sectionTemplate.key);
-    lines.push(`<!-- kg:section ${sectionTemplate.key} -->`, `## ${sectionTemplate.heading}`, "");
-    for (const finding of section.findings) {
-      lines.push(evidenceMarker({ section: section.key, ...finding }), humanFinding(finding));
-    }
-    lines.push("");
-  }
-  return `${lines.join("\n").trimEnd()}\n`;
+  return docsCore.renderBootstrapDocument(plan, document, template, targetPath);
 }
 
 function escapeRegex(value) {
@@ -504,29 +401,15 @@ function deriveV2Targets(projectRoot, plan, taxonomyState, check) {
   const routes = [];
   for (const document of plan.documents) {
     const template = taxonomyState.templates.get(document.doc_type);
-    let targetPath;
-    if (document.mode === "proposal") {
-      validateProposalTarget(document, template);
-      targetPath = document.target_path;
-    } else if (template.targetPlaceholders.includes("sequence")) {
-      const existing = existingSequenceFiles(projectRoot, template);
-      const exact = existing.filter((item) => sequencePattern(template, document.slug).test(item.name));
-      if (check) {
-        if (exact.length !== 1) throw new Error(`check requires exactly one existing ${document.doc_type} target for slug ${document.slug}`);
-        targetPath = path.posix.join(path.posix.dirname(template.create_target_pattern), exact[0].name);
-      } else {
-        if (exact.length > 0) throw new Error(`${document.doc_type} target for slug already exists: ${document.slug}`);
-        const next = (existing.at(-1)?.sequence ?? 0) + 1;
-        if (next > 9999) throw new Error(`${document.doc_type} sequence is exhausted`);
-        targetPath = template.create_target_pattern
-          .replace("{sequence}", String(next).padStart(4, "0"))
-          .replace("{slug}", document.slug);
-      }
-    } else {
-      targetPath = template.create_target_pattern.replace("{slug}", document.slug ?? "");
-    }
-    const resolved = host.resolveSafeRelative(projectRoot, targetPath, { mustExist: check });
-    routes.push({ document, template, targetPath, target: resolved.full });
+    const derived = docsCore.deriveTarget({
+      projectRoot,
+      template,
+      slug: document.slug,
+      requestedMode: document.mode,
+      requestedTargetPath: document.target_path,
+      check,
+    });
+    routes.push({ document, template, targetPath: derived.targetPath, target: derived.target });
   }
   if (new Set(routes.map((route) => host.canonicalPath(route.target))).size !== routes.length) {
     throw new Error("taxonomy routes produce duplicate canonical targets");
@@ -535,17 +418,7 @@ function deriveV2Targets(projectRoot, plan, taxonomyState, check) {
 }
 
 function preflightPathSegments(projectRoot, relative, label) {
-  const segments = relative.split("/");
-  let current = projectRoot;
-  for (let index = 0; index < segments.length; index += 1) {
-    current = path.join(current, segments[index]);
-    if (!fs.existsSync(current)) break;
-    const stat = fs.lstatSync(current);
-    if (stat.isSymbolicLink()) throw new Error(`${label} path contains a symbolic link: ${relative}`);
-    if (index < segments.length - 1 && !stat.isDirectory()) {
-      throw new Error(`${label} parent is not a directory: ${relative}`);
-    }
-  }
+  docsCore.preflightPathSegments(projectRoot, relative, label);
 }
 
 function preflightTarget(projectRoot, route, inventoryState, check) {
@@ -577,116 +450,35 @@ function sha256(buffer) {
 
 function buildProposal(projectRoot, plan, route) {
   const targetBuffer = fs.readFileSync(route.target);
-  const candidateBuffer = Buffer.from(route.expected, "utf8");
   const targetSha256 = sha256(targetBuffer);
   if (targetSha256 !== route.targetSha256) {
     throw new Error(`proposal target changed while preparing candidate: ${route.targetPath}`);
   }
-  const candidateSha256 = sha256(candidateBuffer);
-  const contentId = repository.canonicalDigest({
-    target_path: route.targetPath,
-    target_sha256: targetSha256,
-    candidate_sha256: candidateSha256,
-    inventory_sha256: plan.inventory_sha256,
-  });
-  const proposalId = `bootstrap-${contentId}`;
-  const bundlePath = `docs/proposals/${proposalId}`;
-  const candidatePath = `${bundlePath}/candidate.md`;
-  const manifestPath = `${bundlePath}/manifest.json`;
-  const manifest = {
+  return docsCore.prepareProposal({
+    projectRoot,
+    prefix: "bootstrap",
     kind: "kg.docs_bootstrap_proposal",
-    version: 1,
-    proposal_id: proposalId,
-    doc_type: route.document.doc_type,
-    target_path: route.targetPath,
-    target_sha256: targetSha256,
-    candidate_path: candidatePath,
-    candidate_sha256: candidateSha256,
-    inventory_sha256: plan.inventory_sha256,
-    source_refs: documentSourceRefs(route.document),
-    status: "proposed",
-  };
-  return {
-    contentId,
-    proposalId,
-    bundlePath,
-    bundle: host.resolveSafeRelative(projectRoot, bundlePath, { mustExist: false }).full,
-    candidatePath,
-    candidate: host.resolveSafeRelative(projectRoot, candidatePath, { mustExist: false }).full,
+    route: { ...route, docType: route.document.doc_type },
     candidateText: route.expected,
-    manifestPath,
-    manifest: host.resolveSafeRelative(projectRoot, manifestPath, { mustExist: false }).full,
-    manifestText: `${JSON.stringify(manifest, null, 2)}\n`,
-    value: manifest,
-    reused: false,
-  };
+    identity: { inventory_sha256: plan.inventory_sha256 },
+    sourceRefs: documentSourceRefs(route.document),
+  });
 }
 
 function preflightProposal(projectRoot, proposal) {
-  preflightPathSegments(projectRoot, proposal.candidatePath, "proposal candidate");
-  preflightPathSegments(projectRoot, proposal.manifestPath, "proposal manifest");
-  if (!fs.existsSync(proposal.bundle)) return;
-  const bundleStat = fs.lstatSync(proposal.bundle);
-  if (bundleStat.isSymbolicLink() || !bundleStat.isDirectory()) {
-    throw new Error(`proposal bundle path is unsafe: ${proposal.bundlePath}`);
-  }
-  for (const [label, file, expected] of [
-    ["candidate", proposal.candidate, proposal.candidateText],
-    ["manifest", proposal.manifest, proposal.manifestText],
-  ]) {
-    if (!fs.existsSync(file) || fs.lstatSync(file).isSymbolicLink() || !fs.statSync(file).isFile()) {
-      throw new Error(`existing proposal ${label} is missing or unsafe: ${proposal.bundlePath}`);
-    }
-    if (fs.readFileSync(file, "utf8") !== expected) {
-      throw new Error(`existing proposal ${label} does not match content address: ${proposal.bundlePath}`);
-    }
-  }
-  proposal.reused = true;
+  docsCore.preflightProposal(projectRoot, proposal);
 }
 
 function ensureDirectory(directory, projectRoot, createdDirectories) {
-  if (fs.existsSync(directory)) {
-    if (!fs.statSync(directory).isDirectory() || fs.lstatSync(directory).isSymbolicLink()) {
-      throw new Error(`target parent is unsafe: ${path.relative(projectRoot, directory)}`);
-    }
-    return;
-  }
-  ensureDirectory(path.dirname(directory), projectRoot, createdDirectories);
-  try {
-    fs.mkdirSync(directory);
-    createdDirectories.push(directory);
-  } catch (error) {
-    if (error.code !== "EEXIST") throw error;
-    if (!fs.statSync(directory).isDirectory() || fs.lstatSync(directory).isSymbolicLink()) throw error;
-  }
+  docsCore.ensureDirectory(directory, projectRoot, createdDirectories);
 }
 
 function writeExclusive(file, content, createdFiles) {
-  const descriptor = fs.openSync(file, "wx");
-  createdFiles.push(file);
-  try {
-    fs.writeFileSync(descriptor, content, "utf8");
-    fs.fsyncSync(descriptor);
-  } finally {
-    fs.closeSync(descriptor);
-  }
+  docsCore.writeExclusive(file, content, createdFiles);
 }
 
 function rollbackWrites(createdFiles, createdDirectories) {
-  for (const file of [...createdFiles].reverse()) {
-    try {
-      fs.rmSync(file, { force: true });
-    } catch {
-      // Preserve the original error. A later full check will expose residue.
-    }
-  }
-  for (const directory of [...createdDirectories].reverse()) {
-    try {
-      fs.rmdirSync(directory);
-    } catch {
-      // Concurrently used directories remain intact.
-    }
-  }
+  docsCore.rollbackWrites(createdFiles, createdDirectories);
 }
 
 const args = parseArgs(process.argv.slice(2));

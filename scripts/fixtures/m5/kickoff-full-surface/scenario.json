@@ -1,0 +1,23 @@
+{
+  "kind": "kg.evaluation_scenario",
+  "version": 1,
+  "fixture_id": "m5-kickoff-full-surface",
+  "evaluator": "kickoff",
+  "task": "Ground the orders API task across the complete formal source catalog.",
+  "source_roots": ["project"],
+  "judged_artifact_roots": ["artifacts"],
+  "visible_inputs": ["project/request.txt", "project/AGENTS.md", "project/docs/README.md"],
+  "turns": [
+    {
+      "sequence": 1,
+      "role": "user",
+      "content": "Use docs/api/orders.md to clarify the orders API retry policy."
+    },
+    {
+      "sequence": 2,
+      "role": "user",
+      "content": "Yes, the on-call domain is relevant to this task."
+    }
+  ],
+  "approvals": []
+}

@@ -37,12 +37,26 @@ export const loadAuthority = () => loadProtocolFile("authority.yaml");
 export const loadRouting = () => loadProtocolFile("routing.yaml");
 export const loadKickoffIndexSchema = () => loadProtocolFile("kickoff-index.schema.yaml");
 export const loadKickoffScopeSchema = () => loadProtocolFile("kickoff-scope.schema.yaml");
+export const loadKickoffDeepSchema = () => hydrateProtocolReferences(loadProtocolFile("kickoff-deep.schema.yaml"));
 export const loadKickoffSessionSchema = () => loadProtocolFile("kickoff-session.schema.yaml");
 export const loadKickoffTurnSchema = () => loadProtocolFile("kickoff-turn.schema.yaml");
 export const loadKickoffConflictSchema = () => loadProtocolFile("kickoff-conflict.schema.yaml");
 export const loadSpecSynthesisSchema = () => loadProtocolFile("spec-synthesis.schema.yaml");
 export const loadAdrAssessmentSchema = () => loadProtocolFile("adr-assessment.schema.yaml");
+export const loadAdrEvidencePacketSchema = () => loadProtocolFile("adr-evidence-packet.schema.yaml");
+export const loadDocsScaffoldRequestSchema = () => hydrateProtocolReferences(loadProtocolFile("docs-scaffold-request.schema.yaml"));
+export const loadDocsScaffoldResultSchema = () => loadProtocolFile("docs-scaffold-result.schema.yaml");
 export const loadScanAgentReportSchema = () => loadProtocolFile("scan-agent-report.schema.yaml");
+
+function hydrateProtocolReferences(schema) {
+  const hydrated = { ...schema };
+  for (const [key, value] of Object.entries(schema)) {
+    if (typeof value === "string" && value.endsWith(".yaml")) {
+      hydrated[key] = loadProtocolFile(value);
+    }
+  }
+  return hydrated;
+}
 
 // --- generic record validation against a schema's `fields` specs -----------
 // Spec paths: `field` (top level), `field.sub` (one-level nested map),
@@ -88,6 +102,10 @@ function checkMap(obj, specs, prefix, errors, ctx) {
 
 function checkValue(value, spec, fieldKey, label, errors, ctx) {
   switch (spec.type) {
+    case "string_allow_empty": {
+      if (typeof value !== "string") errors.push(`${label}: must be a string`);
+      return;
+    }
     case "string":
     case "string_or_null": {
       if (value === null) {
@@ -557,7 +575,15 @@ if (isMain()) {
       }
     }
     for (const [field, spec] of Object.entries(schema.fields)) {
-      if (spec.type === "enum_from" && resolveSchemaValue(schema, spec.values_from) === undefined) {
+      let enumSource = resolveSchemaValue(schema, spec.values_from);
+      if (enumSource === undefined) {
+        const first = String(spec.values_from ?? "").split(".")[0];
+        const protocolRef = schema[first];
+        if (typeof protocolRef === "string" && docs[protocolRef]) {
+          enumSource = resolveSchemaValue({ ...schema, [first]: docs[protocolRef] }, spec.values_from);
+        }
+      }
+      if (spec.type === "enum_from" && enumSource === undefined) {
         problems.push(`${file}: ${field}.values_from does not resolve: ${spec.values_from}`);
       }
     }

@@ -8,6 +8,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import * as host from "./lib/host.mjs";
 import { auditR42 } from "./lib/eval-r42.mjs";
+import { isScriptInvocation, isShellToolName } from "./lib/eval-tool-audit.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const COMPILE_SOURCE = path.join(ROOT, "skills", "kg-compile");
@@ -113,18 +114,6 @@ function validateRunnerResponse(response) {
   return errors;
 }
 
-function isShellToolName(name) {
-  const normalized = String(name ?? "")
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_");
-  const shellTokens = new Set(["bash", "sh", "zsh", "fish", "shell", "powershell", "pwsh", "terminal", "cmd", "exec"]);
-  return normalized
-    .split("_")
-    .filter(Boolean)
-    .some((token) => shellTokens.has(token));
-}
-
 function requireProduct(response, kind) {
   const matches = (response.products ?? []).filter((product) => product?.kind === kind);
   if (matches.length !== 1) throw new Error(`runner must return exactly one ${kind} product`);
@@ -155,7 +144,7 @@ function auditToolChain(response, context, planFile) {
   const failures = [];
   const events = response.tool_events ?? [];
   const compile = events.find(
-    (event) => event.ok && event.command.includes("compile.mjs") && event.command.includes("--output"),
+    (event) => isScriptInvocation(event, "compile.mjs") && event.command.includes("--output"),
   );
   const plan = events.find(
     (event) => event.ok && !isShellToolName(event.name) && event.command.includes(path.basename(planFile)),
@@ -163,7 +152,7 @@ function auditToolChain(response, context, planFile) {
   const apply = events.find(
     (event) =>
       event.ok &&
-      event.command.includes("apply-compile-plan.mjs") &&
+      isScriptInvocation(event, "apply-compile-plan.mjs") &&
       event.command.includes("--context") &&
       event.command.includes("--plan"),
   );

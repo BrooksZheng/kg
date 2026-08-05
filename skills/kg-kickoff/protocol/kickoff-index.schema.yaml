@@ -11,37 +11,56 @@ source_classes:
   project_instruction:
     discovery: root_agents_md
     route_source: fixed_root
+    include_patterns: AGENTS.md
     index_fields: "path|sha256|title|line_count"
     deep_qualification: task_or_human_scope
   document_map:
     discovery: docs_readme_links
     route_source: document_links
+    include_patterns: docs/README.md
     index_fields: "path|sha256|title|line_count|graph_edges|registration_hint"
     deep_qualification: graph_scope_match
   taxonomy_document:
     discovery: taxonomy_routes
     route_source: document-taxonomy.yaml
+    include_patterns: protocol:document-taxonomy.yaml
     index_fields: "path|sha256|title|doc_type|status|authority|frontmatter_summary"
     deep_qualification: route_domain_or_scope_match
   knowledge_ledger:
     discovery: active_knowledge_glob
     route_source: knowledge.schema.yaml
+    include_patterns: knowledge/KN-*.md
     index_fields: "path|sha256|knowledge_id|claim|scope|lifecycle|authority|carrier_refs"
     deep_qualification: active_scope_or_explicit_trace
   harness_inventory:
     discovery: harness_sidecars
     route_source: harness.schema.yaml
+    include_patterns: harness/**/*.yaml|harness/**/*.yml
     index_fields: "path|sha256|artifact_id|type|target_path|ownership|status|source_kn_ids|source_refs|parse_issues"
     deep_qualification: selected_graph_connection
   harness_document_closure:
     discovery: harness_target_and_source_refs
     route_source: harness.schema.yaml
+    include_patterns: protocol:harness.schema.yaml
     index_fields: "path|sha256|edge_type|anchor"
     deep_qualification: graph_closure_match
 
 catalog_status_values: [complete, metadata_truncated]
 exclusion_reason_values: [binary, dependency, generated, kg_isolation, outside_root, oversized, sensitive, symlink]
 edge_type_values: [document_link, harness_source, harness_target, knowledge_carrier]
+
+# Discovery safety and metadata budgets are policy tables. Runtime code reads
+# them here so the source catalog has no second directory or threshold list.
+discovery_policy:
+  metadata_header_bytes: 65536
+  maximum_source_bytes: 1048576
+  dependency_directories: "node_modules|vendor|third_party"
+  generated_directories: "build|dist|generated|coverage"
+  sensitive_segments: ".git|.ssh|secrets|credentials|private"
+  sensitive_file_names: ".env|.npmrc|.pypirc|credentials.json"
+  sensitive_extensions: ".pem|.key|.p12|.pfx|.sqlite|.db"
+  markdown_extensions: ".md"
+  sidecar_extensions: ".yaml|.yml"
 
 field_order:
   - kind
@@ -60,7 +79,7 @@ field_order:
 
 record_field_order:
   source_counts: "source_class|total|included|excluded"
-  entries: "source_id|source_class|path|sha256|title|line_count|doc_type|status|authority|domain_keys|summary|metadata_truncated"
+  entries: "source_id|source_class|path|sha256|title|line_count|doc_type|status|authority|domain_keys|summary|metadata|metadata_truncated"
   edges: "from_source_id|to_source_id|edge_type|anchor"
   exclusions: "source_class|path|reason|count"
 
@@ -90,6 +109,7 @@ fields:
   entries[].authority: { type: string, required: true }
   entries[].domain_keys: { type: string_list, required: true }
   entries[].summary: { type: string_or_null, required: true }
+  entries[].metadata: { type: json, required: true }
   entries[].metadata_truncated: { type: boolean, required: true }
   edges: { type: map_list, required: true }
   edges[].from_source_id: { type: string, required: true, pattern: "^SRC-[A-F0-9]{12}$" }

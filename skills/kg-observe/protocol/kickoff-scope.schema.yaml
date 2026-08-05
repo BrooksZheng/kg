@@ -14,6 +14,12 @@ scope_reasons:
   harness_graph_edge: { basis_type: graph_edge, description: "A harness, knowledge, or carrier edge connects the source to confirmed scope." }
   human_confirmed_domain: { basis_type: transcript_pointer, description: "A human reply confirms the indexed domain." }
 
+basis_ref_patterns:
+  transcript_literal: "^message:[0-9]+:(path|domain):.+$"
+  scope_intersection: "^scope:SRC-[A-F0-9]{12}:.+$"
+  graph_edge: "^edge:SRC-[A-F0-9]{12}:SRC-[A-F0-9]{12}:[a-z_]+$"
+  transcript_pointer: "^message:[0-9]+:domain:.+$"
+
 field_order:
   - kind
   - version

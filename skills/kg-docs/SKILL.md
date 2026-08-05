@@ -9,6 +9,91 @@ Create project documents from validated evidence. This skill is a supporting
 mechanism for kickoff and ordinary work sessions. It does not replace human
 review or project-document lifecycle decisions.
 
+## Lazy single-target scaffold
+
+Use scaffold when one conversation has crystallized one project document.
+Routes come from `protocol/document-taxonomy.yaml`. Section keys and ADR
+semantic roles come from the selected template markers. One invocation handles
+one explicit document type and writes no other taxonomy target.
+
+Every scaffold requires a transcript envelope with a structured approval:
+
+```json
+{
+  "transcript": [
+    {"role": "user", "content": "Approve one API draft."}
+  ],
+  "approvals": [
+    {"message_index": 0, "action": "scaffold:api"}
+  ]
+}
+```
+
+Submit strict JSON containing the requested type, a taxonomy-safe slug when
+the route requires one, actual section content, stable source refs, and the
+approval pointer. Keep `candidate_ref` and `adr_assessment` null for every
+type except decision.
+
+```json
+{
+  "doc_type": "api",
+  "slug": "orders",
+  "title": "Orders API",
+  "candidate_ref": null,
+  "source_refs": ["docs/architecture/overview.md#L12"],
+  "sections": [
+    {
+      "key": "surface",
+      "content": ["POST /orders retries with the original idempotency key."]
+    }
+  ],
+  "adr_assessment": null,
+  "human_approval_message_index": 0
+}
+```
+
+A real request contains every section marker from the selected template.
+Run:
+
+```bash
+node <skill>/scripts/scaffold.mjs \
+  --project-root <project-root> \
+  --input <artifacts>/scaffold-input.json \
+  --transcript <artifacts>/transcript.json \
+  --output <artifacts>/scaffold-result.json
+```
+
+Missing targets become registered `draft` documents. Existing targets retain
+their original bytes and produce a content-addressed
+`docs/proposals/scaffold-<content-id>/` bundle. The result product records the
+target, mode, candidate hash, approval pointer, and assessment ref.
+
+### Decision assessment
+
+Read `references/adr-criteria.md`. The evidence packet is strict JSON with one
+record per candidate and the source refs available to assess it. Submit all
+three criterion IDs from `protocol/adr-assessment.schema.yaml`, each with a
+boolean conclusion, confidence from 0 through 1, and at least one packet ref.
+
+```bash
+node <skill>/scripts/assess-adr.mjs \
+  --evidence-packet <artifacts>/adr-evidence-packet.json \
+  --transcript <artifacts>/transcript.json \
+  --input <artifacts>/adr-assessment-input.json \
+  --output <artifacts>/adr-assessment.json
+```
+
+The transcript approval action is `draft:<candidate_ref>`. The writer computes
+`eligible_for_draft` from all three conclusions plus that structured approval.
+An ineligible assessment may be recorded, and scaffold will reject it before
+any target write.
+
+Decision section content follows template roles. The alternatives role uses at
+least two objects with exact `option` and `tradeoff` fields. The consequences
+role uses at least one non-empty string. Other decision sections use non-empty
+string lists. The request includes the matching `candidate_ref`, assessment
+path, and `scaffold:decision` approval.
+
 ## Brownfield bootstrap
 
 Bootstrap creates one draft for every core document type declared by
@@ -140,3 +225,5 @@ New brownfield sessions use version 2.
   lifecycle transition.
 - Never bypass `bootstrap.mjs` by writing project-document Markdown directly.
 - Never use `create` for an existing target or hand-write a proposal bundle.
+- Never scaffold more than the one explicitly requested taxonomy type.
+- Never scaffold a decision from missing, ineligible, or candidate-mismatched ADR assessment.

@@ -1,0 +1,37 @@
+# kg protocol: canonical receipt for a lazy scaffold action.
+
+kind: kg.docs_scaffold_result_schema
+version: 1
+product_kind: kg.docs_scaffold_result
+product_version: 1
+mode_values: [created, proposal]
+
+field_order:
+  - kind
+  - version
+  - scaffold_id
+  - created_at
+  - doc_type
+  - target_path
+  - mode
+  - document_sha256
+  - proposal_path
+  - assessment_ref
+  - approval_message_index
+  - status
+
+script_owned_fields: "kind|version|scaffold_id|created_at|doc_type|target_path|mode|document_sha256|proposal_path|assessment_ref|approval_message_index|status"
+
+fields:
+  kind: { type: enum, required: true, values: "kg.docs_scaffold_result" }
+  version: { type: integer, required: true, values: "1" }
+  scaffold_id: { type: string, required: true, pattern: "^SCAFFOLD-[A-F0-9]{12}$" }
+  created_at: { type: timestamp, required: true }
+  doc_type: { type: string, required: true }
+  target_path: { type: string, required: true }
+  mode: { type: enum_from, required: true, values_from: mode_values }
+  document_sha256: { type: string, required: true, pattern: "^sha256:[a-f0-9]{64}$" }
+  proposal_path: { type: string_or_null, required: true }
+  assessment_ref: { type: string_or_null, required: true }
+  approval_message_index: { type: integer, required: true, min: 0 }
+  status: { type: enum, required: true, values: "draft" }

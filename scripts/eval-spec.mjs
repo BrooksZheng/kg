@@ -11,6 +11,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { parse } from "./lib/kyaml.mjs";
 import * as documentAnchor from "./lib/document-anchor.mjs";
+import { isScriptInvocation, isUserInteractionToolName, normalizedToolName } from "./lib/eval-tool-audit.mjs";
 import * as host from "./lib/host.mjs";
 import * as protocol from "./lib/protocol.mjs";
 import { loadSavedEvaluationFixture } from "./lib/eval-fixture.mjs";
@@ -305,17 +306,17 @@ function parseTurn(file, projectRoot) {
   return turn;
 }
 
-function commandHas(event, ...needles) {
-  return event?.ok === true && needles.every((needle) => event.command.includes(needle));
+function scriptCommandHas(event, scriptPath, ...needles) {
+  return isScriptInvocation(event, scriptPath) && needles.every((needle) => event.command.includes(needle));
 }
 
 function auditKickoffToolChain(response, turn, hasConflicts) {
   const failures = [];
   const events = response.tool_events ?? [];
-  const indexEvent = events.find((event) => commandHas(event, "gather-context.mjs", "--phase", "index"));
-  const deepEvent = events.find((event) => commandHas(event, "gather-context.mjs", "--phase", "deep"));
-  const turnEvent = events.find((event) => commandHas(event, "record-turn.mjs", "--index"));
-  const conflictEvent = events.find((event) => commandHas(event, "record-conflicts.mjs"));
+  const indexEvent = events.find((event) => scriptCommandHas(event, "gather-context.mjs", "--phase", "index"));
+  const deepEvent = events.find((event) => scriptCommandHas(event, "gather-context.mjs", "--phase", "deep"));
+  const turnEvent = events.find((event) => scriptCommandHas(event, "record-turn.mjs", "--index"));
+  const conflictEvent = events.find((event) => scriptCommandHas(event, "record-conflicts.mjs"));
   if (!indexEvent) failures.push("index gather-context.mjs tool event missing");
   if (!deepEvent) failures.push("deep gather-context.mjs tool event missing");
   if (!turnEvent) failures.push("record-turn.mjs --index tool event missing");
@@ -494,19 +495,6 @@ function questionAudit(response) {
     }
   }
   return failures;
-}
-
-function normalizedToolName(name) {
-  return String(name)
-    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
-    .replace(/[^A-Za-z0-9]+/g, " ")
-    .trim()
-    .toLowerCase();
-}
-
-function isUserInteractionToolName(name) {
-  const normalized = normalizedToolName(name);
-  return /\b(?:ask|question)\b/.test(normalized) || /\brequest user input\b/.test(normalized);
 }
 
 function citationAudit(response, projectRoot, expectedSources) {

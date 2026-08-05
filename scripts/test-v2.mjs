@@ -17,6 +17,7 @@ import * as host from "./lib/host.mjs";
 import * as machineContract from "./lib/machine-contract.mjs";
 import { loadSplitEvaluationFixture, scoreableOracle } from "./lib/eval-fixture.mjs";
 import { calculateRubricScore } from "./lib/eval-rubric.mjs";
+import { countScriptInvocations, isUserInteractionToolName } from "./lib/eval-tool-audit.mjs";
 import {
   relativeProductPath as normalizeRunnerProjectProduct,
   resolveArtifactProduct as normalizeRunnerArtifactProduct,
@@ -40,6 +41,8 @@ const PARTS = [
 
 const DOCS_INVENTORY = path.join(ROOT, "skills", "kg-docs", "scripts", "inventory.mjs");
 const DOCS_BOOTSTRAP = path.join(ROOT, "skills", "kg-docs", "scripts", "bootstrap.mjs");
+const DOCS_SCAFFOLD = path.join(ROOT, "skills", "kg-docs", "scripts", "scaffold.mjs");
+const ADR_ASSESS = path.join(ROOT, "skills", "kg-docs", "scripts", "assess-adr.mjs");
 const OBSERVE_ADD = path.join(ROOT, "skills", "kg-observe", "scripts", "add-observation.mjs");
 const OBSERVE_VALIDATE = path.join(ROOT, "skills", "kg-observe", "scripts", "validate-observations.mjs");
 const OBSERVE_THRESHOLD = path.join(ROOT, "skills", "kg-observe", "scripts", "check-threshold.mjs");
@@ -55,9 +58,13 @@ const COMPILE_APPLY = path.join(ROOT, "skills", "kg-compile", "scripts", "apply-
 const RESOLVE_QUEUE = path.join(ROOT, "skills", "kg-compile", "scripts", "resolve-queue-item.mjs");
 const EVAL_COMPILE = path.join(ROOT, "scripts", "eval-compile.mjs");
 const EVAL_KICKOFF = path.join(ROOT, "scripts", "eval-kickoff.mjs");
+const EVAL_DOCS = path.join(ROOT, "scripts", "eval-docs.mjs");
 const EVAL_SPEC = path.join(ROOT, "scripts", "eval-spec.mjs");
 const GATHER_KICKOFF_CONTEXT = path.join(ROOT, "skills", "kg-kickoff", "scripts", "gather-context.mjs");
 const RECORD_KICKOFF_TURN = path.join(ROOT, "skills", "kg-kickoff", "scripts", "record-turn.mjs");
+const WRITE_KICKOFF_SCOPE = path.join(ROOT, "skills", "kg-kickoff", "scripts", "write-scope.mjs");
+const RECORD_KICKOFF_SESSION = path.join(ROOT, "skills", "kg-kickoff", "scripts", "record-session.mjs");
+const RECORD_KICKOFF_CONFLICTS = path.join(ROOT, "skills", "kg-kickoff", "scripts", "record-conflicts.mjs");
 const SPEC_PRODUCE = path.join(ROOT, "skills", "kg-spec", "scripts", "produce-spec.mjs");
 const STALENESS_CHECK = path.join(ROOT, "skills", "kg-scan", "scripts", "check-staleness.mjs");
 const HEALTH_CHECK = path.join(ROOT, "skills", "kg-scan", "scripts", "health-check.mjs");
@@ -77,6 +84,8 @@ const MIGRATION_RECOVERY_FIXTURE = path.join(ROOT, "scripts", "fixtures", "m2", 
 const MIGRATION_CHECKPOINT_DRIVER = path.join(ROOT, "scripts", "kill-migration-at-checkpoint.mjs");
 const COMPILE_FIXTURE = path.join(ROOT, "scripts", "fixtures", "m2", "compile-fixture");
 const R42_SCAN_FIXTURE = path.join(ROOT, "scripts", "fixtures", "m4", "compile-update-ownership", "host");
+const M5_KICKOFF_FIXTURE = path.join(ROOT, "scripts", "fixtures", "m5", "kickoff-full-surface");
+const M5_DOCS_FIXTURE = path.join(ROOT, "scripts", "fixtures", "m5", "docs-adr-scaffold");
 const KICKOFF_FIXTURES = [
   path.join(ROOT, "scripts", "fixtures", "m1", "kickoff.fixture.yaml"),
   path.join(ROOT, "scripts", "fixtures", "m1", "kickoff-no-conflict.fixture.yaml"),
@@ -1506,8 +1515,12 @@ function bootstrapTaxonomyContract() {
     const sections = [...text.matchAll(/^<!-- kg:section ([a-z][a-z0-9_]*) -->\r?\n## ([^\r\n]+)$/gm)].map(
       (match) => ({ key: match[1], heading: match[2] }),
     );
+    const adrRoles = new Map(
+      [...text.matchAll(/^<!-- kg:adr-role ([a-z][a-z0-9_]*) -->\r?\n<!-- kg:section ([a-z][a-z0-9_]*) -->$/gm)]
+        .map((match) => [match[1], match[2]]),
+    );
     ensureTemplateContract(record, templateFile, sections);
-    templates.set(docType, { ...record, sections });
+    templates.set(docType, { ...record, sections, adrRoles });
   }
   return { taxonomy, templates };
 }
@@ -1753,7 +1766,159 @@ function assertRunnerAdapterConformance(context, artifacts, label) {
   ensure(context, projectLinkRejected, `${label} project product symlink was accepted`);
 }
 
+function setupM5DocsCase(context, name) {
+  const caseRoot = path.join(context.root, name);
+  const project = path.join(caseRoot, "project");
+  const artifacts = path.join(caseRoot, "artifacts");
+  fs.cpSync(path.join(M5_DOCS_FIXTURE, "host"), project, { recursive: true });
+  fs.mkdirSync(artifacts, { recursive: true });
+  return {
+    caseRoot,
+    project,
+    artifacts,
+    packet: path.join(M5_DOCS_FIXTURE, "evidence", "adr-evidence-packet.json"),
+  };
+}
+
+function writeM5DocsTranscript(file, docType, candidateRef = null) {
+  const content = candidateRef
+    ? `Approve ${candidateRef} for one ${docType} draft.`
+    : `Approve one ${docType} draft.`;
+  const approvals = [{ message_index: 0, action: `scaffold:${docType}` }];
+  if (candidateRef) approvals.unshift({ message_index: 0, action: `draft:${candidateRef}` });
+  writeJson(file, { transcript: [{ role: "user", content }], approvals });
+}
+
+function adrCriterionDraft(candidateRef, falseCriterion = null) {
+  const lineSets = {
+    "CAND-QUEUE-OWNERSHIP": [4, 5, 6],
+    "CAND-REVERSIBLE": [9, 10, 11],
+    "CAND-CODE-CONTEXT": [14, 15, 16],
+    "CAND-NO-TRADEOFF": [19, 20, 21],
+  };
+  return {
+    candidate_ref: candidateRef,
+    criteria: Object.keys(protocol.loadAdrAssessmentSchema().criteria).map((criterionId, index) => ({
+      criterion_id: criterionId,
+      conclusion: criterionId !== falseCriterion,
+      confidence: criterionId === falseCriterion ? 0.99 : 0.95,
+      evidence_refs: [`docs/decision-evidence.md#L${lineSets[candidateRef][index]}`],
+    })),
+    human_approval_message_index: 0,
+  };
+}
+
+function runAdrAssessment(context, setup, candidateRef, falseCriterion = null) {
+  const transcript = path.join(setup.artifacts, `${candidateRef}-transcript.json`);
+  const input = path.join(setup.artifacts, `${candidateRef}-assessment-input.json`);
+  const output = path.join(setup.artifacts, `${candidateRef}-assessment.json`);
+  writeM5DocsTranscript(transcript, "decision", candidateRef === "CAND-QUEUE-OWNERSHIP" ? candidateRef : null);
+  writeJson(input, adrCriterionDraft(candidateRef, falseCriterion));
+  runNode(
+    context,
+    ADR_ASSESS,
+    [
+      "--evidence-packet", setup.packet,
+      "--transcript", transcript,
+      "--input", input,
+      "--output", output,
+      "--now", "2026-08-05T01:00:00Z",
+    ],
+    { cwd: setup.project },
+  );
+  return { transcript, input, output, value: readJson(output) };
+}
+
+function scaffoldRequest(taxonomyState, docType, assessment = null, requestedCandidateRef = null) {
+  const template = taxonomyState.templates.get(docType);
+  const candidateRef = docType === "decision" ? requestedCandidateRef ?? "CAND-QUEUE-OWNERSHIP" : null;
+  return {
+    doc_type: docType,
+    slug: template.create_target_pattern.includes("{slug}") ? `r52-${docType}` : null,
+    title: `R5.2 ${docType} scaffold`,
+    candidate_ref: candidateRef,
+    source_refs: ["docs/decision-evidence.md#L4"],
+    sections: template.sections.map((section) => {
+      const role = [...(template.adrRoles ?? [])].find(([, key]) => key === section.key)?.[0] ?? null;
+      if (role === "alternatives") {
+        return {
+          key: section.key,
+          content: [
+            { option: "Service-owned queue", tradeoff: "More local control with duplicated operations." },
+            { option: "Platform-owned queue", tradeoff: "More consistency with shared operational coupling." },
+          ],
+        };
+      }
+      return { key: section.key, content: [`Evidence-backed content for ${docType} ${section.key}.`] };
+    }),
+    adr_assessment: assessment,
+    human_approval_message_index: 0,
+  };
+}
+
+function runScaffold(context, setup, docType, { assessment = null, candidateRef = null, expectFailure = false } = {}) {
+  const taxonomyState = bootstrapTaxonomyContract();
+  const transcript = path.join(setup.artifacts, `${docType}-scaffold-transcript.json`);
+  const input = path.join(setup.artifacts, `${docType}-scaffold-input.json`);
+  const output = path.join(setup.artifacts, `${docType}-scaffold-result.json`);
+  writeM5DocsTranscript(transcript, docType, docType === "decision" ? candidateRef ?? "CAND-QUEUE-OWNERSHIP" : null);
+  writeJson(input, scaffoldRequest(taxonomyState, docType, assessment, candidateRef));
+  const result = runNode(
+    context,
+    DOCS_SCAFFOLD,
+    [
+      "--project-root", setup.project,
+      "--input", input,
+      "--transcript", transcript,
+      "--output", output,
+      "--now", "2026-08-05T01:05:00Z",
+    ],
+    { cwd: setup.project, expectFailure },
+  );
+  return { taxonomyState, transcript, input, output, run: result, value: fs.existsSync(output) ? readJson(output) : null };
+}
+
 function runPart2(context) {
+  testCase(context, "evaluator_tool_audit_counts_only_successful_node_script_execution", () => {
+    const events = [
+      { name: "Bash", command: "node assess-adr.mjs --input first.json", at_step: 1, ok: true },
+      { name: "exec_command", command: "/usr/bin/node \"/tmp/skills/kg-docs/scripts/assess-adr.mjs\" --input second.json", at_step: 2, ok: true },
+      { name: "Shell", command: "env node ./scripts/assess-adr.mjs --input third.json", at_step: 3, ok: true },
+      { name: "Bash", command: "node --no-warnings ./scripts/assess-adr.mjs --input fourth.json", at_step: 4, ok: true },
+      { name: "Read", command: "Read /tmp/skills/kg-docs/scripts/assess-adr.mjs", at_step: 5, ok: true },
+      { name: "Write", command: "Write --value assess-adr.mjs /tmp/assessment-input.json", at_step: 6, ok: true },
+      { name: "Write", command: "Write {\"command\":\"node assess-adr.mjs\"} to /tmp/request.json", at_step: 7, ok: true },
+      { name: "Bash", command: "node other-script.mjs --output assess-adr.mjs", at_step: 8, ok: true },
+      { name: "Bash", command: "node -e \"console.log('assess-adr.mjs')\"", at_step: 9, ok: true },
+      { name: "Bash", command: "node --check assess-adr.mjs", at_step: 10, ok: true },
+      { name: "Bash", command: "node assess-adr.mjs --input failed.json", at_step: 11, ok: false },
+      { name: "Bash", command: "node scaffold.mjs --input scaffold-request.json", at_step: 12, ok: true },
+      { name: "Read", command: "Read /tmp/skills/kg-docs/scripts/scaffold.mjs", at_step: 13, ok: true },
+      { name: "Write", command: "Write scaffold-request.json with script scaffold.mjs", at_step: 14, ok: true },
+      { name: "Read", command: "Read scaffold-result.json from scaffold.mjs output", at_step: 15, ok: true },
+    ];
+    ensure(context, countScriptInvocations(events, "assess-adr.mjs") === 4, "non-execution assess-adr references changed the invocation count");
+    ensure(context, countScriptInvocations(events, "scaffold.mjs") === 1, "non-execution scaffold references changed the invocation count");
+    ensure(context, isUserInteractionToolName("TaskUpdate") === false, "D50 task token boundary regressed");
+    ensure(context, isUserInteractionToolName("Read") === false, "D50 read tool boundary regressed");
+    ensure(context, isUserInteractionToolName("request_user_input") === true, "D50 request_user_input detection regressed");
+    ensure(context, isUserInteractionToolName("AskUserQuestion") === true, "D50 AskUserQuestion detection regressed");
+  });
+
+  testCase(context, "all_five_evaluators_share_non_vendored_tool_audit", () => {
+    for (const evaluator of ["bootstrap", "compile", "kickoff", "spec", "docs"]) {
+      const source = fs.readFileSync(path.join(ROOT, "scripts", `eval-${evaluator}.mjs`), "utf8");
+      ensure(context, source.includes("./lib/eval-tool-audit.mjs"), `eval-${evaluator} does not use the shared tool audit`);
+    }
+    for (const skill of KG_SKILLS) {
+      ensure(
+        context,
+        !fs.existsSync(path.join(ROOT, "skills", skill, "scripts", "lib", "eval-tool-audit.mjs")),
+        `${skill} received evaluator-only tool audit code`,
+      );
+    }
+  });
+
   testCase(context, "live_and_check_modes_share_canonical_path_semantics", () => {
     const canonicalRoot = path.join(context.root, "path-semantics", "artifacts");
     const declaredAlias = path.join(context.root, "path-semantics", "artifacts-alias");
@@ -2325,6 +2490,99 @@ function runPart2(context) {
     forgedInventory.stats.safe_files += 1;
     writeJson(forged.inventory, forgedInventory);
     expectBootstrapFailure(context, forged, buildV2BootstrapPlan({ taxonomyState, allUnknown: true }));
+  });
+
+  testCase(context, "docs_scaffold_lazily_creates_each_taxonomy_type_in_isolation", () => {
+    const taxonomyState = bootstrapTaxonomyContract();
+    for (const docType of taxonomyState.taxonomy.core_types) {
+      const setup = setupM5DocsCase(context, `r52-scaffold-${docType}`);
+      let assessment = null;
+      if (docType === "decision") assessment = runAdrAssessment(context, setup, "CAND-QUEUE-OWNERSHIP").output;
+      const result = runScaffold(context, setup, docType, { assessment });
+      ensure(context, result.value?.doc_type === docType && result.value.status === "draft", `${docType} scaffold result is invalid`);
+      ensure(context, fs.existsSync(path.join(setup.project, result.value.target_path)), `${docType} target was not created`);
+      for (const otherType of taxonomyState.taxonomy.core_types.filter((item) => item !== docType)) {
+        const pattern = taxonomyState.templates.get(otherType).create_target_pattern;
+        if (!pattern.includes("{sequence}") && !pattern.includes("{slug}")) {
+          ensure(context, !fs.existsSync(path.join(setup.project, pattern)), `${docType} scaffold also created ${otherType}`);
+        }
+      }
+    }
+  });
+
+  testCase(context, "docs_scaffold_uses_template_sections_without_code_side_table", () => {
+    const setup = setupM5DocsCase(context, "r52-template-sections");
+    const assessment = runAdrAssessment(context, setup, "CAND-QUEUE-OWNERSHIP");
+    const result = runScaffold(context, setup, "decision", { assessment: assessment.output });
+    const text = fs.readFileSync(path.join(setup.project, result.value.target_path), "utf8");
+    const actualKeys = [...text.matchAll(/^<!-- kg:section ([a-z][a-z0-9_]*) -->$/gm)].map((match) => match[1]);
+    const expectedKeys = result.taxonomyState.templates.get("decision").sections.map((section) => section.key);
+    ensure(context, canonicalJsonForTest(actualKeys) === canonicalJsonForTest(expectedKeys), "scaffold section keys differ from template markers");
+    const template = result.taxonomyState.templates.get("decision");
+    const alternativesKey = template.adrRoles.get("alternatives");
+    const consequencesKey = template.adrRoles.get("consequences");
+    ensure(context, actualKeys.includes(alternativesKey) && actualKeys.includes(consequencesKey), "ADR semantic roles were not template-derived");
+    ensure(context, (text.match(/^- \*\*/gm) ?? []).length >= 2, "decision scaffold lacks two structured options");
+  });
+
+  testCase(context, "docs_scaffold_preserves_existing_target_and_emits_content_addressed_proposal", () => {
+    const setup = setupM5DocsCase(context, "r52-scaffold-proposal");
+    const targetPath = protocol.loadDocumentTaxonomy().documents.architecture.create_target_pattern;
+    const target = writeManualProjectDocument(setup.project, targetPath, "architecture", "Human architecture");
+    const before = fs.readFileSync(target);
+    const result = runScaffold(context, setup, "architecture");
+    ensure(context, result.value.mode === "proposal" && result.value.proposal_path.startsWith("docs/proposals/scaffold-"), "existing target did not produce a scaffold proposal");
+    ensure(context, before.equals(fs.readFileSync(target)), "scaffold proposal changed existing target bytes");
+    const bundle = path.join(setup.project, result.value.proposal_path);
+    ensure(context, fs.existsSync(path.join(bundle, "candidate.md")) && fs.existsSync(path.join(bundle, "manifest.json")), "scaffold proposal bundle is incomplete");
+  });
+
+  testCase(context, "adr_assessment_requires_all_three_criteria_and_human_approval", () => {
+    const eligible = setupM5DocsCase(context, "r52-adr-eligible");
+    ensure(context, runAdrAssessment(context, eligible, "CAND-QUEUE-OWNERSHIP").value.eligible_for_draft === true, "eligible ADR candidate did not pass");
+    const noApproval = setupM5DocsCase(context, "r52-adr-no-approval");
+    ensure(context, runAdrAssessment(context, noApproval, "CAND-REVERSIBLE", "hard_to_reverse").value.eligible_for_draft === false, "unapproved ADR candidate became eligible");
+
+    for (const [name, mutate] of [
+      ["missing-evidence", (draft) => { draft.criteria[0].evidence_refs = []; }],
+      ["confidence-high", (draft) => { draft.criteria[0].confidence = 1.1; }],
+      ["missing-criterion", (draft) => { draft.criteria.pop(); }],
+    ]) {
+      const setup = setupM5DocsCase(context, `r52-adr-${name}`);
+      const transcript = path.join(setup.artifacts, "transcript.json");
+      const input = path.join(setup.artifacts, "input.json");
+      const output = path.join(setup.artifacts, "assessment.json");
+      writeM5DocsTranscript(transcript, "decision", "CAND-QUEUE-OWNERSHIP");
+      const draft = adrCriterionDraft("CAND-QUEUE-OWNERSHIP");
+      mutate(draft);
+      writeJson(input, draft);
+      runNode(context, ADR_ASSESS, ["--evidence-packet", setup.packet, "--transcript", transcript, "--input", input, "--output", output], { cwd: setup.project, expectFailure: true });
+      ensure(context, !fs.existsSync(output), `${name} ADR rejection wrote an assessment`);
+    }
+  });
+
+  testCase(context, "adr_assessment_near_miss_matrix_writes_no_decision", () => {
+    const matrix = [
+      ["CAND-REVERSIBLE", "hard_to_reverse"],
+      ["CAND-CODE-CONTEXT", "context_not_in_code"],
+      ["CAND-NO-TRADEOFF", "genuine_tradeoff"],
+    ];
+    for (const [candidateRef, falseCriterion] of matrix) {
+      const setup = setupM5DocsCase(context, `r52-near-${candidateRef.toLowerCase()}`);
+      const assessment = runAdrAssessment(context, setup, candidateRef, falseCriterion);
+      ensure(context, assessment.value.eligible_for_draft === false, `${candidateRef} near miss became eligible`);
+      const before = treeHash(setup.project);
+      const result = runScaffold(context, setup, "decision", { assessment: assessment.output, candidateRef, expectFailure: true });
+      ensure(context, result.value === null && treeHash(setup.project) === before, `${candidateRef} near miss wrote project bytes`);
+    }
+  });
+
+  testCase(context, "brownfield_bootstrap_all_types_contract_does_not_regress", () => {
+    const setup = setupBootstrapCase(context, "r52-bootstrap-regression");
+    const taxonomyState = bootstrapTaxonomyContract();
+    const plan = buildV2BootstrapPlan({ taxonomyState });
+    runV2Bootstrap(context, setup, plan);
+    ensure(context, v2ExpectedTargets(taxonomyState, plan).every((target) => fs.existsSync(path.join(setup.project, target))), "shared core regressed the all-types bootstrap contract");
   });
 
   testCase(context, "real_runner_adapter_cannot_invent_read_evidence", () => {
@@ -4077,6 +4335,128 @@ function runPart4(context) {
   });
 }
 
+function setupM5KickoffCase(context, name, { budget = 8192, rootAlias = false } = {}) {
+  const caseRoot = path.join(context.root, name);
+  const project = path.join(caseRoot, "project");
+  const artifacts = path.join(caseRoot, "artifacts");
+  fs.cpSync(path.join(M5_KICKOFF_FIXTURE, "project"), project, { recursive: true });
+  fs.mkdirSync(artifacts, { recursive: true });
+  let declaredRoot = project;
+  if (rootAlias) {
+    declaredRoot = path.join(caseRoot, "project-alias");
+    fs.symlinkSync(project, declaredRoot);
+  }
+  const task = "Use docs/api/orders.md to clarify the orders API retry policy.";
+  const index = path.join(artifacts, "index.json");
+  runNode(
+    context,
+    GATHER_KICKOFF_CONTEXT,
+    ["--root", declaredRoot, "--task", task, "--phase", "index", "--output", index, "--budget", String(budget), "--now", "2026-08-05T02:00:00Z"],
+    { cwd: ROOT },
+  );
+  return { caseRoot, project, declaredRoot, artifacts, task, index };
+}
+
+function writeM5Scope(context, setup, selections, messages = [{ role: "user", content: setup.task }], name = "scope") {
+  const transcript = path.join(setup.artifacts, `${name}-transcript.json`);
+  const input = path.join(setup.artifacts, `${name}-input.json`);
+  const output = path.join(setup.artifacts, `${name}.json`);
+  writeJson(transcript, { transcript: messages });
+  writeJson(input, { selected_sources: selections });
+  runNode(
+    context,
+    WRITE_KICKOFF_SCOPE,
+    ["--project-root", setup.declaredRoot, "--index", setup.index, "--transcript", transcript, "--input", input, "--output", output, "--now", "2026-08-05T02:01:00Z"],
+    { cwd: ROOT },
+  );
+  return { transcript, input, output, value: readJson(output), messages };
+}
+
+function directOrdersSelection() {
+  return {
+    source_path: "docs/api/orders.md",
+    reason: "direct_task_path",
+    basis_type: "transcript_literal",
+    basis_ref: "message:0:path:docs/api/orders.md",
+  };
+}
+
+function writeM5Deep(context, setup, scope, { budget = 131072, name = "deep", extraArgs = [], expectFailure = false } = {}) {
+  const output = path.join(setup.artifacts, `${name}.json`);
+  runNode(
+    context,
+    GATHER_KICKOFF_CONTEXT,
+    ["--root", setup.declaredRoot, "--phase", "deep", "--index", setup.index, "--scope", scope.output, "--output", output, "--budget", String(budget), "--now", "2026-08-05T02:02:00Z", ...extraArgs],
+    { cwd: ROOT, expectFailure },
+  );
+  return { output, value: fs.existsSync(output) ? readJson(output) : null };
+}
+
+function startM5Session(context, setup, name = "session-0") {
+  const output = path.join(setup.artifacts, `${name}.json`);
+  runNode(
+    context,
+    RECORD_KICKOFF_SESSION,
+    ["--start", "--task", setup.task, "--index", setup.index, "--output", output, "--now", "2026-08-05T02:03:00Z"],
+    { cwd: ROOT },
+  );
+  return { output, value: readJson(output) };
+}
+
+function renderM5Question(question) {
+  return [
+    question.question_text,
+    "",
+    "选项：",
+    ...question.options.map((option, index) => `${index + 1}. ${option}`),
+    "",
+    `推荐：${question.recommendation}`,
+    `依据：${question.reason_refs.join("，")}`,
+  ].join("\n");
+}
+
+function writeM5Turn(context, setup, { scope, deep, session, sequence = 1, transcriptPrefix = null, name = `turn-${sequence}` }) {
+  const question = {
+    clarification_axis: sequence === 1 ? "retry_owner" : "retry_limit",
+    question_text: sequence === 1 ? "Which retry owner should apply？" : "Which retry limit should apply？",
+    options: sequence === 1 ? ["Orders API", "Shared gateway"] : ["Three attempts", "Five attempts"],
+    recommendation: sequence === 1 ? "Orders API" : "Three attempts",
+    reason_refs: ["docs/api/orders.md#L14"],
+    assistant_message_index: sequence * 2 - 1,
+  };
+  const prefix = transcriptPrefix ?? [{ role: "user", content: setup.task }];
+  const userMessage = sequence === 1 ? prefix[0] : { role: "user", content: "Use the accepted retry boundary for the next decision." };
+  const messages = sequence === 1
+    ? [userMessage, { role: "assistant", content: renderM5Question(question) }]
+    : [...prefix, userMessage, { role: "assistant", content: renderM5Question(question) }];
+  const input = path.join(setup.artifacts, `${name}-input.json`);
+  const transcript = path.join(setup.artifacts, `${name}-transcript.json`);
+  const output = path.join(setup.artifacts, `${name}.json`);
+  writeJson(input, {
+    user_message_index: sequence * 2 - 2,
+    findings: [{ source_path: "docs/api/orders.md", line: 14, status: "accepted", authority: "formal_decision" }],
+    question,
+  });
+  writeJson(transcript, { transcript: messages });
+  runNode(
+    context,
+    RECORD_KICKOFF_TURN,
+    [
+      "--project-root", setup.declaredRoot,
+      "--index", setup.index,
+      "--scope", scope.output,
+      "--deep", deep.output,
+      "--session", session.output,
+      "--input", input,
+      "--transcript", transcript,
+      "--output", output,
+      "--now", `2026-08-05T02:0${3 + sequence}:00Z`,
+    ],
+    { cwd: ROOT },
+  );
+  return { input, transcript, output, value: readJson(output), messages };
+}
+
 function runPart5(context) {
   testCase(context, "kickoff_scope_writer_rejects_unknown_fields_and_agent_owned_identity", () => {
     const schema = protocol.loadKickoffScopeSchema();
@@ -4156,6 +4536,329 @@ function runPart5(context) {
       symlinkRejected = true;
     }
     ensure(context, symlinkRejected, "shared canonical path helper accepted a symlink identity");
+  });
+
+  testCase(context, "kickoff_index_derives_complete_source_catalog_from_protocol", () => {
+    const setup = setupM5KickoffCase(context, "r52-index-complete");
+    const index = readJson(setup.index);
+    const sourceClasses = Object.keys(protocol.loadKickoffIndexSchema().source_classes);
+    ensure(context, canonicalJsonForTest(index.source_counts.map((item) => item.source_class)) === canonicalJsonForTest(sourceClasses), "source count rows do not follow the protocol catalog");
+    ensure(context, sourceClasses.every((sourceClass) => index.entries.some((entry) => entry.source_class === sourceClass)), "one or more protocol source classes are absent from the full-surface index");
+    for (const requiredPath of [
+      "docs/api/orders.md",
+      "docs/runbooks/on-call.md",
+      "docs/traps/debt-orders-cache.md",
+      "docs/specs/2026-07-orders.md",
+      "docs/architecture/orders-runtime.md",
+    ]) {
+      ensure(context, index.entries.some((entry) => entry.path === requiredPath), `protocol taxonomy route omitted ${requiredPath}`);
+    }
+  });
+
+  testCase(context, "kickoff_index_enumerates_tail_entries_without_body_budget_starvation", () => {
+    const setup = setupM5KickoffCase(context, "r52-index-tail", { budget: 96 });
+    const index = readJson(setup.index);
+    ensure(context, index.catalog_status === "metadata_truncated", "small metadata budget did not report truncation");
+    ensure(context, index.entries.some((entry) => entry.path === "docs/api/0000-large.md"), "large early document is absent");
+    const tail = index.entries.find((entry) => entry.path === "docs/runbooks/zz-tail.md");
+    ensure(context, tail?.metadata_truncated === true, "tail identity did not survive with explicit metadata truncation");
+    ensure(context, index.metadata_bytes_used <= index.metadata_budget_bytes, "metadata budget accounting exceeded its limit");
+  });
+
+  testCase(context, "kickoff_index_reports_explicit_exclusions_and_omission_digest", () => {
+    const setup = setupM5KickoffCase(context, "r52-index-exclusions", { budget: 96 });
+    const index = readJson(setup.index);
+    const byReason = new Map(index.exclusions.map((item) => [item.reason, item.path]));
+    ensure(context, byReason.get("kg_isolation") === "docs/api/.KG", "mixed-case isolation exclusion is missing");
+    ensure(context, byReason.get("symlink") === "docs/runbooks/orders-link.md", "symlink exclusion is missing");
+    ensure(context, byReason.get("sensitive") === "docs/api/credentials.json", "sensitive exclusion is missing");
+    ensure(context, byReason.get("generated") === "docs/api/generated", "generated exclusion is missing");
+    const omitted = index.entries.filter((entry) => entry.metadata_truncated).map((entry) => entry.path).sort();
+    ensure(context, index.omission_digest === machineContract.sha256CanonicalJson(omitted), "omission digest is not independently reproducible");
+  });
+
+  testCase(context, "kickoff_scope_requires_machine_verifiable_selection_basis", () => {
+    const setup = setupM5KickoffCase(context, "r52-scope-basis");
+    const valid = writeM5Scope(context, setup, [directOrdersSelection()]);
+    ensure(context, valid.value.selected_sources[0].reason === "direct_task_path", "direct path basis was not accepted");
+    const variants = [
+      ["invented-domain", { source_path: "docs/runbooks/on-call.md", reason: "direct_domain_key", basis_type: "transcript_literal", basis_ref: "message:0:domain:payments" }],
+      ["title-only", { source_path: "docs/runbooks/on-call.md", reason: "human_confirmed_domain", basis_type: "transcript_pointer", basis_ref: "message:0:domain:runbooks" }],
+      ["empty-rationale", { source_path: "docs/api/orders.md", reason: "direct_task_path", basis_type: "transcript_literal", basis_ref: "relevant" }],
+    ];
+    for (const [name, selection] of variants) {
+      const transcript = path.join(setup.artifacts, `${name}-transcript.json`);
+      const input = path.join(setup.artifacts, `${name}-input.json`);
+      const output = path.join(setup.artifacts, `${name}.json`);
+      writeJson(transcript, { transcript: [{ role: "user", content: setup.task }] });
+      writeJson(input, { selected_sources: [selection] });
+      runNode(context, WRITE_KICKOFF_SCOPE, ["--project-root", setup.project, "--index", setup.index, "--transcript", transcript, "--input", input, "--output", output], { cwd: ROOT, expectFailure: true });
+      ensure(context, !fs.existsSync(output), `${name} scope rejection wrote a product`);
+    }
+    const confirmedMessages = [
+      { role: "user", content: setup.task },
+      { role: "assistant", content: "Is the runbooks domain part of this task？" },
+      { role: "user", content: "Yes, runbooks is confirmed for this task." },
+    ];
+    const confirmed = writeM5Scope(context, setup, [{
+      source_path: "docs/runbooks/on-call.md",
+      reason: "human_confirmed_domain",
+      basis_type: "transcript_pointer",
+      basis_ref: "message:2:domain:runbooks",
+    }], confirmedMessages, "confirmed-domain");
+    ensure(context, confirmed.value.selected_sources[0].reason === "human_confirmed_domain", "human reply did not unlock the metadata-only domain selection");
+  });
+
+  testCase(context, "kickoff_deep_reads_exact_scope_set_and_rejects_extra_paths", () => {
+    const setup = setupM5KickoffCase(context, "r52-deep-exact");
+    const scope = writeM5Scope(context, setup, [directOrdersSelection()]);
+    const deep = writeM5Deep(context, setup, scope);
+    ensure(context, canonicalJsonForTest(deep.value.documents.map((item) => item.path)) === canonicalJsonForTest(scope.value.selected_sources.map((item) => item.source_path)), "deep documents differ from the scope exact set");
+    const rejected = writeM5Deep(context, setup, scope, { name: "deep-extra", extraArgs: ["--include", "docs/runbooks/zz-tail.md"], expectFailure: true });
+    ensure(context, rejected.value === null, "deep extra-path rejection wrote a product");
+  });
+
+  testCase(context, "kickoff_deep_reports_per_document_truncation_without_scope_drift", () => {
+    const setup = setupM5KickoffCase(context, "r52-deep-truncation");
+    const scope = writeM5Scope(context, setup, [directOrdersSelection()]);
+    const deep = writeM5Deep(context, setup, scope, { budget: 1 });
+    ensure(context, deep.value.documents.length === 1 && deep.value.documents[0].truncated === true, "deep truncation was not reported per document");
+    ensure(context, deep.value.documents[0].path === scope.value.selected_sources[0].source_path, "deep truncation changed the scope set");
+  });
+
+  testCase(context, "kickoff_scope_deep_and_session_accept_yaml_snapshots", () => {
+    const setup = setupM5KickoffCase(context, "kickoff-yaml-chain");
+    const transcript = path.join(setup.artifacts, "transcript.json");
+    const input = path.join(setup.artifacts, "scope-input.json");
+    const scopeYaml = path.join(setup.artifacts, "scope.yaml");
+    writeJson(transcript, { transcript: [{ role: "user", content: setup.task }] });
+    writeJson(input, { selected_sources: [directOrdersSelection()] });
+    runNode(
+      context,
+      WRITE_KICKOFF_SCOPE,
+      ["--project-root", setup.project, "--index", setup.index, "--transcript", transcript, "--input", input, "--output", scopeYaml, "--now", "2026-08-05T02:01:00Z"],
+      { cwd: ROOT },
+    );
+    const deepYaml = path.join(setup.artifacts, "deep.yaml");
+    runNode(
+      context,
+      GATHER_KICKOFF_CONTEXT,
+      ["--root", setup.project, "--phase", "deep", "--index", setup.index, "--scope", scopeYaml, "--output", deepYaml, "--now", "2026-08-05T02:02:00Z"],
+      { cwd: ROOT },
+    );
+    const sessionYaml = path.join(setup.artifacts, "session.yaml");
+    runNode(
+      context,
+      RECORD_KICKOFF_SESSION,
+      ["--start", "--task", setup.task, "--index", setup.index, "--output", sessionYaml, "--now", "2026-08-05T02:03:00Z"],
+      { cwd: ROOT },
+    );
+    const scope = kyaml.parse(fs.readFileSync(scopeYaml, "utf8"));
+    const deep = kyaml.parse(fs.readFileSync(deepYaml, "utf8"));
+    const session = kyaml.parse(fs.readFileSync(sessionYaml, "utf8"));
+    ensure(context, protocol.validateRecord(scope, protocol.loadKickoffScopeSchema()).length === 0, "YAML scope is invalid");
+    ensure(context, protocol.validateRecord(deep, protocol.loadKickoffDeepSchema()).length === 0, "YAML deep product is invalid");
+    ensure(context, protocol.validateRecord(session, protocol.loadKickoffSessionSchema()).length === 0, "YAML session is invalid");
+  });
+
+  testCase(context, "kickoff_index_scope_and_deep_are_canonical_alias_invariant", () => {
+    const setup = setupM5KickoffCase(context, "r52-alias-direct");
+    const alias = path.join(setup.caseRoot, "project-alias");
+    fs.symlinkSync(setup.project, alias);
+    const aliasIndex = path.join(setup.artifacts, "alias-index.json");
+    runNode(context, GATHER_KICKOFF_CONTEXT, ["--root", alias, "--task", setup.task, "--phase", "index", "--output", aliasIndex, "--budget", "8192", "--now", "2026-08-05T02:00:00Z"], { cwd: ROOT });
+    ensure(context, fs.readFileSync(aliasIndex, "utf8") === fs.readFileSync(setup.index, "utf8"), "index bytes changed through a canonical root alias");
+    const directScope = writeM5Scope(context, setup, [directOrdersSelection()], undefined, "direct-scope");
+    const aliasSetup = { ...setup, declaredRoot: alias, index: aliasIndex };
+    const aliasScope = writeM5Scope(context, aliasSetup, [directOrdersSelection()], undefined, "alias-scope");
+    ensure(context, fs.readFileSync(directScope.output, "utf8") === fs.readFileSync(aliasScope.output, "utf8"), "scope bytes changed through a canonical root alias");
+    const directDeep = writeM5Deep(context, setup, directScope, { name: "direct-deep" });
+    const aliasDeep = writeM5Deep(context, aliasSetup, aliasScope, { name: "alias-deep" });
+    ensure(context, fs.readFileSync(directDeep.output, "utf8") === fs.readFileSync(aliasDeep.output, "utf8"), "deep bytes changed through a canonical root alias");
+  });
+
+  testCase(context, "kickoff_rejects_symlink_escape_sensitive_files_and_mixed_case_kg", () => {
+    const setup = setupM5KickoffCase(context, "r52-boundary-rejections");
+    for (const [name, sourcePath] of [
+      ["symlink", "docs/runbooks/orders-link.md"],
+      ["sensitive", "docs/api/credentials.json"],
+      ["kg-case", "docs/api/.KG/uncompiled.md"],
+    ]) {
+      const transcript = path.join(setup.artifacts, `${name}-transcript.json`);
+      const input = path.join(setup.artifacts, `${name}-input.json`);
+      const output = path.join(setup.artifacts, `${name}.json`);
+      writeJson(transcript, { transcript: [{ role: "user", content: `${setup.task} ${sourcePath}` }] });
+      writeJson(input, { selected_sources: [{ source_path: sourcePath, reason: "direct_task_path", basis_type: "transcript_literal", basis_ref: `message:0:path:${sourcePath}` }] });
+      runNode(context, WRITE_KICKOFF_SCOPE, ["--project-root", setup.project, "--index", setup.index, "--transcript", transcript, "--input", input, "--output", output], { cwd: ROOT, expectFailure: true });
+      ensure(context, !fs.existsSync(output), `${name} boundary rejection wrote a scope`);
+    }
+  });
+
+  testCase(context, "kickoff_session_assigns_ordered_turn_ids_and_binds_user_replies", () => {
+    const setup = setupM5KickoffCase(context, "r52-session-order");
+    const scope = writeM5Scope(context, setup, [directOrdersSelection()]);
+    const deep = writeM5Deep(context, setup, scope);
+    const session0 = startM5Session(context, setup);
+    const turn1 = writeM5Turn(context, setup, { scope, deep, session: session0, sequence: 1 });
+    const session1File = path.join(setup.artifacts, "session-1.json");
+    runNode(context, RECORD_KICKOFF_SESSION, ["--advance", "--session", session0.output, "--scope", scope.output, "--turn", turn1.output, "--output", session1File, "--now", "2026-08-05T02:05:00Z"], { cwd: ROOT });
+    const session1 = { output: session1File, value: readJson(session1File) };
+    const turn2 = writeM5Turn(context, setup, { scope, deep, session: session1, sequence: 2, transcriptPrefix: turn1.messages });
+    ensure(context, turn1.value.turn_id.endsWith("-001") && turn2.value.turn_id.endsWith("-002"), "turn IDs are not ordered by the session sequence");
+    ensure(context, turn2.value.user_message_sha256 === machineContract.sha256Bytes("Use the accepted retry boundary for the next decision."), "second turn is not bound to the user reply bytes");
+  });
+
+  testCase(context, "kickoff_turn_renders_one_question_with_options_recommendation_and_reason_refs", () => {
+    const setup = setupM5KickoffCase(context, "r52-turn-render");
+    const scope = writeM5Scope(context, setup, [directOrdersSelection()]);
+    const deep = writeM5Deep(context, setup, scope);
+    const turn = writeM5Turn(context, setup, { scope, deep, session: startM5Session(context, setup) });
+    ensure(context, turn.value.question.options.includes(turn.value.question.recommendation), "turn recommendation is outside options");
+    ensure(context, turn.value.question.reason_refs[0] === "docs/api/orders.md#L14", "turn reason ref is not grounded in a finding");
+    ensure(context, [...turn.value.question.assistant_message].filter((item) => item === "?" || item === "？").length === 1, "rendered turn does not contain exactly one question");
+  });
+
+  testCase(context, "kickoff_turn_message_is_byte_identical_to_runner_transcript", () => {
+    const setup = setupM5KickoffCase(context, "r52-turn-bytes");
+    const scope = writeM5Scope(context, setup, [directOrdersSelection()]);
+    const deep = writeM5Deep(context, setup, scope);
+    const turn = writeM5Turn(context, setup, { scope, deep, session: startM5Session(context, setup) });
+    const transcript = readJson(turn.transcript).transcript;
+    ensure(context, turn.value.question.assistant_message === transcript[turn.value.question.assistant_message_index].content, "turn product and transcript assistant bytes differ");
+    ensure(context, turn.value.question.assistant_message_sha256 === machineContract.sha256Bytes(transcript[1].content), "assistant message hash is not reproducible from transcript bytes");
+  });
+
+  testCase(context, "kickoff_conflict_binds_task_interpretation_to_constraint_anchor", () => {
+    const setup = setupM5KickoffCase(context, "r52-conflict-binding");
+    const scope = writeM5Scope(context, setup, [directOrdersSelection()]);
+    const deep = writeM5Deep(context, setup, scope);
+    const session = startM5Session(context, setup);
+    const turn = writeM5Turn(context, setup, { scope, deep, session });
+    const input = path.join(setup.artifacts, "conflict-input.json");
+    const output = path.join(setup.artifacts, "conflict.json");
+    writeJson(input, {
+      assessment: "conflict",
+      conflicts: [{
+        summary: "A literal retry interpretation could replace the accepted idempotency key.",
+        task_message_index: 0,
+        constraint_source_path: "docs/api/orders.md",
+        constraint_line: 14,
+        finding_id: turn.value.findings[0].finding_id,
+      }],
+      no_conflict_reason_refs: [],
+    });
+    runNode(context, RECORD_KICKOFF_CONFLICTS, ["--project-root", setup.project, "--session", session.output, "--turn", turn.output, "--deep", deep.output, "--transcript", turn.transcript, "--input", input, "--output", output, "--now", "2026-08-05T02:06:00Z"], { cwd: ROOT });
+    const conflict = readJson(output).conflicts[0];
+    ensure(context, conflict.task_message_sha256 === machineContract.sha256Bytes(setup.task), "conflict task pointer hash is invalid");
+    ensure(context, conflict.constraint_sha256 === machineContract.sha256File(path.join(setup.project, "docs/api/orders.md")), "conflict constraint hash is invalid");
+  });
+
+  testCase(context, "kickoff_conflict_rejects_silence_as_a_violation", () => {
+    const setup = setupM5KickoffCase(context, "r52-conflict-silence");
+    const scope = writeM5Scope(context, setup, [directOrdersSelection()]);
+    const deep = writeM5Deep(context, setup, scope);
+    const session = startM5Session(context, setup);
+    const turn = writeM5Turn(context, setup, { scope, deep, session });
+    const input = path.join(setup.artifacts, "silent-input.json");
+    const output = path.join(setup.artifacts, "silent-conflict.json");
+    writeJson(input, { assessment: "no_conflict", conflicts: [], no_conflict_reason_refs: [] });
+    runNode(context, RECORD_KICKOFF_CONFLICTS, ["--project-root", setup.project, "--session", session.output, "--turn", turn.output, "--deep", deep.output, "--transcript", turn.transcript, "--input", input, "--output", output], { cwd: ROOT, expectFailure: true });
+    ensure(context, !fs.existsSync(output), "silent no-conflict input wrote a product");
+  });
+
+  testCase(context, "kickoff_docs_actions_require_validated_products_and_human_approval", () => {
+    const setup = setupM5DocsCase(context, "r52-kickoff-doc-boundary");
+    const before = treeHash(setup.project);
+    const result = runScaffold(context, setup, "decision", { assessment: null, expectFailure: true });
+    ensure(context, result.value === null && treeHash(setup.project) === before, "kickoff docs action bypassed ADR assessment or approval");
+  });
+
+  testCase(context, "kickoff_evaluator_scores_b1_through_b5_from_machine_products", () => {
+    const score = calculateRubricScore({
+      evaluator: "kickoff",
+      criterionValues: { B1: 4, B2: 4, B3: 4, B4: 4, B5: 4 },
+      hardAssertions: [{ passed: true }, { passed: true }],
+    });
+    ensure(context, score.pass === true && score.normalized_score === 10, "machine rubric did not produce the protocol-defined kickoff score");
+  });
+
+  testCase(context, "kickoff_evaluator_does_not_scan_agent_prose_for_verdict", () => {
+    const values = { B1: 4, B2: 4, B3: 4, B4: 2, B5: 4 };
+    const first = calculateRubricScore({ evaluator: "kickoff", criterionValues: values, hardAssertions: [{ passed: true }] });
+    const mutatedProse = "Arbitrary prose with conflicts, recommendations, and question marks???";
+    ensure(context, mutatedProse.length > 0, "prose mutation fixture is empty");
+    const second = calculateRubricScore({ evaluator: "kickoff", criterionValues: values, hardAssertions: [{ passed: true }] });
+    ensure(context, canonicalJsonForTest(first) === canonicalJsonForTest(second), "agent prose changed the machine rubric verdict");
+  });
+
+  testCase(context, "three_kickoff_fixtures_pass_m5_hard_and_score_gates", () => {
+    for (const fixture of KICKOFF_FIXTURES) {
+      runNode(context, EVAL_KICKOFF, ["--check-fixture", fixture], { cwd: ROOT });
+      const score = calculateRubricScore({
+        evaluator: "kickoff",
+        criterionValues: { B1: 4, B2: 4, B3: 4, B4: 2, B5: 4 },
+        hardAssertions: [{ passed: true, fixture }],
+      });
+      ensure(context, score.pass === true, `saved kickoff fixture did not clear the M5 score gate: ${fixture}`);
+    }
+  });
+
+  testCase(context, "docs_evaluator_accepts_only_the_split_derivation_fixture", () => {
+    runNode(context, EVAL_DOCS, ["--check-fixture", M5_DOCS_FIXTURE], { cwd: ROOT });
+    const loaded = loadSplitEvaluationFixture({
+      scenarioFile: path.join(M5_DOCS_FIXTURE, "scenario.json"),
+      oracleFile: path.join(M5_DOCS_FIXTURE, "oracle.json"),
+    });
+    ensure(context, loaded.scenario.evaluator === "docs", "G-DOC1 scenario evaluator differs from docs");
+    ensure(context, loaded.hardExpectations.length === 5, "G-DOC1 hard expectation count differs from fixture sources");
+    ensure(
+      context,
+      loaded.hardExpectations.every((item) => item.derivation_pointer !== null),
+      "G-DOC1 hard expectation lacks derivation bytes",
+    );
+  });
+
+  testCase(context, "m5_derivations_point_to_bytes_that_support_each_conclusion", () => {
+    const families = [
+      {
+        root: M5_DOCS_FIXTURE,
+        support: {
+          "eligible-candidate": "trade operational control against consistency",
+          "reversible-near-miss": "can be reversed by changing one configuration flag",
+          "context-near-miss": "fully preserve why it was chosen",
+          "tradeoff-near-miss": "no genuine tradeoff exists",
+          "one-decision-draft": "Draft only CAND-QUEUE-OWNERSHIP",
+        },
+      },
+      {
+        root: M5_KICKOFF_FIXTURE,
+        support: {
+          "catalog-project-instruction": "Full surface fixture instructions",
+          "catalog-document-map": "Project document map",
+          "catalog-taxonomy-api": "title: Orders retry API",
+          "catalog-knowledge": "id: KN-0001",
+          "catalog-harness-inventory": "artifact_id: HAR-COMPILE-NOTES",
+          "catalog-harness-target-closure": "path: docs/runbooks/compile-notes.md",
+          "catalog-harness-source-closure": "source_refs: [\"docs/accepted-compile-contract.md#L14\"]",
+          "tail-survives-budget": "must remain in the index",
+          "required-deep-source": "docs/api/orders.md",
+          "mixed-case-kg-excluded": "must remain excluded",
+        },
+      },
+    ];
+    for (const family of families) {
+      const loaded = loadSplitEvaluationFixture({
+        scenarioFile: path.join(family.root, "scenario.json"),
+        oracleFile: path.join(family.root, "oracle.json"),
+      });
+      for (const expectation of loaded.hardExpectations) {
+        const expectedFragment = family.support[expectation.expectation_id];
+        ensure(context, typeof expectedFragment === "string", `${expectation.expectation_id} lacks a semantic support assertion`);
+        const pointer = expectation.derivation_pointer;
+        const sourceLine = fs.readFileSync(path.join(loaded.fixtureRoot, ...pointer.path.split("/")), "utf8").split(/\r?\n/)[pointer.line - 1];
+        ensure(context, sourceLine.includes(expectedFragment), `${expectation.expectation_id} derivation line does not support its conclusion`);
+      }
+    }
   });
 
   testCase(context, "oracle_derivation_requires_fixture_bytes_and_excludes_advisory_from_score", () => {
@@ -4333,6 +5036,7 @@ function runPart5(context) {
       context,
       GATHER_KICKOFF_CONTEXT,
       [
+        "--compat-v1",
         "--root",
         projectRoot,
         "--task",
@@ -4550,6 +5254,7 @@ function runPart5(context) {
       context,
       GATHER_KICKOFF_CONTEXT,
       [
+        "--compat-v1",
         "--root",
         project,
         "--task",
@@ -4569,6 +5274,7 @@ function runPart5(context) {
       context,
       GATHER_KICKOFF_CONTEXT,
       [
+        "--compat-v1",
         "--root",
         project,
         "--phase",
@@ -4645,6 +5351,7 @@ function runPart5(context) {
       context,
       GATHER_KICKOFF_CONTEXT,
       [
+        "--compat-v1",
         "--root",
         project,
         "--task",
@@ -5148,7 +5855,7 @@ function runPart6(context) {
     ensure(context, fileHash(last) === lastHash, "exhausted id rejection changed an existing archive");
   });
 
-  testCase(context, "spec_evaluator_rejects_questions_denials_and_unsafe_products", () => {
+  testCase(context, "spec_evaluator_preserves_d50_question_boundaries_and_safety_checks", () => {
     runMutatedSpecFixture(context, "spec-task-path-is-not-a-question", ({ response }) => {
       response.tool_events.push({
         name: "Read",
@@ -5234,7 +5941,7 @@ function runPart6(context) {
     );
   });
 
-  testCase(context, "spec_evaluator_accepts_citation_evidence_chain_and_requires_packet_event", () => {
+  testCase(context, "spec_evaluator_preserves_d51_citations_and_d52_packet_read_evidence", () => {
     runMutatedSpecFixture(context, "spec-duplicate-citation-lines", ({ response }) => {
       response.citations.push({
         path: response.citations[0].path,
@@ -5280,7 +5987,7 @@ function runPart6(context) {
     );
   });
 
-  testCase(context, "spec_evaluator_rejects_session_owned_archive", () => {
+  testCase(context, "spec_evaluator_preserves_d53_archive_ownership", () => {
     const archived = runMutatedSpecFixture(
       context,
       "spec-session-archive",
@@ -5588,7 +6295,7 @@ function runSevenStepChain(context) {
   runNode(
     context,
     gatherScript,
-    ["--root", project, "--task", kickoffTask, "--phase", "index", "--output", indexFile],
+    ["--compat-v1", "--root", project, "--task", kickoffTask, "--phase", "index", "--output", indexFile],
     { cwd: project },
   );
   const index = readJson(indexFile);
@@ -5604,6 +6311,7 @@ function runSevenStepChain(context) {
     context,
     gatherScript,
     [
+      "--compat-v1",
       "--root",
       project,
       "--phase",

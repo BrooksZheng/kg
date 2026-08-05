@@ -5,6 +5,7 @@
 
 {{findings:context}}
 
+<!-- kg:adr-role alternatives -->
 <!-- kg:section options -->
 ## Options
 
@@ -15,6 +16,7 @@
 
 {{findings:proposed_decision}}
 
+<!-- kg:adr-role consequences -->
 <!-- kg:section consequences -->
 ## Consequences
 

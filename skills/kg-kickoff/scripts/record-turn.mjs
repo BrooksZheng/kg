@@ -280,7 +280,7 @@ function writeRecord(file, record) {
   fs.writeFileSync(file, content, { flag: "wx" });
 }
 
-export function main(argv = process.argv.slice(2)) {
+function mainLegacy(argv = process.argv.slice(2)) {
   try {
     const args = parseArgs(argv);
     const projectRoot = host.assertSafeHostRoot(args.project_root);
@@ -294,6 +294,194 @@ export function main(argv = process.argv.slice(2)) {
     const record = canonicalRecord(raw, transcriptEnvelope, projectRoot, membership, args.now);
     writeRecord(output, record);
     console.log(`kg: kickoff turn 已写入 ${output}，共 ${record.findings.length} 条 finding`);
+  } catch (error) {
+    fail(`turn 记录校验失败：${error.message}`);
+  }
+}
+
+function parseV2Args(argv) {
+  const out = {};
+  const allowed = new Set([
+    "--project-root", "--index", "--scope", "--deep", "--session", "--input", "--transcript", "--output", "--now",
+  ]);
+  for (let index = 0; index < argv.length; index += 1) {
+    const flag = argv[index];
+    if (!allowed.has(flag)) throw new Error(`unknown option: ${flag}`);
+    const value = argv[index + 1];
+    if (!value || value.startsWith("--")) throw new Error(`${flag} needs a value`);
+    const key = flag.slice(2).replaceAll("-", "_");
+    if (out[key] !== undefined) throw new Error(`${flag} may be provided once`);
+    out[key] = value;
+    index += 1;
+  }
+  for (const field of ["project_root", "index", "scope", "deep", "session", "input", "transcript", "output"]) {
+    if (!out[field]) throw new Error(`missing --${field.replaceAll("_", "-")}`);
+  }
+  const now = out.now ? new Date(out.now) : new Date();
+  if (Number.isNaN(now.getTime())) throw new Error(`invalid --now: ${out.now}`);
+  return { ...out, now };
+}
+
+function v2Messages(raw) {
+  const messages = Array.isArray(raw) ? raw : raw?.transcript;
+  if (!Array.isArray(messages)) throw new Error("transcript must be a list or contain a transcript list");
+  for (const [index, message] of messages.entries()) {
+    if (message === null || typeof message !== "object" || Array.isArray(message) ||
+        !["user", "assistant"].includes(message.role) || typeof message.content !== "string") {
+      throw new Error(`transcript[${index}] is invalid`);
+    }
+  }
+  return messages;
+}
+
+function validatedProduct(file, schema, label) {
+  const text = fs.readFileSync(file, "utf8");
+  let value;
+  try {
+    value = path.extname(file).toLowerCase() === ".json" || text.trimStart().startsWith("{")
+      ? JSON.parse(text)
+      : kyaml.parse(text);
+  } catch (error) {
+    throw new Error(`${label} must be a machine record: ${error.message}`);
+  }
+  const errors = protocol.validateRecord(value, schema);
+  if (errors.length > 0) throw new Error(`${label} is invalid: ${errors.join("; ")}`);
+  return value;
+}
+
+function questionMarks(value) {
+  return [...String(value)].filter((character) => character === "?" || character === "？").length;
+}
+
+function renderAssistantMessage(question) {
+  const optionLines = question.options.map((option, index) => `${index + 1}. ${option}`);
+  return [
+    question.question_text,
+    "",
+    "选项：",
+    ...optionLines,
+    "",
+    `推荐：${question.recommendation}`,
+    `依据：${question.reason_refs.join("，")}`,
+  ].join("\n");
+}
+
+function mainV2(argv) {
+  const args = parseV2Args(argv);
+  const projectRoot = host.assertSafeHostRoot(args.project_root);
+  const indexFile = externalFile(args.index, "--index");
+  const scopeFile = externalFile(args.scope, "--scope");
+  const deepFile = externalFile(args.deep, "--deep");
+  const sessionFile = externalFile(args.session, "--session");
+  const inputFile = externalFile(args.input, "--input");
+  const transcriptFile = externalFile(args.transcript, "--transcript");
+  const output = outputFile(args.output);
+  const indexSchema = protocol.loadKickoffIndexSchema();
+  const scopeSchema = protocol.loadKickoffScopeSchema();
+  const deepSchema = protocol.loadKickoffDeepSchema();
+  const sessionSchema = protocol.loadKickoffSessionSchema();
+  const turnSchema = protocol.loadKickoffTurnSchema();
+  const index = validatedProduct(indexFile, indexSchema, "index");
+  const scope = validatedProduct(scopeFile, scopeSchema, "scope");
+  const deep = validatedProduct(deepFile, deepSchema, "deep");
+  const session = validatedProduct(sessionFile, sessionSchema, "session");
+  const raw = parseJson(inputFile, "--input");
+  const messages = v2Messages(parseJson(transcriptFile, "--transcript"));
+  machineContract.assertRawInput(raw, turnSchema, "kickoff turn");
+  if (host.canonicalPath(index.project_root) !== projectRoot || deep.project_root !== projectRoot) {
+    throw new Error("index or deep product belongs to a different project root");
+  }
+  const indexSha256 = machineContract.sha256File(indexFile);
+  const scopeSha256 = machineContract.sha256File(scopeFile);
+  if (scope.index_sha256 !== indexSha256 || deep.index_sha256 !== indexSha256 || deep.scope_sha256 !== scopeSha256) {
+    throw new Error("index, scope, and deep products are not one bound chain");
+  }
+  if (session.status !== "active" || session.task_sha256 !== index.task_sha256 || host.canonicalPath(session.index_ref) !== host.canonicalPath(indexFile)) {
+    throw new Error("session is inactive or bound to a different index");
+  }
+  const userMessage = messages[raw.user_message_index];
+  if (!userMessage || userMessage.role !== "user") throw new Error("user_message_index must point to a user message");
+  const deepByPath = new Map(deep.documents.map((document) => [document.path, document]));
+  const findings = raw.findings.map((finding, indexValue) => {
+    const document = deepByPath.get(finding.source_path);
+    if (!document) throw new Error(`findings[${indexValue}] is outside the deep exact set`);
+    let anchor;
+    try {
+      anchor = documentAnchor.validateStableDocumentReference({
+        sourcePath: finding.source_path,
+        line: finding.line,
+        projectRoot,
+      });
+    } catch (error) {
+      throw new Error(`findings[${indexValue}]: ${documentAnchor.formatDocumentAnchorErrorZh(error)}`);
+    }
+    if (finding.status !== document.status || finding.authority !== document.authority) {
+      throw new Error(`findings[${indexValue}] status or authority differs from deep metadata`);
+    }
+    const seed = machineContract.sha256CanonicalJson({
+      session_id: session.session_id,
+      sequence: session.next_turn_sequence,
+      path: anchor.sourcePath,
+      line: anchor.line,
+    });
+    return {
+      finding_id: `KF-${seed.slice(-12).toUpperCase()}`,
+      source_path: anchor.sourcePath,
+      line: anchor.line,
+      status: finding.status,
+      authority: finding.authority,
+    };
+  });
+  if (new Set(findings.map((finding) => finding.finding_id)).size !== findings.length) {
+    throw new Error("findings contain duplicate source anchors");
+  }
+  if (questionMarks(raw.question.question_text) !== 1 || raw.question.options.some((option) => questionMarks(option) > 0)) {
+    throw new Error("question_text must contain exactly one question mark and options must contain none");
+  }
+  if (new Set(raw.question.options).size !== raw.question.options.length || !raw.question.options.includes(raw.question.recommendation)) {
+    throw new Error("question options must be unique and include the recommendation");
+  }
+  const findingRefs = new Set(findings.map((finding) => `${finding.source_path}#L${finding.line}`));
+  if (raw.question.reason_refs.some((ref) => !findingRefs.has(ref))) {
+    throw new Error("every question reason_ref must name a finding anchor from this turn");
+  }
+  const assistantMessage = renderAssistantMessage(raw.question);
+  if (questionMarks(assistantMessage) !== 1) throw new Error("rendered assistant message must contain one question");
+  const assistant = messages[raw.question.assistant_message_index];
+  if (!assistant || assistant.role !== "assistant" || assistant.content !== assistantMessage) {
+    throw new Error("assistant transcript message is not byte-identical to the script-rendered question");
+  }
+  const suffix = session.session_id.slice("KSESSION-".length);
+  const sequence = session.next_turn_sequence;
+  const question = {
+    ...raw.question,
+    assistant_message: assistantMessage,
+    assistant_message_sha256: machineContract.sha256Bytes(assistantMessage),
+  };
+  const record = machineContract.buildCanonicalRecord(
+    raw,
+    {
+      kind: turnSchema.product_kind,
+      version: turnSchema.product_version,
+      recorded_at: args.now.toISOString(),
+      session_id: session.session_id,
+      turn_id: `KTURN-${suffix}-${String(sequence).padStart(3, "0")}`,
+      sequence,
+      user_message_sha256: machineContract.sha256Bytes(userMessage.content),
+      findings,
+      question,
+    },
+    turnSchema,
+    "kickoff turn",
+  );
+  machineContract.writeCanonicalRecord(output, record, turnSchema, { label: "kickoff turn" });
+  console.log(`kg: wrote turn ${record.turn_id} with one script-rendered question`);
+}
+
+export function main(argv = process.argv.slice(2)) {
+  try {
+    if (argv.includes("--session")) mainV2(argv);
+    else mainLegacy(argv);
   } catch (error) {
     fail(`turn 记录校验失败：${error.message}`);
   }
