@@ -9,3 +9,4 @@ evidence:
   - { type: log, ref: "scan on kg itself: 0 errors, 49 warnings; architecture, api and glossary each reported uncovered_core_type with unmet_conditions [accepted_not_superseded] and the document path plus status draft, while five other core types reported missing_core_type with no candidate" }
   - { type: test, ref: "test-v2 Part 7 scan_groups_coverage_by_taxonomy_derived_quadrant" }
 urgency: batch
+compiled_to_kn: KN-0041

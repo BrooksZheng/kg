@@ -11,3 +11,4 @@ evidence:
   - { type: log, ref: "Part 1 kill_matrix_converges_at_every_checkpoint failed at after_before_images and after_config_write with was not killed at confirmation" }
   - { type: test, ref: "scripts/test-v2.mjs Part 1 kill_matrix_converges_at_every_checkpoint passed after content confirmation" }
 urgency: batch
+compiled_to_kn: KN-0047

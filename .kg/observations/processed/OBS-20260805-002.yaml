@@ -10,3 +10,4 @@ context:
 evidence:
   - { type: diff, ref: "skills/kg-kickoff/scripts/gather-context.mjs:276-303 validates index membership for --include but has no scope product or selection-basis check" }
 urgency: batch
+compiled_to_kn: KN-0042

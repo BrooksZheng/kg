@@ -8,6 +8,7 @@ scope:
     - protocol/document-taxonomy.yaml
 evidence:
   - { type: observation, ref: OBS-20260804-003 }
+  - { type: observation, ref: OBS-20260805-001 }
   - { type: test, ref: "test-v2 Part 7 scan_groups_coverage_by_taxonomy_derived_quadrant" }
   - { type: test, ref: "test-v2 Part 7 scan_excludes_spec_and_tutorials_from_coverage_denominator" }
   - { type: log, ref: "R4.4 verification on a host with no core documents: all eight gaps reported missing_core_type and none was miscoded uncovered_core_type" }
@@ -28,6 +29,15 @@ carrier_refs: []
 — draft status, superseded, or outside the expected location. The first is
 youth and the second is drift, and they call for opposite responses: write
 the document, versus find out what happened to the one you have.
+
+The distinction only pays off if the finding says which condition failed.
+`uncovered_core_type` alone tells a reader something is wrong without
+telling them a draft is the reason, so each gap carries its
+`unmet_conditions` and the offending document path — running scan against
+this repository returns `architecture`, `api` and `glossary` as
+`uncovered` with `unmet: [accepted_not_superseded]` and the three draft
+paths, which is actionable, whereas the bare code would only prompt a
+search. An issue code names a category; the reader needs the instance.
 
 Both conditions are checkable without reading prose. Quadrants come from
 `protocol/document-taxonomy.yaml` rather than a mapping in the report

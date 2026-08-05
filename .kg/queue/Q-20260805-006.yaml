@@ -1,0 +1,17 @@
+id: Q-20260805-006
+at: 2026-08-05T08:44:59Z
+kind: promotion
+category: project_contract
+claim: "Promote KN-0045: a defect in how a component interprets a shared contract must be repaired in a shared helper the siblings also call, because a local fix leaves every sibling holding the original defect."
+evidence:
+  - { type: observation, ref: OBS-20260805-007 }
+  - { type: quote, ref: ".mission/kg-v2-refactor/feedback-r52.md D70: eval-docs counted an agent reading assess-adr.mjs as a fifth invocation and failed a correct G-DOC1 session — the same substring misreading D50 patched locally in eval-spec, reappearing in the fifth evaluator" }
+options:
+  - "accept as project contract (activate KN-0045)"
+  - "keep as project_knowledge (advisory only)"
+  - "reject (retire KN-0045)"
+recommendation: "Accept. This is the project's first confirmed repeat-correction, and the repeat happened precisely because the first repair was local. The entry carries a usable test — ask whether the buggy code was interpreting its own state or a contract siblings share — which is what makes it enforceable rather than a slogan."
+entry: KN-0045
+source_observations: [OBS-20260805-007]
+resolution: accepted
+resolution_note: "Human delegated queue rulings to the compiler agent in-session (裁决有你帮我决定, 2026-07-31); delegation not scoped to a single round. Ruled per the recorded recommendation."

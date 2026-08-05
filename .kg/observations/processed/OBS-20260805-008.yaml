@@ -12,3 +12,4 @@ evidence:
   - { type: test, ref: "scripts/test-v2.mjs Part 6 validate_synthesis_and_archive_share_one_protocol_validator" }
   - { type: test, ref: "scripts/test-v2.mjs Part 7 seven_step_pipeline_consumes_real_outputs" }
 urgency: batch
+compiled_to_kn: KN-0046

@@ -1,0 +1,13 @@
+id: OBS-20260805-011
+at: 2026-08-05T08:47:21Z
+source: agent_insight
+claim: "The repeat-correction metric only matches human corrections against earlier human corrections, so the clearest repeats in this project — the same defect class rediscovered through testing rather than human rebuke — never register and the count can read zero while the phenomenon recurs."
+context:
+  task: "M5 backlog compile round"
+  paths:
+    - .agents/skills/kg-compile/scripts/report-metrics.mjs
+    - knowledge/KN-0045-when-a-defect-lies-in-how.md
+evidence:
+  - { type: log, ref: "D50 (eval-spec substring match) and D70 (eval-docs substring match) are the same misreading of the same tool-event contract five evaluators apart, yet report-metrics still prints repeat-correction count 0 because both were recorded as task_outcome observations, not human corrections" }
+  - { type: quote, ref: "report-metrics.mjs:2 'repeat-correction count — human corrections whose claim closely matches an EARLIER human correction'" }
+urgency: batch

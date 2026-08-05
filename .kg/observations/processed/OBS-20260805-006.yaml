@@ -11,3 +11,4 @@ context:
 evidence:
   - { type: test, ref: "protocol/kickoff-index.schema.yaml#L8-L86; skills/kg-kickoff/scripts/gather-context.mjs#L657-L723; scripts/test-v2.mjs#L4517-L4525" }
 urgency: batch
+compiled_to_kn: KN-0043

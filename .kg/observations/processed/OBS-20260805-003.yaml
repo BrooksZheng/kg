@@ -8,3 +8,4 @@ context:
 evidence:
   - { type: diff, ref: "skills/kg-kickoff/scripts/gather-context.mjs:247-262 reads each full file through readBudgeted and breaks the source loop at the limit" }
 urgency: batch
+compiled_to_kn: KN-0043

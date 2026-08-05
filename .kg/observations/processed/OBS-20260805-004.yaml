@@ -11,3 +11,4 @@ context:
 evidence:
   - { type: diff, ref: "skills/kg-spec/SKILL.md:37-43 conflicts with protocol/task-spec.schema.yaml:19 and skills/kg-spec/scripts/produce-spec.mjs:227-247" }
 urgency: batch
+compiled_to_kn: KN-0044

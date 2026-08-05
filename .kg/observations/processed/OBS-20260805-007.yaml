@@ -12,3 +12,4 @@ evidence:
   - { type: quote, ref: "human review: D50 fixed substring matching only in eval-spec, then D70 repeated the same defect in eval-docs" }
   - { type: test, ref: "node scripts/test-v2.mjs: evaluator_tool_audit_counts_only_successful_node_script_execution and all_five_evaluators_share_non_vendored_tool_audit" }
 urgency: batch
+compiled_to_kn: KN-0045

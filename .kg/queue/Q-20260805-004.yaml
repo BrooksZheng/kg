@@ -1,0 +1,18 @@
+id: Q-20260805-004
+at: 2026-08-05T08:44:59Z
+kind: promotion
+category: project_contract
+claim: "Promote KN-0042: retrieval scope must carry a machine-verifiable authorization basis for each selected source, because 'this document is relevant' is otherwise unfalsifiable."
+evidence:
+  - { type: observation, ref: OBS-20260805-002 }
+  - { type: test, ref: "test-v2 Part 5 kickoff_scope_requires_machine_verifiable_selection_basis" }
+  - { type: quote, ref: ".mission/kg-v2-refactor/contract-5.md §3.1.2: reason basis 只允许可复算来源；agent 自创 domain、仅凭标题相似、relevant: true 全部拒绝" }
+options:
+  - "accept as project contract (activate KN-0042)"
+  - "keep as project_knowledge (advisory only)"
+  - "reject (retire KN-0042)"
+recommendation: "Accept. This is the boundary that makes kickoff auditable at all: without it no checker can call a read out of bounds. It also encodes the honest limit — when no reconstructible basis exists the agent asks the user rather than inventing a rationale, which is the difference between a real boundary and a simulated one."
+entry: KN-0042
+source_observations: [OBS-20260805-002]
+resolution: accepted
+resolution_note: "Human delegated queue rulings to the compiler agent in-session (裁决有你帮我决定, 2026-07-31); delegation not scoped to a single round. Ruled per the recorded recommendation."

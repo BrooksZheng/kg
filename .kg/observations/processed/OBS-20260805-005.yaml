@@ -11,3 +11,4 @@ context:
 evidence:
   - { type: test, ref: "scripts/test-v2.mjs Part 6 spec_archives_compiled_context_transcript exposed map-list to string-list flattening" }
 urgency: batch
+compiled_to_kn: KN-0002

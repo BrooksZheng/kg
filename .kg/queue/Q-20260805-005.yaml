@@ -1,0 +1,17 @@
+id: Q-20260805-005
+at: 2026-08-05T08:44:59Z
+kind: promotion
+category: project_contract
+claim: "Promote KN-0044: a format an agent must produce may be stated in exactly one authoritative place; prose that restates a schema-enforced format drifts and sends the agent into a validator rejection."
+evidence:
+  - { type: observation, ref: OBS-20260805-004 }
+  - { type: quote, ref: ".mission/kg-v2-refactor/feedback-r25.md D54: kg-spec SKILL.md documented bare project-relative paths while the schema required #L anchors; the agent followed the prose and failed validation" }
+options:
+  - "accept as project contract (activate KN-0044)"
+  - "keep as project_knowledge (advisory only)"
+  - "reject (retire KN-0044)"
+recommendation: "Accept. KN-0034 already binds this for code; documentation is the surface agents actually read, and the D54 divergence survived from M2 to M5 because nothing compared the two statements. As contract it licenses a check; as advisory it licenses nothing."
+entry: KN-0044
+source_observations: [OBS-20260805-004]
+resolution: accepted
+resolution_note: "Human delegated queue rulings to the compiler agent in-session (裁决有你帮我决定, 2026-07-31); delegation not scoped to a single round. Ruled per the recorded recommendation."
