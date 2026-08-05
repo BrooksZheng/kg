@@ -1,0 +1,80 @@
+{
+  "kind": "kg.evaluation_oracle",
+  "version": 1,
+  "fixture_id": "m5-scan-agent-boundary",
+  "evaluator": "scan",
+  "expectations": [
+    {
+      "expectation_id": "contradiction-boundary-ref",
+      "level": "hard",
+      "criterion_id": null,
+      "assertion": "the accepted payment boundary requires queue-mediated writes",
+      "expected": "docs/architecture/payment-boundary.md#L3",
+      "derivation": "host/docs/architecture/payment-boundary.md#L3"
+    },
+    {
+      "expectation_id": "contradiction-incident-ref",
+      "level": "hard",
+      "criterion_id": null,
+      "assertion": "the incident runbook directs the same subject to write Ledger directly",
+      "expected": "docs/runbooks/payment-incident.md#L3",
+      "derivation": "host/docs/runbooks/payment-incident.md#L3"
+    },
+    {
+      "expectation_id": "compatible-distractor-ref",
+      "level": "hard",
+      "criterion_id": null,
+      "assertion": "the same-topic retry source preserves the queue boundary",
+      "expected": "docs/runbooks/payment-retry.md#L3",
+      "derivation": "host/docs/runbooks/payment-retry.md#L3"
+    },
+    {
+      "expectation_id": "semantic-gap-module",
+      "level": "hard",
+      "criterion_id": null,
+      "assertion": "the uncovered semantic flow belongs to the refunds module",
+      "expected": "src/modules/refunds",
+      "derivation": "host/src/modules/refunds/index.mjs#L1"
+    },
+    {
+      "expectation_id": "semantic-gap-module-ref",
+      "level": "hard",
+      "criterion_id": null,
+      "assertion": "the module identity has a stable source anchor",
+      "expected": "src/modules/refunds/index.mjs#L1",
+      "derivation": "host/src/modules/refunds/index.mjs#L1"
+    },
+    {
+      "expectation_id": "semantic-gap-runbook-ref",
+      "level": "hard",
+      "criterion_id": null,
+      "assertion": "the refunds recovery flow has no runbook",
+      "expected": "src/modules/refunds/index.mjs#L7",
+      "derivation": "host/src/modules/refunds/index.mjs#L7"
+    },
+    {
+      "expectation_id": "semantic-gap-reference-ref",
+      "level": "hard",
+      "criterion_id": null,
+      "assertion": "the refunds recovery flow has no reference document",
+      "expected": "src/modules/refunds/index.mjs#L8",
+      "derivation": "host/src/modules/refunds/index.mjs#L8"
+    },
+    {
+      "expectation_id": "semantic-gap-missing-runbook",
+      "level": "hard",
+      "criterion_id": null,
+      "assertion": "runbook is one exact missing evidence key",
+      "expected": "runbook",
+      "derivation": "host/src/modules/refunds/index.mjs#L7"
+    },
+    {
+      "expectation_id": "semantic-gap-missing-reference",
+      "level": "hard",
+      "criterion_id": null,
+      "assertion": "reference is one exact missing evidence key",
+      "expected": "reference",
+      "derivation": "host/src/modules/refunds/index.mjs#L8"
+    }
+  ]
+}

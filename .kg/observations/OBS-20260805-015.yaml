@@ -1,0 +1,15 @@
+id: OBS-20260805-015
+at: 2026-08-05T09:30:26Z
+source: task_outcome
+claim: "The scan agent writer must normalize protocol-declared degenerate line ranges before deriving report and finding identities, while shared parsing preserves true cross-line ranges."
+context:
+  task: "R5.4 D71 anchor canonicalization repair"
+  paths:
+    - protocol/scan-agent-report.schema.yaml
+    - scripts/lib/document-anchor.mjs
+    - skills/kg-scan/scripts/write-agent-report.mjs
+    - scripts/eval-scan-agent.mjs
+evidence:
+  - { type: test, ref: "scripts/test-v2.mjs Part 7 scan_agent_writer_canonicalizes_degenerate_line_ranges" }
+  - { type: diff, ref: "R5.4 D71 repair: #Ln-Ln and #Ln inputs produce byte-identical reports while #Ln-Lm remains unchanged" }
+urgency: batch

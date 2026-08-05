@@ -1,0 +1,14 @@
+id: OBS-20260805-012
+at: 2026-08-05T09:01:20Z
+source: task_outcome
+claim: "Scan agent evidence packets and reports must resolve outside the host project root so agent-assisted review remains read-only with respect to the host."
+context:
+  task: "R5.4 scan agent layer"
+  paths:
+    - skills/kg-scan/scripts/agent-report-core.mjs
+    - skills/kg-scan/scripts/prepare-agent-evidence.mjs
+    - skills/kg-scan/scripts/write-agent-report.mjs
+evidence:
+  - { type: diff, ref: "agent-report-core.mjs outputFile rejects canonical outputs inside project_root" }
+  - { type: test, ref: "test-v2 Part 7 scan_agent_report_is_separate_and_hash_binds_deterministic_report rejects host output" }
+urgency: batch

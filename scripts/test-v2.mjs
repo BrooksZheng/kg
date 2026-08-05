@@ -25,6 +25,7 @@ import {
   validateRunnerResponse,
 } from "./eval-bootstrap.mjs";
 import { scoreSpecMachineProducts } from "./eval-spec.mjs";
+import { evaluateAgentReportAgainstOracle } from "./eval-scan-agent.mjs";
 import { parseStructuredSpecText } from "../skills/kg-spec/scripts/produce-spec.mjs";
 import { computeMigrationPlanId } from "../skills/kg-init/scripts/migration-lib.mjs";
 
@@ -61,6 +62,7 @@ const RESOLVE_QUEUE = path.join(ROOT, "skills", "kg-compile", "scripts", "resolv
 const EVAL_COMPILE = path.join(ROOT, "scripts", "eval-compile.mjs");
 const EVAL_KICKOFF = path.join(ROOT, "scripts", "eval-kickoff.mjs");
 const EVAL_DOCS = path.join(ROOT, "scripts", "eval-docs.mjs");
+const EVAL_SCAN_AGENT = path.join(ROOT, "scripts", "eval-scan-agent.mjs");
 const EVAL_SPEC = path.join(ROOT, "scripts", "eval-spec.mjs");
 const GATHER_KICKOFF_CONTEXT = path.join(ROOT, "skills", "kg-kickoff", "scripts", "gather-context.mjs");
 const RECORD_KICKOFF_TURN = path.join(ROOT, "skills", "kg-kickoff", "scripts", "record-turn.mjs");
@@ -70,6 +72,8 @@ const RECORD_KICKOFF_CONFLICTS = path.join(ROOT, "skills", "kg-kickoff", "script
 const SPEC_PRODUCE = path.join(ROOT, "skills", "kg-spec", "scripts", "produce-spec.mjs");
 const STALENESS_CHECK = path.join(ROOT, "skills", "kg-scan", "scripts", "check-staleness.mjs");
 const HEALTH_CHECK = path.join(ROOT, "skills", "kg-scan", "scripts", "health-check.mjs");
+const SCAN_AGENT_PREPARE = path.join(ROOT, "skills", "kg-scan", "scripts", "prepare-agent-evidence.mjs");
+const SCAN_AGENT_WRITE = path.join(ROOT, "skills", "kg-scan", "scripts", "write-agent-report.mjs");
 const INIT_INSTALL = path.join(ROOT, "skills", "kg-init", "scripts", "install.mjs");
 const FIXTURE_LINT = path.join(ROOT, "scripts", "lint-fixtures.mjs");
 const MOCK_BOOTSTRAP_RUNNER = path.join(ROOT, "scripts", "fixtures", "m2", "mock-bootstrap-runner.mjs");
@@ -89,6 +93,7 @@ const R42_SCAN_FIXTURE = path.join(ROOT, "scripts", "fixtures", "m4", "compile-u
 const M5_KICKOFF_FIXTURE = path.join(ROOT, "scripts", "fixtures", "m5", "kickoff-full-surface");
 const M5_DOCS_FIXTURE = path.join(ROOT, "scripts", "fixtures", "m5", "docs-adr-scaffold");
 const M5_SPEC_OOS_FIXTURE = path.join(ROOT, "scripts", "fixtures", "m5", "spec-oos-provenance");
+const M5_SCAN_AGENT_FIXTURE = path.join(ROOT, "scripts", "fixtures", "m5", "scan-agent-boundary");
 const KICKOFF_FIXTURES = [
   path.join(ROOT, "scripts", "fixtures", "m1", "kickoff.fixture.yaml"),
   path.join(ROOT, "scripts", "fixtures", "m1", "kickoff-no-conflict.fixture.yaml"),
@@ -6699,12 +6704,100 @@ function runHealth(context, project, options = {}) {
     [
       "--root",
       project,
+      ...(options.output ? ["--output", options.output] : []),
       "--now",
       "2026-07-31T09:00:00Z",
       ...(options.gates ? ["--gates", "--max-staleness", String(options.maxStaleness ?? 0)] : []),
     ],
     { cwd: project, expectFailure: options.expectFailure === true },
   );
+}
+
+function scanAgentInput(options = {}) {
+  const contradiction = {
+    type: "semantic_contradiction",
+    severity: options.severity ?? "warning",
+    confidence: options.confidence ?? 0.97,
+    subject: "Checkout payment state write path",
+    source_refs: [
+      "docs/architecture/payment-boundary.md#L3",
+      "docs/runbooks/payment-incident.md#L3",
+    ],
+    analysis: options.resolved ? "Agent claims this contradiction is resolved." : "The same Checkout write path is required to use the queue and directed to bypass it.",
+    recommendation: options.resolved ? "No deterministic action requested." : "Reconcile the incident runbook with the accepted queue boundary.",
+    module_identity: null,
+    coverage_evidence: [],
+    missing_evidence: [],
+  };
+  const gap = {
+    type: "semantic_coverage_gap",
+    severity: options.severity ?? "warning",
+    confidence: options.confidence ?? 0.96,
+    subject: "Refund operator recovery",
+    source_refs: [
+      "src/modules/refunds/index.mjs#L1",
+      "src/modules/refunds/index.mjs#L7",
+      "src/modules/refunds/index.mjs#L8",
+    ],
+    analysis: options.resolved ? "Agent claims this semantic gap is resolved." : "The module names a manual operator flow while both semantic documentation links are null.",
+    recommendation: options.resolved ? "No deterministic action requested." : "Add the recovery runbook and reference document.",
+    module_identity: "src/modules/refunds",
+    coverage_evidence: ["src/modules/refunds/index.mjs#L1"],
+    missing_evidence: ["runbook", "reference"],
+  };
+  return {
+    model: "fresh-agent-test",
+    session_id: "session-scan-agent-test",
+    findings: options.findings ?? [contradiction, gap],
+  };
+}
+
+function setupScanAgentProject(context, name) {
+  const caseRoot = path.join(context.root, name);
+  const project = path.join(caseRoot, "project");
+  const artifacts = path.join(caseRoot, "artifacts");
+  fs.cpSync(path.join(M5_SCAN_AGENT_FIXTURE, "host"), project, { recursive: true });
+  fs.mkdirSync(artifacts, { recursive: true });
+  const baseReport = path.join(artifacts, "base-report.json");
+  const baseGate = runHealth(context, project, { gates: true, output: baseReport });
+  const scenario = readJson(path.join(M5_SCAN_AGENT_FIXTURE, "scenario.json"));
+  const sources = scenario.visible_inputs.map((value) => {
+    ensure(context, value.startsWith("host/"), `scan fixture visible input is outside host: ${value}`);
+    return value.slice("host/".length);
+  });
+  const packet = path.join(artifacts, "evidence-packet.json");
+  runNode(
+    context,
+    SCAN_AGENT_PREPARE,
+    [
+      "--project-root", project,
+      "--base-report", baseReport,
+      ...sources.flatMap((source) => ["--source", source]),
+      "--output", packet,
+    ],
+    { cwd: project },
+  );
+  return { caseRoot, project, artifacts, baseReport, baseGate, packet, sources };
+}
+
+function writeScanAgentReport(context, setup, name, input, options = {}) {
+  const inputFile = path.join(setup.artifacts, `${name}-input.json`);
+  const output = options.output ?? path.join(setup.artifacts, `${name}-report.json`);
+  writeJson(inputFile, input);
+  const run = runNode(
+    context,
+    SCAN_AGENT_WRITE,
+    [
+      "--project-root", setup.project,
+      "--base-report", setup.baseReport,
+      "--evidence-packet", setup.packet,
+      "--input", inputFile,
+      "--output", output,
+      "--now", "2026-07-31T09:05:00Z",
+    ],
+    { cwd: setup.project, expectFailure: options.expectFailure === true },
+  );
+  return { inputFile, output, run, report: fs.existsSync(output) ? readJson(output) : null };
 }
 
 function setupStalenessProject(context, name) {
@@ -7128,6 +7221,226 @@ function runSevenStepChain(context) {
 }
 
 function runPart7(context) {
+  testCase(context, "scan_agent_writer_canonicalizes_degenerate_line_ranges", () => {
+    const setup = setupScanAgentProject(context, "m5-scan-agent-anchor-canonicalization");
+    const canonical = writeScanAgentReport(context, setup, "canonical-anchor", scanAgentInput());
+    const degenerateInput = scanAgentInput();
+    degenerateInput.findings[0].source_refs[0] = "docs/architecture/payment-boundary.md#L3-L3";
+    const degenerate = writeScanAgentReport(context, setup, "degenerate-anchor", degenerateInput);
+    ensure(
+      context,
+      fs.readFileSync(canonical.output).equals(fs.readFileSync(degenerate.output)),
+      "single-line and degenerate-range inputs did not produce byte-identical reports",
+    );
+
+    const rangeInput = scanAgentInput();
+    rangeInput.findings[1].source_refs[0] = "src/modules/refunds/index.mjs#L3-L5";
+    rangeInput.findings[1].coverage_evidence[0] = "src/modules/refunds/index.mjs#L3-L5";
+    const range = writeScanAgentReport(context, setup, "cross-line-anchor", rangeInput).report;
+    const gap = range.findings.find((finding) => finding.type === "semantic_coverage_gap");
+    ensure(
+      context,
+      gap.source_refs.includes("src/modules/refunds/index.mjs#L3-L5") &&
+        gap.coverage_evidence.includes("src/modules/refunds/index.mjs#L3-L5"),
+      "cross-line source range changed during canonicalization",
+    );
+  });
+
+  testCase(context, "scan_agent_report_is_separate_and_hash_binds_deterministic_report", () => {
+    const setup = setupScanAgentProject(context, "m5-scan-agent-hash-binding");
+    const written = writeScanAgentReport(context, setup, "valid", scanAgentInput());
+    const report = written.report;
+    const errors = protocol.validateRecord(report, protocol.loadScanAgentReportSchema());
+    ensure(context, errors.length === 0, `scan agent report schema failed: ${errors.join("; ")}`);
+    ensure(context, report.kind === "kg.scan_agent_report" && report.version === 1, "scan agent report identity is invalid");
+    ensure(context, report.base_report_sha256 === `sha256:${fileHash(setup.baseReport)}`, "base report hash was not recomputed from disk bytes");
+    ensure(context, report.evidence_packet_sha256 === `sha256:${fileHash(setup.packet)}`, "packet hash was not recomputed from disk bytes");
+    const base = readJson(setup.baseReport);
+    ensure(context, base.kind === "kg.staleness_report" && base.version === 2, "deterministic report shape changed");
+    ensure(context, base.findings.every((finding) => finding.detection_mode === "deterministic" && finding.confidence === undefined), "agent finding entered deterministic findings");
+    ensure(context, !fs.existsSync(path.join(setup.artifacts, "scan-bundle.json")), "B-2 bundle product was created");
+
+    const hostOutput = path.join(setup.project, "docs", "agent-report.json");
+    const hostWrite = writeScanAgentReport(context, setup, "host-output", scanAgentInput(), {
+      expectFailure: true,
+      output: hostOutput,
+    });
+    ensure(context, !fs.existsSync(hostWrite.output), "agent writer modified the host project");
+
+    fs.appendFileSync(setup.baseReport, "\n");
+    const rejected = writeScanAgentReport(context, setup, "drifted-base", scanAgentInput(), { expectFailure: true });
+    ensure(context, !fs.existsSync(rejected.output), "base hash mismatch wrote an agent report");
+  });
+
+  testCase(context, "scan_agent_findings_require_agent_assisted_mode_and_confidence", () => {
+    const setup = setupScanAgentProject(context, "m5-scan-agent-mode-confidence");
+    const critical = writeScanAgentReport(context, setup, "critical", scanAgentInput({ confidence: 1, severity: "critical" }));
+    ensure(context, critical.report.detection_mode === "agent_assisted", "top-level agent detection mode is missing");
+    ensure(context, critical.report.findings.every((finding) => finding.detection_mode === "agent_assisted" && finding.confidence === 1 && finding.severity === "critical"), "agent finding mode, confidence, or severity changed");
+
+    const ownedMode = { ...scanAgentInput(), detection_mode: "agent_assisted" };
+    const ownedRejected = writeScanAgentReport(context, setup, "owned-mode", ownedMode, { expectFailure: true });
+    ensure(context, !fs.existsSync(ownedRejected.output), "agent supplied a script-owned detection mode");
+    const invalidConfidence = scanAgentInput();
+    invalidConfidence.findings[0].confidence = 1.01;
+    const confidenceRejected = writeScanAgentReport(context, setup, "invalid-confidence", invalidConfidence, { expectFailure: true });
+    ensure(context, !fs.existsSync(confidenceRejected.output), "out-of-range confidence wrote a report");
+  });
+
+  testCase(context, "scan_contradiction_requires_two_distinct_valid_source_refs", () => {
+    const setup = setupScanAgentProject(context, "m5-scan-agent-contradiction-refs");
+    const cases = [
+      {
+        name: "one-ref",
+        mutate: (input) => { input.findings[0].source_refs = [input.findings[0].source_refs[0]]; },
+      },
+      {
+        name: "duplicate-ref",
+        mutate: (input) => { input.findings[0].source_refs = [input.findings[0].source_refs[0], input.findings[0].source_refs[0]]; },
+      },
+      {
+        name: "line-range",
+        mutate: (input) => { input.findings[0].source_refs[1] = "docs/runbooks/payment-incident.md#L99"; },
+      },
+      {
+        name: "packet-membership",
+        mutate: (input) => { input.findings[0].source_refs[1] = "docs/runbooks/unpacketized.md#L1"; },
+      },
+      {
+        name: "mixed-case-kg",
+        mutate: (input) => { input.findings[0].source_refs[1] = ".KG/hidden.md#L1"; },
+      },
+    ];
+    for (const item of cases) {
+      const input = scanAgentInput();
+      item.mutate(input);
+      const rejected = writeScanAgentReport(context, setup, item.name, input, { expectFailure: true });
+      ensure(context, !fs.existsSync(rejected.output), `${item.name} source ref wrote a report`);
+    }
+
+    fs.writeFileSync(path.join(setup.project, "docs", "runbooks", "unpacketized.md"), "outside packet\n");
+    fs.writeFileSync(path.join(setup.project, "docs", "runbooks", "symlink-target.md"), "target\n");
+    fs.symlinkSync(
+      path.join(setup.project, "docs", "runbooks", "symlink-target.md"),
+      path.join(setup.project, "docs", "runbooks", "symlink-source.md"),
+    );
+    const symlinkPacket = path.join(setup.artifacts, "symlink-packet.json");
+    runNode(
+      context,
+      SCAN_AGENT_PREPARE,
+      ["--project-root", setup.project, "--base-report", setup.baseReport, "--source", "docs/runbooks/symlink-source.md", "--output", symlinkPacket],
+      { cwd: setup.project, expectFailure: true },
+    );
+    ensure(context, !fs.existsSync(symlinkPacket), "symlink source entered an evidence packet");
+    fs.mkdirSync(path.join(setup.project, ".Kg"));
+    fs.writeFileSync(path.join(setup.project, ".Kg", "hidden.md"), "hidden\n");
+    const kgPacket = path.join(setup.artifacts, "kg-packet.json");
+    runNode(
+      context,
+      SCAN_AGENT_PREPARE,
+      ["--project-root", setup.project, "--base-report", setup.baseReport, "--source", ".Kg/hidden.md", "--output", kgPacket],
+      { cwd: setup.project, expectFailure: true },
+    );
+    ensure(context, !fs.existsSync(kgPacket), "mixed-case .kg source entered an evidence packet");
+  });
+
+  testCase(context, "scan_semantic_gap_uses_distinct_issue_code_and_module_evidence", () => {
+    const setup = setupScanAgentProject(context, "m5-scan-agent-semantic-gap");
+    const valid = writeScanAgentReport(context, setup, "valid-gap", scanAgentInput()).report;
+    const gap = valid.findings.find((finding) => finding.type === "semantic_coverage_gap");
+    const structuralIssues = new Set(Object.values(protocol.loadScanPolicy().structural_coverage));
+    ensure(context, gap && !structuralIssues.has(gap.type), "semantic gap issue code overlaps deterministic structural coverage");
+    ensure(context, gap.module_identity === "src/modules/refunds", "semantic gap lost module identity");
+    ensure(context, gap.coverage_evidence.length === 1 && gap.missing_evidence.length === 2, "semantic gap lost existing or missing evidence");
+
+    const deterministicCode = scanAgentInput();
+    deterministicCode.findings[1].type = protocol.loadScanPolicy().structural_coverage.missing_issue;
+    const codeRejected = writeScanAgentReport(context, setup, "deterministic-code", deterministicCode, { expectFailure: true });
+    ensure(context, !fs.existsSync(codeRejected.output), "deterministic core issue code entered agent report");
+    const missingModule = scanAgentInput();
+    missingModule.findings[1].module_identity = null;
+    const moduleRejected = writeScanAgentReport(context, setup, "missing-module", missingModule, { expectFailure: true });
+    ensure(context, !fs.existsSync(moduleRejected.output), "semantic gap without module identity wrote a report");
+    const repeatedStructural = scanAgentInput();
+    repeatedStructural.findings[1].missing_evidence = [protocol.loadScanPolicy().structural_coverage.uncovered_issue];
+    const repeatedRejected = writeScanAgentReport(context, setup, "repeated-structural", repeatedStructural, { expectFailure: true });
+    ensure(context, !fs.existsSync(repeatedRejected.output), "semantic gap repackaged a deterministic structural issue");
+  });
+
+  testCase(context, "scan_agent_report_cannot_change_deterministic_report_bytes_or_counts", () => {
+    const setup = setupScanAgentProject(context, "m5-scan-agent-deterministic-invariance");
+    const beforeBytes = fs.readFileSync(setup.baseReport);
+    const beforeSha256 = `sha256:${fileHash(setup.baseReport)}`;
+    const before = readJson(setup.baseReport);
+    const projectHash = treeHash(setup.project);
+    writeScanAgentReport(context, setup, "valid", scanAgentInput());
+    ensure(context, treeHash(setup.project) === projectHash, "agent writer changed project bytes");
+    const afterFile = path.join(setup.artifacts, "base-report-after.json");
+    const afterGate = runHealth(context, setup.project, { gates: true, output: afterFile });
+    const afterBytes = fs.readFileSync(afterFile);
+    const afterSha256 = `sha256:${fileHash(afterFile)}`;
+    const after = readJson(afterFile);
+    ensure(context, setup.baseGate.status === afterGate.status && setup.baseGate.status === 0, "agent layer changed deterministic gate exit");
+    ensure(context, beforeBytes.equals(afterBytes), "agent layer changed deterministic report bytes or hash");
+    ensure(context, beforeSha256 === afterSha256, "agent layer changed deterministic report sha256");
+    for (const field of ["artifacts_scanned", "staleness_count", "hard_error_count", "warning_count"]) {
+      ensure(context, before[field] === after[field], `agent layer changed deterministic ${field}`);
+    }
+
+    for (const file of [STALENESS_CHECK, path.join(ROOT, "skills", "kg-scan", "scripts", "report-builder.mjs")]) {
+      const source = fs.readFileSync(file, "utf8");
+      for (const forbidden of ["scan-agent-report", "loadScanAgentReportSchema", "agent-report-core", "write-agent-report", "confidence", '"critical"', '"advisory"']) {
+        ensure(context, !source.includes(forbidden), `${path.basename(file)} can read agent capability ${forbidden}`);
+      }
+    }
+  });
+
+  testCase(context, "scan_agent_critical_finding_never_changes_gate_exit", () => {
+    const setup = setupScanAgentProject(context, "m5-scan-agent-critical-gate");
+    ensure(context, setup.baseGate.status === 0, "healthy baseline gate failed");
+    const critical = writeScanAgentReport(context, setup, "critical", scanAgentInput({ confidence: 1, severity: "critical" }));
+    ensure(context, critical.report.findings.every((finding) => finding.confidence === 1 && finding.severity === "critical"), "critical report injection was not legal");
+    const after = runHealth(context, setup.project, { gates: true, output: path.join(setup.artifacts, "critical-gate.json") });
+    ensure(context, after.status === setup.baseGate.status, "critical agent finding changed deterministic gate exit");
+  });
+
+  testCase(context, "scan_deterministic_error_fails_gate_even_when_agent_claims_resolution", () => {
+    const setup = setupScanAgentProject(context, "m5-scan-agent-hard-error");
+    const empty = writeScanAgentReport(context, setup, "empty", scanAgentInput({ findings: [] }));
+    ensure(context, empty.report.findings.length === 0, "empty agent report was not legal");
+    const resolved = writeScanAgentReport(context, setup, "resolved", scanAgentInput({ confidence: 1, severity: "critical", resolved: true }));
+    ensure(context, resolved.report.findings.every((finding) => finding.analysis.includes("claims")), "resolved claim fixture was not injected");
+    const hardTarget = path.join(setup.project, "harness", "artifacts", "HAR-SCAN-HARD.yaml");
+    fs.mkdirSync(path.dirname(hardTarget), { recursive: true });
+    fs.copyFileSync(path.join(M5_SCAN_AGENT_FIXTURE, "variants", "hard-error", "HAR-SCAN-HARD.yaml"), hardTarget);
+    for (const state of ["missing", "empty", "resolved"]) {
+      const gate = runHealth(context, setup.project, {
+        gates: true,
+        output: path.join(setup.artifacts, `hard-${state}.json`),
+        expectFailure: true,
+      });
+      const report = readStalenessReport(gate);
+      ensure(context, gate.status === 2 && report.hard_error_count > 0, `hard error passed with ${state} agent report state`);
+    }
+  });
+
+  testCase(context, "scan_agent_fixture_rejects_false_positive_and_missing_expected_gap", () => {
+    runNode(context, EVAL_SCAN_AGENT, ["--check-fixture", M5_SCAN_AGENT_FIXTURE], { cwd: ROOT });
+    const loaded = loadSplitEvaluationFixture({
+      scenarioFile: path.join(M5_SCAN_AGENT_FIXTURE, "scenario.json"),
+      oracleFile: path.join(M5_SCAN_AGENT_FIXTURE, "oracle.json"),
+    });
+    const setup = setupScanAgentProject(context, "m5-scan-agent-oracle-controls");
+    const valid = writeScanAgentReport(context, setup, "valid", scanAgentInput()).report;
+    ensure(context, evaluateAgentReportAgainstOracle(valid, loaded).length === 0, "source-derived scan oracle rejected the valid report");
+    const falsePositive = structuredClone(valid);
+    falsePositive.findings[0].source_refs[1] = "docs/runbooks/payment-retry.md#L3";
+    ensure(context, evaluateAgentReportAgainstOracle(falsePositive, loaded).some((failure) => failure.includes("distractor")), "scan oracle accepted the compatible distractor");
+    const missingGap = structuredClone(valid);
+    missingGap.findings = missingGap.findings.filter((finding) => finding.type !== "semantic_coverage_gap");
+    ensure(context, evaluateAgentReportAgainstOracle(missingGap, loaded).length > 0, "scan oracle accepted a report with no expected semantic gap");
+  });
+
   testCase(context, "scan_reports_one_missing_source_ref", () => {
     const setup = setupStalenessProject(context, "staleness-positive");
     const unreadable = path.join(setup.project, ".kg", "observations");

@@ -110,6 +110,32 @@ export function validateConstraintAnchor(source, projectRoot, pattern) {
   }
 }
 
+export function parseStableLineAnchor(source, contract) {
+  if (typeof source !== "string") throw new Error("source ref must be a string");
+  const pattern = contract?.source_ref_pattern;
+  if (typeof pattern !== "string" || pattern.trim() === "") {
+    throw new Error("source ref protocol pattern is missing");
+  }
+  const match = new RegExp(pattern).exec(source);
+  const groups = match?.groups;
+  if (!groups?.path || !groups.line_start) {
+    throw new Error(`source ref does not match the protocol anchor form: ${source}`);
+  }
+  const lineStart = Number.parseInt(groups.line_start, 10);
+  const lineEnd = Number.parseInt(groups.line_end ?? groups.line_start, 10);
+  if (lineEnd < lineStart) throw new Error(`source ref range is reversed: ${source}`);
+  return { path: groups.path, lineStart, lineEnd };
+}
+
+export function normalizeStableLineAnchor(source, contract) {
+  const parsed = parseStableLineAnchor(source, contract);
+  if (contract?.source_ref_canonicalization !== "equal_line_range_to_single_line") {
+    throw new Error("source ref protocol canonicalization is missing or unsupported");
+  }
+  if (parsed.lineStart !== parsed.lineEnd || !source.includes("-L")) return source;
+  return `${parsed.path}#L${parsed.lineStart}`;
+}
+
 export function formatDocumentAnchorErrorZh(error) {
   if (!(error instanceof DocumentAnchorError)) return error.message;
   const { sourcePath, line, lineCount } = error.details;

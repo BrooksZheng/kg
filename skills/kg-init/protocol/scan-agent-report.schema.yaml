@@ -7,6 +7,20 @@ product_version: 1
 detection_mode_values: [agent_assisted]
 finding_type_values: [semantic_contradiction, semantic_coverage_gap]
 severity_values: [advisory, warning, critical]
+semantic_gap_issue_code: semantic_coverage_gap
+
+# Shared source-ref contract. The named captures are interpreted by
+# scripts/lib/document-anchor.mjs. Writers accept this input form and apply
+# the declared canonicalization before product identity or bytes are derived.
+source_ref_pattern: "^(?<path>.+)#L(?<line_start>[1-9][0-9]*)(?:-L(?<line_end>[1-9][0-9]*))?$"
+source_ref_canonicalization: equal_line_range_to_single_line
+
+# The evidence packet is a script-produced agent input, not a kg.* product.
+# These orders are interpreted by prepare-agent-evidence.mjs and the report
+# writer so packet identity and source membership have one protocol authority.
+evidence_packet_version: 1
+evidence_packet_field_order: "version|project_root|base_report_path|base_report_sha256|sources"
+evidence_source_field_order: "path|sha256|line_count|content"
 
 field_order:
   - kind
@@ -46,9 +60,9 @@ fields:
   findings[].severity: { type: enum_from, required: true, values_from: severity_values }
   findings[].confidence: { type: float, required: true, min: 0, max: 1 }
   findings[].subject: { type: string, required: true }
-  findings[].source_refs: { type: string_list, required: true, min_items: 1 }
+  findings[].source_refs: { type: string_list, required: true, min_items: 1, unique: true, pattern_from: source_ref_pattern }
   findings[].analysis: { type: string, required: true }
   findings[].recommendation: { type: string, required: true }
   findings[].module_identity: { type: string_or_null, required: true }
-  findings[].coverage_evidence: { type: string_list, required: true }
-  findings[].missing_evidence: { type: string_list, required: true }
+  findings[].coverage_evidence: { type: string_list, required: true, unique: true, pattern_from: source_ref_pattern }
+  findings[].missing_evidence: { type: string_list, required: true, unique: true }

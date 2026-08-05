@@ -124,6 +124,73 @@ scan observation only when the scan process itself teaches a reusable
 project-specific lesson; do not duplicate every API or glossary finding into
 the observation inbox.
 
+## Structural coverage and semantic coverage
+
+Keep the two coverage layers separate.
+
+Structural coverage is deterministic. `kg.staleness_report` version 2 derives
+`coverage_audit` from the document taxonomy and accepted registered project
+documents. `missing_core_type` means that no registered document exists for a
+core taxonomy type. `uncovered_core_type` means candidates exist but fail one
+or more explicit coverage conditions. These codes, counts, report bytes, and
+gate behavior belong only to the deterministic builder.
+
+Semantic coverage is agent-assisted. It asks whether a specific module or
+flow has enough explanation, a runbook, or a reference for a human reader.
+Record that judgment only as `semantic_coverage_gap` in a separate
+`kg.scan_agent_report`. Bind it to a canonical `module_identity`, stable source
+refs already present in the evidence packet, existing `coverage_evidence`, and
+explicit `missing_evidence`. Never reuse `missing_core_type` or
+`uncovered_core_type` for this layer.
+
+### Agent-assisted evidence workflow
+
+First save a completed deterministic report. Then prepare a read-only evidence
+packet from the smallest source set that can support semantic review:
+
+```bash
+node <kg-scan>/scripts/health-check.mjs \
+  --root <project-root> \
+  --now <ISO-timestamp> \
+  --output <session>/base-report.json
+
+node <kg-scan>/scripts/prepare-agent-evidence.mjs \
+  --project-root <project-root> \
+  --base-report <session>/base-report.json \
+  --source docs/architecture/example.md \
+  --source src/modules/example/index.mjs \
+  --output <session>/evidence-packet.json
+```
+
+The packet is script-produced agent input and has no `kg.*` product identity.
+Its source bytes, hashes, canonical paths, line counts, and base report binding
+are rechecked by the report writer.
+
+Read the complete packet and submit strict JSON containing only `model`,
+`session_id`, and `findings`. A contradiction needs at least two distinct
+packet source refs and must keep `module_identity` null with empty coverage gap
+fields. A semantic gap needs a canonical module identity, at least one stable
+coverage ref that also appears in `source_refs`, and at least one missing
+evidence key. Follow the source-ref anchor contract in
+`protocol/scan-agent-report.schema.yaml`.
+
+Write the canonical product through:
+
+```bash
+node <kg-scan>/scripts/write-agent-report.mjs \
+  --project-root <project-root> \
+  --base-report <session>/base-report.json \
+  --evidence-packet <session>/evidence-packet.json \
+  --input <session>/agent-input.json \
+  --output <session>/agent-report.json \
+  --now <ISO-timestamp>
+```
+
+`kg.scan_agent_report` is the only agent-layer product. Its confidence and
+severity fields support human review. They never alter deterministic report
+bytes, counts, verdict, or gate exit. Deterministic gate entrypoints accept no
+agent report parameter and import no agent writer.
+
 ## Deterministic staleness health check
 
 The R4.3 report builder is shared by `check-staleness.mjs` and

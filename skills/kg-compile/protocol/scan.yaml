@@ -5,6 +5,12 @@
 kind: kg.scan_policy
 version: 1
 
+# Structural coverage belongs to the deterministic report. Agent-assisted
+# semantic coverage uses a disjoint type table in scan-agent-report.schema.yaml.
+structural_coverage:
+  missing_issue: missing_core_type
+  uncovered_issue: uncovered_core_type
+
 resident_surface:
   path: AGENTS.md
   target_lines: 30

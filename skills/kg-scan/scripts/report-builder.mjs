@@ -9,6 +9,7 @@ import path from "node:path";
 import { harness, host, inverseMap, kyaml, proposal, protocol } from "./_lib.mjs";
 
 const SCAN_REPORT_SCHEMA = protocol.loadScanReportSchema();
+const SCAN_POLICY = protocol.loadScanPolicy();
 const REPORT_FIELDS = SCAN_REPORT_SCHEMA.field_order;
 const FINDING_FIELDS = SCAN_REPORT_SCHEMA.finding_field_order;
 function portableRelative(root, full) {
@@ -584,7 +585,10 @@ function scanCoverage(root, findings) {
       continue;
     }
 
-    const issue = typeCandidates.length === 0 ? "missing_core_type" : "uncovered_core_type";
+    // KN-0034: deterministic structural issue codes come from scan policy.
+    const issue = typeCandidates.length === 0
+      ? SCAN_POLICY.structural_coverage.missing_issue
+      : SCAN_POLICY.structural_coverage.uncovered_issue;
     const documentDetails = typeCandidates.map((candidate) => {
       const conditions = coverageConditions(candidate, coreType, taxonomy);
       return {
@@ -611,7 +615,7 @@ function scanCoverage(root, findings) {
       severity: "warning",
       side: "coverage",
       source_path: documentDetails[0]?.path ?? route.path ?? null,
-      message: issue === "missing_core_type"
+      message: issue === SCAN_POLICY.structural_coverage.missing_issue
         ? `${coreType}: no registered project document exists`
         : `${coreType}: registered project document(s) do not satisfy: ${unmet.join(", ")}`,
       expected: "accepted registered project document under the taxonomy path without superseded_by",
@@ -711,8 +715,7 @@ function scanInverse(root, knowledgeEntries, carriers, findings) {
 }
 
 function scanResidentSurface(root, findings) {
-  const policy = protocol.loadScanPolicy();
-  const configured = policy.resident_surface;
+  const configured = SCAN_POLICY.resident_surface;
   const target = safePath(root, configured.path, findings, {
     issue: "resident_surface_path_invalid",
     side: "resident_surface",

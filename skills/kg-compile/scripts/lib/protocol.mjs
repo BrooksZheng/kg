@@ -192,6 +192,14 @@ function checkValue(value, spec, fieldKey, label, errors, ctx) {
         errors.push(`${label}: must be a list of non-empty strings`);
         return;
       }
+      const pattern = spec.pattern ?? resolveSchemaValue(ctx.schema, spec.pattern_from);
+      if (spec.pattern_from && typeof pattern !== "string") {
+        errors.push(`${label}: schema bug — pattern_from \`${spec.pattern_from}\` is empty or missing`);
+        return;
+      }
+      if (pattern && !value.every((item) => new RegExp(pattern).test(item))) {
+        errors.push(`${label}: contains a value that does not match ${pattern}`);
+      }
       if (spec.min_items !== undefined && value.length < spec.min_items) {
         errors.push(`${label}: needs at least ${spec.min_items} item(s)`);
       }
@@ -475,6 +483,7 @@ if (isMain()) {
   const taxonomy = docs["document-taxonomy.yaml"];
   const scan = docs["scan.yaml"];
   const scanReport = docs["scan-report.schema.yaml"];
+  const scanAgentReport = docs["scan-agent-report.schema.yaml"];
   const projectDocument = docs["project-document.schema.yaml"];
   if (taxonomy && projectDocument) {
     if (projectDocument.version !== 1) problems.push("project-document: version must remain 1");
@@ -520,6 +529,15 @@ if (isMain()) {
     if (typeof surface?.guidance !== "string" || surface.guidance.trim() === "") {
       problems.push("scan: resident surface guidance is required");
     }
+    const structuralIssues = Object.values(scan.structural_coverage ?? {});
+    if (structuralIssues.length !== 2 || new Set(structuralIssues).size !== 2 ||
+        !structuralIssues.every((value) => typeof value === "string" && value.trim() !== "")) {
+      problems.push("scan: structural coverage issue codes must be two distinct strings");
+    }
+    const semanticIssues = new Set(scanAgentReport?.finding_type_values ?? []);
+    for (const issue of structuralIssues) {
+      if (semanticIssues.has(issue)) problems.push(`scan: structural and semantic coverage issue codes overlap at ${issue}`);
+    }
   }
   if (scanReport) {
     if (scanReport.kind !== "kg.scan_report_schema" || scanReport.version !== 2) {
@@ -530,6 +548,33 @@ if (isMain()) {
     }
     if (!scanReport.field_order?.includes("coverage_audit") || scanReport.fields?.coverage_audit?.type !== "map") {
       problems.push("scan-report: taxonomy coverage_audit field is required");
+    }
+  }
+  if (scanAgentReport) {
+    const packetFields = String(scanAgentReport.evidence_packet_field_order ?? "").split("|").filter(Boolean);
+    const sourceFields = String(scanAgentReport.evidence_source_field_order ?? "").split("|").filter(Boolean);
+    if (scanAgentReport.product_kind !== "kg.scan_agent_report" || scanAgentReport.product_version !== 1) {
+      problems.push("scan-agent-report: product kind/version is invalid");
+    }
+    if (scanAgentReport.semantic_gap_issue_code !== "semantic_coverage_gap" ||
+        !scanAgentReport.finding_type_values?.includes(scanAgentReport.semantic_gap_issue_code)) {
+      problems.push("scan-agent-report: semantic gap issue code must come from the finding type table");
+    }
+    if (scanAgentReport.evidence_packet_version !== 1 || packetFields.length !== 5 || sourceFields.length !== 4) {
+      problems.push("scan-agent-report: evidence packet version and field orders are required");
+    }
+    try {
+      new RegExp(scanAgentReport.source_ref_pattern);
+    } catch {
+      problems.push("scan-agent-report: source ref pattern must be a valid regular expression");
+    }
+    if (scanAgentReport.source_ref_canonicalization !== "equal_line_range_to_single_line") {
+      problems.push("scan-agent-report: source ref canonicalization is invalid");
+    }
+    for (const field of ["findings[].source_refs", "findings[].coverage_evidence"]) {
+      if (scanAgentReport.fields?.[field]?.pattern_from !== "source_ref_pattern") {
+        problems.push(`scan-agent-report: ${field} must point to the source ref pattern`);
+      }
     }
   }
   const taskSpec = docs["task-spec.schema.yaml"];
@@ -585,6 +630,18 @@ if (isMain()) {
       }
       if (spec.type === "enum_from" && enumSource === undefined) {
         problems.push(`${file}: ${field}.values_from does not resolve: ${spec.values_from}`);
+      }
+      const patternSource = resolveSchemaValue(schema, spec.pattern_from);
+      if (spec.pattern_from && typeof patternSource !== "string") {
+        problems.push(`${file}: ${field}.pattern_from does not resolve: ${spec.pattern_from}`);
+      }
+      const pattern = spec.pattern ?? patternSource;
+      if (pattern) {
+        try {
+          new RegExp(pattern);
+        } catch {
+          problems.push(`${file}: ${field} pattern is not a valid regular expression`);
+        }
       }
     }
     const owned = String(schema.script_owned_fields ?? "").split("|").filter(Boolean);
