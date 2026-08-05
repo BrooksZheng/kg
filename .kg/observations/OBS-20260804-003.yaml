@@ -1,0 +1,15 @@
+id: OBS-20260804-003
+at: 2026-08-04T03:37:54Z
+source: task_outcome
+claim: "Coverage audit issue codes must distinguish a core type with no registered project document from a registered document that fails one or more deterministic coverage conditions, with taxonomy supplying the quadrant map."
+context:
+  task: "R4.4 taxonomy coverage audit"
+  paths:
+    - skills/kg-scan/scripts/report-builder.mjs
+    - protocol/document-taxonomy.yaml
+    - protocol/project-document.schema.yaml
+evidence:
+  - { type: test, ref: scan_defines_missing_core_type_without_semantic_guessing }
+  - { type: test, ref: scan_reports_registered_document_schema_failures_deterministically }
+  - { type: test, ref: scan_groups_coverage_by_taxonomy_derived_quadrant }
+urgency: batch

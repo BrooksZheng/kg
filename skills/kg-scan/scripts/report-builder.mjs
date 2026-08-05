@@ -485,6 +485,162 @@ function scanKnowledge(root, findings) {
   return valid;
 }
 
+function taxonomyPathMatches(relative, configuredPath) {
+  const configured = String(configuredPath).replaceAll("\\", "/").replace(/\/+$/, "");
+  return configured.endsWith(".md")
+    ? relative === configured
+    : relative === configured || relative.startsWith(`${configured}/`);
+}
+
+function registeredDocumentCandidate(file, root, schema, findings) {
+  const text = fs.readFileSync(file.full, "utf8");
+  if (!text.startsWith("---\n") && !text.startsWith("---\r\n")) return null;
+  let frontmatter;
+  try {
+    ({ frontmatter } = protocol.splitFrontmatter(text));
+  } catch (error) {
+    return null;
+  }
+  if (frontmatter?.kind !== "kg.project_document") return null;
+  const errors = protocol.validateRecord(frontmatter, schema);
+  return {
+    relative: file.relative,
+    frontmatter,
+    schema_errors: errors,
+    schema_valid: errors.length === 0,
+  };
+}
+
+function coverageConditions(candidate, coreType, taxonomy) {
+  const record = candidate.frontmatter;
+  const route = taxonomy.documents?.[coreType];
+  const kind = record.kind === "kg.project_document";
+  const docType = record.doc_type === coreType;
+  const pathValid = docType && route ? taxonomyPathMatches(candidate.relative, route.path) : false;
+  const schemaValid = candidate.schema_valid;
+  const acceptedNotSuperseded = record.status === "accepted" && !record.superseded_by;
+  return {
+    kind,
+    doc_type: docType,
+    path: pathValid,
+    schema: schemaValid,
+    accepted_not_superseded: acceptedNotSuperseded,
+  };
+}
+
+function unmetCoverageConditions(conditions) {
+  return Object.entries(conditions)
+    .filter(([, satisfied]) => !satisfied)
+    .map(([condition]) => condition);
+}
+
+function scanCoverage(root, findings) {
+  const taxonomy = protocol.loadDocumentTaxonomy();
+  const schema = protocol.loadProjectDocumentSchema();
+  const coreTypes = [...(taxonomy.core_types ?? [])];
+  const docs = listFiles(root, "docs", ".md", findings, "project_document");
+  const candidates = docs.map((file) => registeredDocumentCandidate(file, root, schema, findings)).filter(Boolean);
+  const validRegistered = candidates.filter((candidate) => candidate.schema_valid);
+  const invalidRegistered = candidates.filter((candidate) => !candidate.schema_valid);
+  const quadrants = [...new Set([
+    ...Object.values(taxonomy.documents ?? {}).map((record) => record.diataxis_quadrant),
+    taxonomy.tutorials?.diataxis_quadrant,
+  ].filter(Boolean))].sort();
+  const byQuadrant = Object.fromEntries(quadrants.map((quadrant) => [quadrant, {
+    covered_types: [],
+    covered_documents: [],
+    gaps: [],
+    excluded_types: [],
+  }]));
+  const gaps = [];
+  const coveredTypes = [];
+  const coveredDocuments = [];
+
+  for (const [docType, record] of Object.entries(taxonomy.documents ?? {})) {
+    if (!coreTypes.includes(docType)) {
+      const quadrant = record.diataxis_quadrant;
+      if (byQuadrant[quadrant]) byQuadrant[quadrant].excluded_types.push(docType);
+    }
+  }
+  if (taxonomy.tutorials?.diataxis_quadrant && byQuadrant[taxonomy.tutorials.diataxis_quadrant]) {
+    byQuadrant[taxonomy.tutorials.diataxis_quadrant].excluded_types.push("tutorials");
+  }
+
+  for (const coreType of coreTypes) {
+    const route = taxonomy.documents?.[coreType] ?? {};
+    const quadrant = route.diataxis_quadrant;
+    const typeCandidates = candidates.filter((candidate) => candidate.frontmatter.doc_type === coreType);
+    const covered = typeCandidates.filter((candidate) => {
+      const conditions = coverageConditions(candidate, coreType, taxonomy);
+      return Object.values(conditions).every(Boolean);
+    });
+    if (covered.length > 0) {
+      coveredTypes.push(coreType);
+      for (const candidate of covered) coveredDocuments.push(candidate.relative);
+      if (byQuadrant[quadrant]) {
+        byQuadrant[quadrant].covered_types.push(coreType);
+        byQuadrant[quadrant].covered_documents.push(...covered.map((candidate) => candidate.relative));
+      }
+      continue;
+    }
+
+    const issue = typeCandidates.length === 0 ? "missing_core_type" : "uncovered_core_type";
+    const documentDetails = typeCandidates.map((candidate) => {
+      const conditions = coverageConditions(candidate, coreType, taxonomy);
+      return {
+        path: candidate.relative,
+        conditions,
+        unmet_conditions: unmetCoverageConditions(conditions),
+        schema_errors: [...candidate.schema_errors],
+        status: candidate.frontmatter.status ?? null,
+        superseded_by: candidate.frontmatter.superseded_by ?? null,
+      };
+    });
+    const unmet = [...new Set(documentDetails.flatMap((document) => document.unmet_conditions))].sort();
+    const gap = {
+      core_type: coreType,
+      quadrant,
+      issue,
+      documents: documentDetails,
+      unmet_conditions: unmet,
+    };
+    gaps.push(gap);
+    if (byQuadrant[quadrant]) byQuadrant[quadrant].gaps.push(gap);
+    addFinding(findings, {
+      issue,
+      severity: "warning",
+      side: "coverage",
+      source_path: documentDetails[0]?.path ?? route.path ?? null,
+      message: issue === "missing_core_type"
+        ? `${coreType}: no registered project document exists`
+        : `${coreType}: registered project document(s) do not satisfy: ${unmet.join(", ")}`,
+      expected: "accepted registered project document under the taxonomy path without superseded_by",
+      actual: unmet,
+    });
+  }
+
+  for (const value of Object.values(byQuadrant)) {
+    value.covered_types.sort();
+    value.covered_documents.sort();
+    value.gaps.sort((a, b) => a.core_type.localeCompare(b.core_type));
+    value.excluded_types.sort();
+  }
+  const metrics = {
+    core_types_total: coreTypes.length,
+    core_types_covered: coveredTypes.length,
+    core_type_gaps: gaps.length,
+    documents_scanned: docs.length,
+    registered_documents_valid: validRegistered.length,
+    registered_documents_invalid: invalidRegistered.length,
+  };
+  return {
+    taxonomy_core_types: coreTypes,
+    by_quadrant: byQuadrant,
+    gaps,
+    metrics,
+  };
+}
+
 function inverseSourcePath(finding, knowledgeById, carrierById) {
   if (finding.side === "knowledge" || finding.side === "both") {
     const pathValue = knowledgeById.get(finding.kn_id)?.relative;
@@ -618,6 +774,7 @@ function canonicalReport(report) {
     hard_error_count: report.hard_error_count,
     warning_count: report.warning_count,
     resident_surface: report.resident_surface,
+    coverage_audit: report.coverage_audit,
     scan_limits: report.scan_limits,
   };
   if (JSON.stringify(Object.keys(canonical)) !== JSON.stringify(REPORT_FIELDS)) {
@@ -635,6 +792,7 @@ export function buildScanReport(rootValue, nowValue) {
   const knowledge = scanKnowledge(root, findings);
   scanInverse(root, knowledge, artifacts.valid, findings);
   const residentSurface = scanResidentSurface(root, findings);
+  const coverageAudit = scanCoverage(root, findings);
   const hardErrorCount = findings.filter((finding) => finding.severity === "error").length;
   const warningCount = findings.filter((finding) => finding.severity === "warning").length;
   return canonicalReport({
@@ -647,6 +805,7 @@ export function buildScanReport(rootValue, nowValue) {
     hard_error_count: hardErrorCount,
     warning_count: warningCount,
     resident_surface: residentSurface,
+    coverage_audit: coverageAudit,
     scan_limits: {
       static_only: true,
       reads_kg: false,

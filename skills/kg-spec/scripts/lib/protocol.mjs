@@ -460,6 +460,9 @@ if (isMain()) {
     if (!Array.isArray(scanReport.field_order) || !Array.isArray(scanReport.finding_field_order)) {
       problems.push("scan-report: field orders are required");
     }
+    if (!scanReport.field_order?.includes("coverage_audit") || scanReport.fields?.coverage_audit?.type !== "map") {
+      problems.push("scan-report: taxonomy coverage_audit field is required");
+    }
   }
   const taskSpec = docs["task-spec.schema.yaml"];
   if (taskSpec) {

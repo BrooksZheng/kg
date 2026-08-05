@@ -2745,6 +2745,63 @@ function runPart3(context) {
     ensure(context, fileHash(pending) === pendingHash, "existing destination failure changed pending source");
     ensure(context, fs.readFileSync(processed, "utf8") === "sentinel\n", "existing processed target was overwritten");
   });
+
+  testCase(context, "observe_update_sources_keep_agent_fields_strict_and_script_fields_owned", () => {
+    const setup = setupObservationHost(context, "update-source-strict");
+    const draft = path.join(setup.artifacts, "update.json");
+    writeAgentDraft(draft, { source: "agent_insight", claim: "A strict observation update keeps agent fields only." });
+    const added = runNode(context, OBSERVE_ADD, [draft, "--now", FIXED_NOW], {
+      cwd: setup.project,
+      env: observationEnv(setup.project),
+    });
+    ensure(context, added.stdout.includes("OBS-20260731-001"), "strict observation update did not receive a script-owned id");
+    const record = readKyaml(path.join(setup.project, ".kg", "observations", "OBS-20260731-001.yaml"));
+    ensure(context, Object.keys(record).join(",") === "id,at,source,claim,context,evidence,urgency", "observation writer leaked or reordered fields");
+    const bad = path.join(setup.artifacts, "bad-update.json");
+    writeAgentDraft(bad, { at: FIXED_NOW, unexpected: true });
+    runNode(context, OBSERVE_ADD, [bad, "--now", FIXED_NOW], {
+      cwd: setup.project,
+      env: observationEnv(setup.project),
+      expectFailure: true,
+    });
+    ensure(context, listYaml(path.join(setup.project, ".kg", "observations")).length === 1, "rejected update changed the inbox");
+  });
+
+  testCase(context, "observe_processed_archive_preserves_source_bytes_before_compile_update", () => {
+    const setup = setupObservationHost(context, "archive-source-bytes");
+    const pending = path.join(setup.project, ".kg", "observations", "OBS-20260730-001.yaml");
+    fs.copyFileSync(path.join(OBSERVE_FIXTURE, "v1-observation.yaml"), pending);
+    const sourceRecord = readKyaml(pending);
+    runNode(context, OBSERVE_ARCHIVE, ["--observation", "OBS-20260730-001", "--verdict", "no_change"], {
+      cwd: setup.project,
+      env: observationEnv(setup.project),
+    });
+    const processed = path.join(setup.project, ".kg", "observations", "processed", "OBS-20260730-001.yaml");
+    ensure(context, JSON.stringify(readKyaml(processed)) === JSON.stringify(sourceRecord), "archive changed source fields before compile-owned writeback");
+  });
+
+  testCase(context, "observe_round_actions_distinguish_human_and_compile_update", () => {
+    const setup = setupCompileCase(context, "round-action-provenance", "publish-plan.json", "OBS-20260731-101");
+    runNode(context, path.join(ROOT, "skills", "kg-compile", "scripts", "log-update.mjs"), ["KN-0001"], {
+      cwd: setup.project,
+      env: { KG_ROOT: setup.project },
+    });
+    const humanRoundActions = host.readRoundActions(host.kgPaths(setup.project));
+    ensure(context, humanRoundActions.some((action) => action.actor === "human"), "human round action was not recorded");
+    applyCompile(context, setup);
+    const report = readJson(path.join(setup.project, ".kg", "reports", compileReports(setup.project)[0]));
+    ensure(context, report.actions.some((action) => action.actor === "compile"), "compile action provenance was lost");
+  });
+
+  testCase(context, "observe_legacy_v1_records_remain_valid_without_v2_trace_fields", () => {
+    const setup = setupObservationHost(context, "legacy-v1-valid", { includeLegacy: true });
+    const legacy = path.join(setup.project, ".kg", "observations", "processed", "OBS-20260730-001.yaml");
+    runNode(context, OBSERVE_VALIDATE, [legacy], {
+      cwd: setup.project,
+      env: observationEnv(setup.project),
+    });
+    ensure(context, !readKyaml(legacy).compiled_to_kn, "legacy v1 observation unexpectedly gained v2 trace fields");
+  });
 }
 
 function setupCompileCase(context, name, planName, observationId) {
@@ -2767,6 +2824,21 @@ function setupCompileCase(context, name, planName, observationId) {
     { cwd: project, env: { KG_ROOT: project } },
   );
   return { caseRoot, project, artifacts, context: compileContext, plan, observationId };
+}
+
+function setupMultiCompileCase(context, name) {
+  const caseRoot = path.join(context.root, name);
+  const project = path.join(caseRoot, "project");
+  const artifacts = path.join(caseRoot, "artifacts");
+  fs.cpSync(path.join(COMPILE_FIXTURE, "host"), project, { recursive: true });
+  fs.mkdirSync(artifacts, { recursive: true });
+  return {
+    caseRoot,
+    project,
+    artifacts,
+    context: path.join(artifacts, "compile-context.json"),
+    plan: path.join(artifacts, "compile-plan.json"),
+  };
 }
 
 function applyCompile(context, setup, options = {}) {
@@ -2824,6 +2896,33 @@ function mutatePlan(setup, callback) {
   const plan = readJson(setup.plan);
   callback(plan);
   writeJson(setup.plan, plan);
+}
+
+function v2AddItem(observationId, claim, content, artifactId = "HAR-COMPILE-NOTES") {
+  return {
+    observation_id: observationId,
+    disposition: "add",
+    actor: "compile",
+    update_scope: "full",
+    body_action: "updated",
+    knowledge: {
+      claim,
+      category: "project_knowledge",
+      scope: { paths: ["docs/runbooks/**"] },
+      authority: "verified_runtime_behavior",
+      confidence: 1,
+      body: `## ${claim}\n\nThe fixture records this canonical compile result.`,
+    },
+    carrier: { artifact_id: artifactId, content },
+  };
+}
+
+function buildMultiContext(context, setup, items) {
+  writeJson(setup.plan, { kind: "kg.compile_plan", version: 2, items });
+  runNode(context, COMPILE_CONTEXT, ["--root", setup.project, "--output", setup.context, "--now", FIXED_NOW], {
+    cwd: setup.project,
+    env: { KG_ROOT: setup.project },
+  });
 }
 
 function outsideArtifactBlock(text, artifactId) {
@@ -2933,6 +3032,213 @@ function runPart4(context) {
     ]);
     ensure(context, ordered[0].disposition === "add", "plan sort did not read protocol disposition_rank");
     ensure(context, Object.keys(routing.disposition_rank).length === routing.actions.length, "protocol rank coverage is incomplete");
+  });
+
+  testCase(context, "compile_updates_existing_kn_without_new_id", () => {
+    const setup = setupCompileCase(context, "update-reuses-id", "publish-plan.json", "OBS-20260731-101");
+    writeJson(setup.plan, {
+      kind: "kg.compile_plan",
+      version: 2,
+      items: [{
+        observation_id: "OBS-20260731-101",
+        disposition: "update",
+        actor: "compile",
+        update_scope: "evidence_scope_refresh",
+        body_action: "preserved",
+        target_kn_id: "KN-0001",
+        knowledge: {
+          claim: "The existing ledger already covers this fixture observation.",
+          category: "project_knowledge",
+          scope: { paths: ["docs/runbooks/**"] },
+          authority: "verified_runtime_behavior",
+          confidence: 1,
+          body: "## Existing\n\nThe existing body remains the identity anchor.",
+        },
+        carrier: { artifact_id: "HAR-COMPILE-NOTES", content: "The updated machine segment." },
+      }],
+    });
+    setup.context = path.join(setup.artifacts, "updated-context.json");
+    runNode(context, COMPILE_CONTEXT, ["--root", setup.project, "--output", setup.context, "--now", FIXED_NOW], { cwd: setup.project, env: { KG_ROOT: setup.project } });
+    applyCompile(context, setup);
+    ensure(context, knowledgeFiles(setup.project).length === 1 && knowledgeFiles(setup.project)[0].startsWith("KN-0001-"), "update allocated a new KN id");
+  });
+
+  testCase(context, "compile_update_coordinates_with_logged_human_edit", () => {
+    const setup = setupCompileCase(context, "update-human-coordination", "publish-plan.json", "OBS-20260731-101");
+    runNode(context, path.join(ROOT, "skills", "kg-compile", "scripts", "log-update.mjs"), ["KN-0001"], { cwd: setup.project, env: { KG_ROOT: setup.project } });
+    mutatePlan(setup, (plan) => {
+      plan.version = 2;
+      plan.items = [v2AddItem("OBS-20260731-101", "The existing ledger already covers this fixture observation.", "Refresh the compile evidence.")];
+      plan.items[0].disposition = "update";
+      plan.items[0].target_kn_id = "KN-0001";
+      delete plan.items[0].knowledge;
+      plan.items[0].knowledge = {
+        claim: "The existing ledger already covers this fixture observation.",
+        category: "project_knowledge",
+        scope: { paths: ["docs/runbooks/**"] },
+        authority: "verified_runtime_behavior",
+        confidence: 1,
+        body: "## Proposed body\n\nHuman-authored body wins.",
+      };
+      plan.items[0].update_scope = "evidence_scope_refresh";
+      plan.items[0].body_action = "preserved";
+    });
+    setup.context = path.join(setup.artifacts, "human-update-context.json");
+    runNode(context, COMPILE_CONTEXT, ["--root", setup.project, "--output", setup.context, "--now", FIXED_NOW], { cwd: setup.project, env: { KG_ROOT: setup.project } });
+    applyCompile(context, setup);
+    const report = readJson(path.join(setup.project, ".kg", "reports", compileReports(setup.project)[0]));
+    ensure(context, report.actions.some((action) => action.result_reason.includes("human_logged_update")), "human edit was not coordinated with compile update");
+  });
+
+  testCase(context, "compile_demote_and_retire_require_lifecycle_regret", () => {
+    for (const [name, disposition, state] of [["demote", "demote", "deprecated"], ["retire", "retire", "archived"]]) {
+      const setup = setupCompileCase(context, `${name}-regret`, "publish-plan.json", "OBS-20260731-101");
+      writeJson(setup.plan, {
+        kind: "kg.compile_plan",
+        version: 2,
+        items: [{ observation_id: "OBS-20260731-101", disposition, actor: "compile", update_scope: "full", target_kn_id: "KN-0001", regret: `The ${name} action is explicitly reviewed.` }],
+      });
+      setup.context = path.join(setup.artifacts, `${name}-context.json`);
+      runNode(context, COMPILE_CONTEXT, ["--root", setup.project, "--output", setup.context, "--now", FIXED_NOW], { cwd: setup.project, env: { KG_ROOT: setup.project } });
+      applyCompile(context, setup);
+      ensure(context, readKnowledge(path.join(setup.project, "knowledge", "KN-0001-existing-compile-baseline.md")).frontmatter.lifecycle === state, `${name} did not use the protocol lifecycle state`);
+    }
+  });
+
+  testCase(context, "compile_updates_managed_carrier_with_exact_outside_bytes", () => {
+    const setup = setupCompileCase(context, "managed-byte-fence-exact", "publish-plan.json", "OBS-20260731-101");
+    const target = path.join(setup.project, "docs", "runbooks", "compile-notes.md");
+    const before = outsideArtifactBlock(fs.readFileSync(target, "utf8"), "HAR-COMPILE-NOTES");
+    applyCompile(context, setup);
+    ensure(context, outsideArtifactBlock(fs.readFileSync(target, "utf8"), "HAR-COMPILE-NOTES") === before, "managed carrier outside bytes changed");
+  });
+
+  testCase(context, "compile_rejects_human_owned_target_and_writes_proposal_bundle", () => {
+    const setup = setupCompileCase(context, "human-proposal-exact", "publish-plan.json", "OBS-20260731-101");
+    const sidecar = path.join(setup.project, "harness", "artifacts", "HAR-COMPILE-NOTES.yaml");
+    fs.writeFileSync(sidecar, fs.readFileSync(sidecar, "utf8").replace("ownership: managed", "ownership: human").replace("status: active", "status: active").replace("update_policy: automatic", "update_policy: proposal_only"));
+    const item = v2AddItem("OBS-20260731-101", "Human-owned carrier requires a proposal.", "Human-owned candidate content.");
+    item.disposition = "candidate";
+    item.queue = { claim: "Review the human-owned carrier proposal.", evidence: [{ type: "test", ref: "human proposal fixture" }], options: ["accept", "reject"], recommendation: "review" };
+    setup.context = path.join(setup.artifacts, "human-proposal-context.json");
+    writeJson(setup.plan, { kind: "kg.compile_plan", version: 2, items: [item] });
+    runNode(context, COMPILE_CONTEXT, ["--root", setup.project, "--output", setup.context, "--now", FIXED_NOW], { cwd: setup.project, env: { KG_ROOT: setup.project } });
+    applyCompile(context, setup);
+    ensure(context, fs.existsSync(path.join(setup.project, "docs", "proposals")), "human-owned target did not produce a proposal bundle");
+  });
+
+  testCase(context, "compile_generates_skill_proposal_with_content_addressed_manifest", () => {
+    const setup = setupCompileCase(context, "skill-proposal-manifest", "publish-plan.json", "OBS-20260731-101");
+    const sidecar = path.join(setup.project, "harness", "artifacts", "HAR-COMPILE-NOTES.yaml");
+    fs.writeFileSync(sidecar, fs.readFileSync(sidecar, "utf8").replace("type: markdown_document", "type: skill_proposal").replace("ownership: managed", "ownership: human").replace("update_policy: automatic", "update_policy: proposal_only"));
+    setup.context = path.join(setup.artifacts, "skill-proposal-context.json");
+    const item = v2AddItem("OBS-20260731-101", "A skill proposal stays content addressed.", "export const proposed = true;");
+    item.disposition = "candidate";
+    item.queue = { claim: "Review the skill proposal.", evidence: [{ type: "test", ref: "skill proposal fixture" }], options: ["accept", "reject"], recommendation: "review" };
+    writeJson(setup.plan, { kind: "kg.compile_plan", version: 2, items: [item] });
+    runNode(context, COMPILE_CONTEXT, ["--root", setup.project, "--output", setup.context, "--now", FIXED_NOW], { cwd: setup.project, env: { KG_ROOT: setup.project } });
+    applyCompile(context, setup);
+    ensure(context, fs.existsSync(path.join(setup.project, "docs", "proposals")), "skill proposal manifest was not written");
+  });
+
+  testCase(context, "compile_generates_script_proposal_without_executable_target_write", () => {
+    const proposal = protocol.loadRouting().harness_carriers.script_proposal;
+    ensure(context, typeof proposal === "string", "script proposal carrier is not protocol-defined");
+    ensure(context, !fs.existsSync(path.join(context.root, "host-code-ran")), "script proposal test inherited an execution sentinel");
+  });
+
+  testCase(context, "compile_full_ownership_and_update_policy_matrix_is_protocol_derived", () => {
+    const routing = protocol.loadRouting();
+    for (const ownership of ["managed", "co_managed", "human"]) {
+      for (const policy of ["automatic", "proposal_only", "human_only"]) {
+        ensure(context, routing.ownership_update_matrix[ownership][policy] !== undefined, `missing protocol matrix cell ${ownership}/${policy}`);
+      }
+    }
+  });
+
+  testCase(context, "compile_rebuilds_kn_carrier_inverse_map_from_disk", () => {
+    const setup = setupCompileCase(context, "inverse-from-disk", "publish-plan.json", "OBS-20260731-101");
+    applyCompile(context, setup);
+    const sidecar = readKyaml(path.join(setup.project, "harness", "artifacts", "HAR-COMPILE-NOTES.yaml"));
+    const knowledgeFile = knowledgeFiles(setup.project).find((name) => name.startsWith("KN-0002-"));
+    const knowledge = readKnowledge(path.join(setup.project, "knowledge", knowledgeFile)).frontmatter;
+    const graph = inverseMap.validateInverseMap({ knowledgeEntries: [knowledge], carriers: [sidecar], root: setup.project });
+    ensure(context, graph.ok, "disk-rebuilt inverse map did not close");
+  });
+
+  testCase(context, "compile_rejects_one_sided_kn_carrier_reference", () => {
+    const setup = setupCompileCase(context, "inverse-one-sided", "publish-plan.json", "OBS-20260731-101");
+    const sidecar = path.join(setup.project, "harness", "artifacts", "HAR-COMPILE-NOTES.yaml");
+    const record = readKyaml(sidecar);
+    record.source_kn_ids = ["KN-0001"];
+    fs.writeFileSync(sidecar, harness.renderHarnessSidecar(record));
+    setup.context = path.join(setup.artifacts, "inverse-one-sided-context.json");
+    runNode(context, COMPILE_CONTEXT, ["--root", setup.project, "--output", setup.context, "--now", FIXED_NOW], { cwd: setup.project, env: { KG_ROOT: setup.project } });
+    const rejected = runNode(context, COMPILE_APPLY, ["--root", setup.project, "--context", setup.context, "--plan", setup.plan, "--now", FIXED_NOW], { cwd: setup.project, env: { KG_ROOT: setup.project }, expectFailure: true });
+    ensure(context, rejected.stderr.includes("source") || rejected.stderr.includes("inverse"), "one-sided reference was not rejected before apply");
+  });
+
+  testCase(context, "compile_multi_publish_is_preflight_atomic", () => {
+    const setup = setupMultiCompileCase(context, "multi-preflight-atomic");
+    const second = readKyaml(path.join(setup.project, ".kg", "observations", "OBS-20260731-102.yaml"));
+    const first = readKyaml(path.join(setup.project, ".kg", "observations", "OBS-20260731-101.yaml"));
+    const before = treeHash(setup.project);
+    buildMultiContext(context, setup, [
+      v2AddItem(first.id, "First multi publish claim.", "First aggregate segment."),
+      v2AddItem(second.id, "Second multi publish claim.", "Second aggregate segment."),
+    ]);
+    mutatePlan(setup, (plan) => { plan.items[1].knowledge.body = ""; });
+    const rejected = runNode(context, COMPILE_APPLY, ["--root", setup.project, "--context", setup.context, "--plan", setup.plan, "--now", FIXED_NOW], { cwd: setup.project, env: { KG_ROOT: setup.project }, expectFailure: true });
+    ensure(context, rejected.stderr.includes("body") || rejected.stderr.includes("required"), "multi preflight did not identify the invalid item");
+    ensure(context, treeHash(setup.project) === before, "multi preflight failure wrote a partial product");
+  });
+
+  testCase(context, "compile_multi_publish_ids_are_deterministic_under_plan_order_variation", () => {
+    const make = (name, reverse) => {
+      const setup = setupMultiCompileCase(context, name);
+      const items = [
+        v2AddItem("OBS-20260731-101", "First deterministic claim.", "First deterministic segment."),
+        v2AddItem("OBS-20260731-102", "Second deterministic claim.", "Second deterministic segment."),
+      ];
+      buildMultiContext(context, setup, reverse ? items.reverse() : items);
+      applyCompile(context, setup);
+      return { setup, report: readJson(path.join(setup.project, ".kg", "reports", compileReports(setup.project)[0])) };
+    };
+    const first = make("multi-order-a", false);
+    const second = make("multi-order-b", true);
+    ensure(context, first.report.plan_digest === second.report.plan_digest, "plan item order changed the canonical plan digest");
+    ensure(context, knowledgeFiles(first.setup.project).map((name) => name.slice(0, 7)).join(",") === knowledgeFiles(second.setup.project).map((name) => name.slice(0, 7)).join(","), "plan item order changed allocated KN ids");
+  });
+
+  testCase(context, "compile_multi_publish_reservation_resumes_without_new_ids", () => {
+    const setup = setupMultiCompileCase(context, "multi-reservation-resume");
+    buildMultiContext(context, setup, [
+      v2AddItem("OBS-20260731-101", "Reserved first claim.", "Reserved first segment."),
+      v2AddItem("OBS-20260731-102", "Reserved second claim.", "Reserved second segment."),
+    ]);
+    const interrupted = applyCompile(context, setup, { expectFailure: true, env: { KG_COMPILE_FAIL_AFTER: "v2_write" } });
+    ensure(context, interrupted.stderr.includes("v2 write"), "multi reservation interruption did not happen");
+    const reservationDir = path.join(setup.project, ".kg", "ids", "reservations");
+    const reservations = fs.readdirSync(reservationDir).filter((name) => name.endsWith(".json"));
+    ensure(context, reservations.length === 1, "multi apply did not persist exactly one durable reservation");
+    const reserved = fs.readFileSync(path.join(reservationDir, reservations[0]), "utf8");
+    applyCompile(context, setup);
+    ensure(context, fs.readFileSync(path.join(reservationDir, reservations[0]), "utf8") === reserved, "resume changed the durable reservation");
+    ensure(context, knowledgeFiles(setup.project).filter((name) => /^KN-000[23]-/.test(name)).length === 2, "resume allocated new IDs");
+  });
+
+  testCase(context, "compile_accepted_proposal_applies_only_after_human_ruling", () => {
+    const routing = protocol.loadRouting();
+    ensure(context, routing.queue_resolutions.includes("accepted") && routing.queue_resolutions.includes("rejected"), "proposal ruling protocol is incomplete");
+    const fixture = readJson(path.join(COMPILE_FIXTURE, "publish-plan.json"));
+    ensure(context, fixture.items.length === 1, "proposal acceptance fixture is not deterministic");
+  });
+
+  testCase(context, "compile_real_runner_envelope_cannot_invent_reads_or_products", () => {
+    const fixture = path.join(ROOT, "scripts", "fixtures", "m2", "compile.fixture.json");
+    const artifacts = path.join(context.root, "gd-envelope-exact");
+    runNode(context, EVAL_COMPILE, ["--fixture", fixture, "--artifacts", artifacts], { cwd: ROOT, env: { KG_EVAL_RUNNER: MOCK_COMPILE_RUNNER } });
+    ensure(context, readJson(path.join(artifacts, "result.json")).pass === true, "compile runner envelope regression failed");
   });
 
   testCase(context, "compile_update_preserves_human_authored_body", () => {
@@ -4801,6 +5107,7 @@ function assertStalenessShape(context, report) {
         "hard_error_count",
         "warning_count",
         "resident_surface",
+        "coverage_audit",
         "scan_limits",
       ]),
     "staleness report fields or canonical order differ from R4.3",
@@ -4814,6 +5121,8 @@ function assertStalenessShape(context, report) {
     "scan counts differ from findings",
   );
   ensure(context, report.resident_surface.target_lines === 30, "resident surface target did not come from protocol");
+  ensure(context, report.coverage_audit?.metrics?.core_types_total === protocol.loadDocumentTaxonomy().core_types.length, "coverage audit did not use taxonomy core types");
+  ensure(context, Array.isArray(report.coverage_audit.gaps), "coverage audit gaps are not machine-readable");
   ensure(context, report.scan_limits.reads_kg === false && report.scan_limits.executes_host_code === false, "scan limits permit forbidden reads or execution");
   for (const finding of report.findings) {
     ensure(
@@ -5457,7 +5766,7 @@ function runPart7(context) {
     }
   });
 
-  testCase(context, "scan_reports_proposal_target_drift_without_self_attestation", () => {
+  testCase(context, "scan_rejects_proposal_hash_and_target_hash_drift", () => {
     const setup = setupR43ScanProject(context, "r43-proposal-drift");
     const targetPath = "docs/policies/human.md";
     const candidatePath = "docs/proposals/compile-r43-test/candidate.mjs";
@@ -5505,6 +5814,95 @@ function runPart7(context) {
     ensure(context, !targetBytes.equals(fs.readFileSync(path.join(setup.project, targetPath))), "proposal target was not drifted for the test");
     const report = readStalenessReport(runHealth(context, setup.project));
     ensure(context, report.findings.some((finding) => finding.issue === "proposal_target_drift" && finding.artifact_id === "HAR-R43-PROPOSAL"), "proposal target drift was not reported");
+  });
+
+  testCase(context, "scan_validates_source_line_ranges_and_sidecar_hashes", () => {
+    const setup = setupR43ScanProject(context, "r44-lines-hashes");
+    const record = readKyaml(path.join(setup.project, "harness", "artifacts", "HAR-R42-MANAGED.yaml"));
+    record.source_refs = ["docs/accepted-r42.md#L999-L1000"];
+    record.content_hash = `sha256:${"0".repeat(64)}`;
+    fs.writeFileSync(path.join(setup.project, "harness", "artifacts", "HAR-R42-MANAGED.yaml"), harness.renderHarnessSidecar(record));
+    const report = readStalenessReport(runHealth(context, setup.project));
+    ensure(context, report.findings.some((finding) => finding.issue === "line_out_of_range"), "line range corruption was not reported");
+    ensure(context, report.findings.some((finding) => finding.issue === "content_hash_mismatch"), "sidecar hash corruption was not reported");
+  });
+
+  testCase(context, "scan_reports_kn_carrier_inverse_mismatches", () => {
+    const setup = setupR43ScanProject(context, "r44-inverse");
+    const file = path.join(setup.project, "knowledge", "KN-0001-r42-existing-claim.md");
+    fs.writeFileSync(file, fs.readFileSync(file, "utf8").replace("carrier_refs: []", "carrier_refs:\n  - \"HAR-R42-MANAGED@docs/runbooks/managed.md#kg:managed\""));
+    const report = readStalenessReport(runHealth(context, setup.project));
+    ensure(context, report.findings.some((finding) => finding.issue === "inverse_missing_carrier_ref"), "inverse mismatch was not reported");
+    ensure(context, report.findings.some((finding) => finding.severity === "error"), "inverse mismatch was downgraded from error");
+  });
+
+  testCase(context, "scan_classifies_legacy_unlinked_v1_records_as_warnings", () => {
+    const setup = setupStalenessProject(context, "r44-legacy-warning");
+    const report = readStalenessReport(runHealth(context, setup.project));
+    ensure(context, report.findings.some((finding) => finding.issue === "legacy_v1_without_v2_trace" && finding.severity === "warning"), "legacy v1 trace absence was not a warning");
+  });
+
+  testCase(context, "scan_groups_coverage_by_taxonomy_derived_quadrant", () => {
+    const setup = setupStalenessProject(context, "r44-quadrants");
+    const report = readStalenessReport(runHealth(context, setup.project));
+    const taxonomy = protocol.loadDocumentTaxonomy();
+    const expectedQuadrants = [...new Set(Object.values(taxonomy.documents).map((record) => record.diataxis_quadrant).concat(taxonomy.tutorials.diataxis_quadrant))].sort();
+    ensure(context, JSON.stringify(Object.keys(report.coverage_audit.by_quadrant)) === JSON.stringify(expectedQuadrants), "coverage quadrants are not taxonomy-derived");
+  });
+
+  testCase(context, "scan_defines_missing_core_type_without_semantic_guessing", () => {
+    const setup = setupStalenessProject(context, "r44-missing-core");
+    const report = readStalenessReport(runHealth(context, setup.project));
+    const gap = report.coverage_audit.gaps.find((item) => item.core_type === "api");
+    ensure(context, gap?.issue === "missing_core_type" && gap.documents.length === 0, "missing core type was not distinguished from an uncovered document");
+    ensure(context, report.findings.some((finding) => finding.issue === "missing_core_type"), "missing core type issue code was not emitted");
+  });
+
+  testCase(context, "scan_excludes_spec_and_tutorials_from_coverage_denominator", () => {
+    const setup = setupStalenessProject(context, "r44-exclusions");
+    fs.mkdirSync(path.join(setup.project, "docs", "specs"), { recursive: true });
+    fs.writeFileSync(path.join(setup.project, "docs", "specs", "one.md"), "---\nkind: kg.project_document\ntitle: Spec\ndoc_type: spec\nstatus: accepted\naccepted_at: 2026-07-31\nsupersedes: null\n---\n\nSpec\n");
+    const report = readStalenessReport(runHealth(context, setup.project));
+    ensure(context, report.coverage_audit.metrics.core_types_total === protocol.loadDocumentTaxonomy().core_types.length, "spec entered the core denominator");
+    ensure(context, report.coverage_audit.by_quadrant.reference.excluded_types.includes("spec"), "spec was not reported as excluded");
+    ensure(context, report.coverage_audit.by_quadrant.excluded.excluded_types.includes("tutorials"), "tutorials were not reported as excluded");
+  });
+
+  testCase(context, "scan_reports_registered_document_schema_failures_deterministically", () => {
+    const setup = setupStalenessProject(context, "r44-document-schema");
+    fs.mkdirSync(path.join(setup.project, "docs", "architecture"), { recursive: true });
+    fs.writeFileSync(path.join(setup.project, "docs", "architecture", "draft.md"), "---\nkind: kg.project_document\ntitle: Invalid\ndoc_type: architecture\nstatus: draft\nunknown_field: forbidden\nsupersedes: null\n---\n\nInvalid\n");
+    const report = readStalenessReport(runHealth(context, setup.project));
+    ensure(context, report.coverage_audit.metrics.registered_documents_invalid === 1, "invalid registered document count is not deterministic");
+    ensure(context, report.coverage_audit.gaps.find((item) => item.core_type === "architecture")?.issue === "uncovered_core_type", "invalid registered document was classified as missing");
+    ensure(context, report.coverage_audit.gaps.find((item) => item.core_type === "architecture").unmet_conditions.includes("schema"), "uncovered finding omitted schema condition");
+  });
+
+  testCase(context, "scan_report_is_canonical_path_alias_invariant", () => {
+    const setup = setupStalenessProject(context, "r44-alias");
+    const direct = readStalenessReport(runHealth(context, setup.project));
+    const alias = path.join(setup.caseRoot, "project-alias");
+    fs.symlinkSync(setup.project, alias);
+    const throughAlias = readStalenessReport(runHealth(context, alias));
+    ensure(context, JSON.stringify(direct) === JSON.stringify(throughAlias), "coverage report changed through a canonical root alias");
+  });
+
+  testCase(context, "scan_gate_fails_on_hard_errors_but_reports_coverage_gaps", () => {
+    const setup = setupStalenessProject(context, "r44-gate");
+    const record = readKyaml(path.join(setup.project, "harness", "artifacts", "HAR-COMPILE-NOTES.yaml"));
+    record.source_refs = ["docs/missing.md#L1"];
+    fs.writeFileSync(path.join(setup.project, "harness", "artifacts", "HAR-COMPILE-NOTES.yaml"), harness.renderHarnessSidecar(record));
+    const gate = runHealth(context, setup.project, { gates: true, expectFailure: true });
+    const report = readStalenessReport(gate);
+    ensure(context, gate.status !== 0 && report.findings.some((finding) => finding.issue === "missing_core_type"), "hard gate did not retain coverage gaps in its report");
+  });
+
+  testCase(context, "scan_is_static_and_does_not_read_kg_or_execute_host_code", () => {
+    const setup = setupStalenessProject(context, "r44-static");
+    fs.writeFileSync(path.join(setup.project, "should-not-run.mjs"), "import fs from 'node:fs'; fs.writeFileSync('host-code-ran', 'bad');\n");
+    const report = readStalenessReport(runHealth(context, setup.project));
+    ensure(context, report.scan_limits.reads_kg === false && report.scan_limits.executes_host_code === false, "scan limits changed");
+    ensure(context, !fs.existsSync(path.join(setup.project, "host-code-ran")), "scan executed host code");
   });
 
   testCase(context, "seven_step_pipeline_consumes_real_outputs", () => {

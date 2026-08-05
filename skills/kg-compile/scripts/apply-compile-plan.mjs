@@ -148,6 +148,83 @@ function nextQueueIds(paths, count, now) {
   return Array.from({ length: count }, (_, index) => `Q-${day}-${String(max + index + 1).padStart(3, "0")}`);
 }
 
+function reservationDirectory(paths) {
+  return path.join(paths.kg, "ids", "reservations");
+}
+
+function readDurableReservations(paths) {
+  const directory = reservationDirectory(paths);
+  if (!fs.existsSync(directory)) return [];
+  const files = fs.readdirSync(directory, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
+    .map((entry) => path.join(directory, entry.name))
+    .sort();
+  return files.map((file) => {
+    let reservation;
+    try {
+      reservation = JSON.parse(fs.readFileSync(file, "utf8"));
+    } catch (error) {
+      fail(`durable ID reservation is invalid: ${file}: ${error.message}`);
+    }
+    if (reservation?.kind !== "kg.compile_id_reservation" || !reservation.plan_digest) {
+      fail(`durable ID reservation shape is invalid: ${file}`);
+    }
+    return reservation;
+  });
+}
+
+function numericPart(value, prefix) {
+  const match = new RegExp(`^${prefix}([0-9]+)$`).exec(value ?? "");
+  return match ? Number.parseInt(match[1], 10) : null;
+}
+
+function rangesOverlap(start, end, ranges) {
+  return ranges.some((range) => start <= range.end && end >= range.start);
+}
+
+function reservedKnowledgeRanges(paths) {
+  return readDurableReservations(paths)
+    .map((reservation) => reservation.allocation?.knowledge)
+    .filter((range) => range?.start && range?.end)
+    .map((range) => ({ start: numericPart(range.start, "KN-"), end: numericPart(range.end, "KN-") }))
+    .filter((range) => Number.isInteger(range.start) && Number.isInteger(range.end));
+}
+
+function reservedQueueRanges(paths, day) {
+  return readDurableReservations(paths)
+    .map((reservation) => reservation.allocation?.queue)
+    .filter((range) => range?.day === day && range.start && range.end)
+    .map((range) => ({ start: numericPart(range.start, `Q-${day}-`), end: numericPart(range.end, `Q-${day}-`) }))
+    .filter((range) => Number.isInteger(range.start) && Number.isInteger(range.end));
+}
+
+function nextKnowledgeIds(paths, count) {
+  if (count === 0) return [];
+  let start = Number.parseInt(host.nextKnowledgeId(paths).slice(3), 10);
+  const ranges = reservedKnowledgeRanges(paths);
+  while (rangesOverlap(start, start + count - 1, ranges)) {
+    start = Math.max(...ranges.filter((range) => start <= range.end && start + count - 1 >= range.start).map((range) => range.end + 1));
+  }
+  if (start + count - 1 > 9999) fail("knowledge id space exhausted by the durable reservation");
+  return Array.from({ length: count }, (_, index) => `KN-${String(start + index).padStart(4, "0")}`);
+}
+
+function nextQueueIdsWithReservations(paths, count, now) {
+  if (count === 0) return [];
+  const day = now.toISOString().slice(0, 10).replaceAll("-", "");
+  let start = 1;
+  for (const file of host.listFiles(paths.queue, ".yaml")) {
+    const value = numericPart(path.basename(file, ".yaml"), `Q-${day}-`);
+    if (value !== null) start = Math.max(start, value + 1);
+  }
+  const ranges = reservedQueueRanges(paths, day);
+  while (rangesOverlap(start, start + count - 1, ranges)) {
+    start = Math.max(...ranges.filter((range) => start <= range.end && start + count - 1 >= range.start).map((range) => range.end + 1));
+  }
+  if (start + count - 1 > 999) fail(`queue id space exhausted for ${day}`);
+  return Array.from({ length: count }, (_, index) => `Q-${day}-${String(start + index).padStart(3, "0")}`);
+}
+
 function renderKnowledge(record, body) {
   const errors = protocol.validateRecord(record, protocol.loadKnowledgeSchema());
   if (errors.length) fail(`prepared knowledge entry is invalid: ${errors.join("; ")}`);
@@ -327,6 +404,23 @@ function renderedMachineContent(sourceIds, content) {
   return `${markers.map((id) => `<!-- kg:source ${id} -->`).join("\n")}${markers.length ? "\n" : ""}${text.trim()}`;
 }
 
+function canonicalAggregatedContent(items) {
+  return items
+    .slice()
+    .sort((left, right) => {
+      const a = left.item;
+      const b = right.item;
+      return (
+        compilePlan.dispositionRank(a.disposition) - compilePlan.dispositionRank(b.disposition) ||
+        a.observation_id.localeCompare(b.observation_id) ||
+        String(a.target_kn_id ?? "").localeCompare(String(b.target_kn_id ?? "")) ||
+        String(a.carrier?.artifact_id ?? "").localeCompare(String(b.carrier?.artifact_id ?? ""))
+      );
+    })
+    .map(({ item, knId }) => `<!-- kg:source ${knId} -->\n${String(item.carrier.content).trim()}`)
+    .join("\n");
+}
+
 function validateMatrixRegion(artifact) {
   const region = protocol.loadRouting().ownership_update_matrix?.[artifact.ownership]?.[artifact.update_policy];
   if (region === "none") fail(`compile carrier has no compile-owned region: ${artifact.artifact_id}`);
@@ -344,7 +438,6 @@ function prepareCarrierMutation(root, request, now) {
   const sidecar = harness.readHarnessSidecar(root, sidecarFile);
   harness.validateHarnessReferences(root, sidecar);
   const targetBytes = fs.readFileSync(targetFile);
-  const targetText = targetBytes.toString("utf8");
   const sourceIds = canonicalList([...(sidecar.source_kn_ids ?? []), ...request.sourceIds]);
   const writes = [];
   let updatedSidecar = { ...sidecar, source_kn_ids: sourceIds };
@@ -353,8 +446,8 @@ function prepareCarrierMutation(root, request, now) {
   const effectivePolicy = request.forceProposal ? "proposal_only" : artifact.update_policy;
   if (effectivePolicy === "automatic") {
     if (artifact.type !== "markdown_document") fail(`automatic carrier updates require Markdown markers: ${artifact.artifact_id}`);
-    const machineContent = renderedMachineContent(sourceIds, request.content);
     const beforeBlock = harness.inspectCarrier(targetBytes, artifact.artifact_id, artifact.ownership);
+    const machineContent = renderedMachineContent(sourceIds, request.content);
     const afterText = artifact.ownership === "managed"
       ? harness.replaceManagedBlock(targetBytes, artifact.artifact_id, machineContent)
       : harness.replaceCoManagedMachineSegment(targetBytes, artifact.artifact_id, machineContent);
@@ -503,8 +596,15 @@ function buildFreshJournalV2(root, context, plan, planDigest, now) {
   const observationInputs = new Map(context.observations.map((input) => [input.id, input]));
   const artifactInputs = new Map(context.artifacts.map((input) => [input.artifact_id, input]));
   const sortedItems = compilePlan.sortPlanItems(plan.items);
-  const firstKnId = host.nextKnowledgeId(paths);
-  const queueIds = nextQueueIds(paths, sortedItems.filter((item) => item.disposition === "candidate").length, now);
+  const allocatedKnowledgeIds = nextKnowledgeIds(
+    paths,
+    sortedItems.filter((item) => ["add", "candidate"].includes(item.disposition)).length,
+  );
+  const queueIds = nextQueueIdsWithReservations(
+    paths,
+    sortedItems.filter((item) => item.disposition === "candidate").length,
+    now,
+  );
   let knOffset = 0;
   let queueOffset = 0;
   const observations = new Map();
@@ -520,7 +620,7 @@ function buildFreshJournalV2(root, context, plan, planDigest, now) {
   const itemPlans = sortedItems.map((item) => {
     const targetId = item.target_kn_id ?? null;
     const knId = ["add", "candidate"].includes(item.disposition)
-      ? incrementKnId(firstKnId, knOffset++)
+      ? allocatedKnowledgeIds[knOffset++]
       : targetId;
     if (["update", "merge", "demote", "retire"].includes(item.disposition)) knowledgeFile(root, targetId);
     const op = {
@@ -555,9 +655,9 @@ function buildFreshJournalV2(root, context, plan, planDigest, now) {
       forceProposal: false,
     };
     request.sourceIds.add(planItem.knId);
-    request.content = planItem.item.carrier.content;
     request.forceProposal ||= planItem.item.disposition === "candidate";
     request.items.push(planItem);
+    request.content = canonicalAggregatedContent(request.items);
     carrierRequests.set(artifact.artifact_id, request);
   }
   const carrierPlans = new Map();
@@ -753,6 +853,91 @@ function reportPathFor(paths, planDigest) {
 
 function journalPathFor(paths, planDigest) {
   return path.join(paths.reports, `.compile-transaction-${planDigest.slice(0, 16)}.json`);
+}
+
+function reservationFromJournal(root, journal, planDigest, contextDigest, now) {
+  const knowledgeIds = journal.operations
+    .map((operation) => operation.kn_id)
+    .filter((id) => /^KN-[0-9]{4}$/.test(id))
+    .sort();
+  const queueIds = journal.operations
+    .map((operation) => operation.queue?.id)
+    .filter((id) => /^Q-[0-9]{8}-[0-9]{3}$/.test(id))
+    .sort();
+  const proposalIds = journal.operations
+    .flatMap((operation) => operation.writes ?? [])
+    .map((write) => write.expected_text)
+    .flatMap((text) => {
+      const matches = [...String(text).matchAll(/"proposal_id": "(compile-[a-z0-9][a-z0-9._-]*)"/g)];
+      return matches.map((match) => match[1]);
+    })
+    .sort();
+  const range = (ids, key) => ids.length === 0
+    ? { start: null, end: null, count: 0 }
+    : { start: ids[0], end: ids.at(-1), count: ids.length };
+  const queueDay = queueIds[0]?.slice(2, 10) ?? now.toISOString().slice(0, 10).replaceAll("-", "");
+  return {
+    kind: "kg.compile_id_reservation",
+    version: 1,
+    plan_digest: planDigest,
+    context_digest: contextDigest,
+    now: now.toISOString(),
+    allocation: {
+      knowledge: range(knowledgeIds, "knowledge"),
+      queue: { day: queueDay, ...range(queueIds, "queue") },
+      proposals: { ids: [...new Set(proposalIds)], count: [...new Set(proposalIds)].length },
+    },
+    path: `.kg/ids/reservations/${planDigest}.json`,
+  };
+}
+
+function sealJournal(journal) {
+  const { journal_digest: _oldDigest, ...unsigned } = journal;
+  return {
+    ...unsigned,
+    journal_digest: sha256(Buffer.from(JSON.stringify(unsigned), "utf8")),
+  };
+}
+
+function reserveIdsExclusive(paths, reservation) {
+  const directory = reservationDirectory(paths);
+  fs.mkdirSync(directory, { recursive: true });
+  const file = path.join(directory, `${reservation.plan_digest}.json`);
+  if (fs.existsSync(file)) {
+    const existing = JSON.parse(fs.readFileSync(file, "utf8"));
+    if (JSON.stringify(existing) !== JSON.stringify(reservation)) {
+      fail(`durable ID reservation conflicts with existing plan: ${reservation.plan_digest}`);
+    }
+    return file;
+  }
+  const occupied = readDurableReservations(paths).filter((item) => item.plan_digest !== reservation.plan_digest);
+  const newKnowledge = reservation.allocation.knowledge;
+  const newQueue = reservation.allocation.queue;
+  const knowledgeConflict = newKnowledge.start && rangesOverlap(
+    numericPart(newKnowledge.start, "KN-"),
+    numericPart(newKnowledge.end, "KN-"),
+    occupied.map((item) => item.allocation?.knowledge).filter((range) => range?.start && range?.end).map((range) => ({
+      start: numericPart(range.start, "KN-"),
+      end: numericPart(range.end, "KN-"),
+    })),
+  );
+  const queueConflict = newQueue.start && rangesOverlap(
+    numericPart(newQueue.start, `Q-${newQueue.day}-`),
+    numericPart(newQueue.end, `Q-${newQueue.day}-`),
+    occupied.map((item) => item.allocation?.queue).filter((range) => range?.day === newQueue.day && range.start && range.end).map((range) => ({
+      start: numericPart(range.start, `Q-${newQueue.day}-`),
+      end: numericPart(range.end, `Q-${newQueue.day}-`),
+    })),
+  );
+  if (knowledgeConflict || queueConflict) fail("durable ID reservation overlaps an existing reservation");
+  const text = `${JSON.stringify(reservation, null, 2)}\n`;
+  try {
+    fs.writeFileSync(file, text, { flag: "wx" });
+  } catch (error) {
+    if (error.code === "EEXIST") fail(`durable ID reservation was claimed concurrently: ${reservation.plan_digest}`);
+    throw error;
+  }
+  return file;
 }
 
 function actionResult(operation) {
@@ -1217,6 +1402,7 @@ function validateOperationState(root, operation, { final }) {
 function preflightWritable(root, journal) {
   const paths = host.kgPaths(root);
   const directories = new Set([paths.processed, paths.reports]);
+  if (journal.version === 2) directories.add(reservationDirectory(paths));
   for (const operation of journal.operations) {
     if (operation.protocol_version === 2) {
       for (const write of operation.writes) directories.add(path.dirname(operationWriteFile(root, write.path)));
@@ -1294,9 +1480,14 @@ function applyJournal(root, journal, now) {
           }
         }
       }
-      runWriter(ARCHIVE_OBSERVATION, operation.archive_args, root);
     }
 
+    // Product writes are validated from the post-write filesystem before any
+    // observation is archived. This keeps the archive as the final product
+    // transition and makes a partial product impossible to report as done.
+    for (const operation of journal.operations) validateOperationState(root, operation, { final: false });
+    validateCurrentInverseMap(root);
+    for (const operation of journal.operations) runWriter(ARCHIVE_OBSERVATION, operation.archive_args, root);
     for (const operation of journal.operations) validateOperationState(root, operation, { final: true });
     validateCurrentInverseMap(root);
     const paths = host.kgPaths(root);
@@ -1310,7 +1501,7 @@ function applyJournal(root, journal, now) {
   }
 }
 
-function loadJournal(root, file, planDigest, contextDigest) {
+function loadJournal(root, file, planDigest, contextDigest, nowValue = null) {
   let journal;
   try {
     journal = JSON.parse(fs.readFileSync(file, "utf8"));
@@ -1339,6 +1530,32 @@ function loadJournal(root, file, planDigest, contextDigest) {
     typeof journal.journal_digest !== "string"
   ) {
     fail("compile transaction journal does not match the plan/context");
+  }
+  if (journal.version === 2) {
+    const reservation = journal.reservation;
+    if (
+      reservation?.kind !== "kg.compile_id_reservation" ||
+      reservation.plan_digest !== planDigest ||
+      reservation.context_digest !== contextDigest ||
+      (nowValue && reservation.now !== nowValue.toISOString()) ||
+      reservation.path !== `.kg/ids/reservations/${planDigest}.json`
+    ) {
+      fail("compile transaction journal reservation does not match the plan/context/now");
+    }
+    const reservationFile = path.join(root, ...reservation.path.split("/"));
+    if (!fs.existsSync(reservationFile)) fail("compile transaction durable reservation is missing");
+    let storedReservation;
+    try {
+      storedReservation = JSON.parse(fs.readFileSync(reservationFile, "utf8"));
+    } catch (error) {
+      fail(`compile transaction durable reservation is invalid: ${error.message}`);
+    }
+    if (JSON.stringify(storedReservation) !== JSON.stringify(reservation)) {
+      fail("compile transaction durable reservation differs from the journal");
+    }
+    if (JSON.stringify(journal.report?.reservation) !== JSON.stringify(reservation)) {
+      fail("compile report reservation differs from the journal");
+    }
   }
   const { journal_digest: declaredDigest, ...unsigned } = journal;
   if (declaredDigest !== sha256(Buffer.from(JSON.stringify(unsigned), "utf8"))) {
@@ -1405,7 +1622,7 @@ function main() {
     const loadedPlan = assertExternalJson(args.plan, "compile plan");
     const context = harness.validateCompileContext(loadedContext.value);
     const plan = validatePlan(loadedPlan.value);
-    const planDigest = sha256(Buffer.from(JSON.stringify(plan), "utf8"));
+    const planDigest = compilePlan.digestPlan(plan);
     const paths = host.kgPaths(root);
     const reportFile = reportPathFor(paths, planDigest);
     if (fs.existsSync(reportFile)) {
@@ -1417,7 +1634,7 @@ function main() {
     const journalFile = journalPathFor(paths, planDigest);
     let journal;
     if (fs.existsSync(journalFile)) {
-      journal = loadJournal(root, journalFile, planDigest, context.context_digest);
+      journal = loadJournal(root, journalFile, planDigest, context.context_digest, args.now);
       for (const operation of journal.operations) validateOperationState(root, operation, { final: false });
     } else {
       harness.assertCompileContextCurrent(root, context);
@@ -1427,8 +1644,28 @@ function main() {
         console.log(`kg: compile plan preflight passed (${planDigest})`);
         return;
       }
-      fs.mkdirSync(paths.reports, { recursive: true });
-      atomicWriteJson(journalFile, journal);
+      if (journal.version === 2) {
+        const reservation = reservationFromJournal(root, journal, planDigest, context.context_digest, args.now);
+        const reservationFile = path.join(root, ...reservation.path.split("/"));
+        let createdReservation = false;
+        try {
+          createdReservation = !fs.existsSync(reservationFile);
+          reserveIdsExclusive(paths, reservation);
+          journal = sealJournal({
+            ...journal,
+            reservation,
+            report: { ...journal.report, reservation },
+          });
+          fs.mkdirSync(paths.reports, { recursive: true });
+          atomicWriteJson(journalFile, journal);
+        } catch (error) {
+          if (createdReservation && fs.existsSync(reservationFile) && !fs.existsSync(journalFile)) fs.rmSync(reservationFile, { force: true });
+          throw error;
+        }
+      } else {
+        fs.mkdirSync(paths.reports, { recursive: true });
+        atomicWriteJson(journalFile, journal);
+      }
     }
     if (args.check) {
       console.log(`kg: compile transaction is resumable (${planDigest})`);

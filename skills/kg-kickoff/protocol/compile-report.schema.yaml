@@ -15,6 +15,7 @@ field_order:
   - results
   - actions
   - archives
+  - reservation
 
 fields:
   kind: { type: enum, required: true, values: "kg.compile_report" }
@@ -26,6 +27,7 @@ fields:
   results: { type: map, required: true }
   actions: { type: map_list, required: true }
   archives: { type: map_list, required: true }
+  reservation: { type: map, required: false }
 
 action_field_order:
   - action_id

@@ -1,0 +1,6 @@
+{
+  "kind": "kg.eval_compile_fixture",
+  "version": 1,
+  "project_source": "scripts/fixtures/m4/compile-backlog/host",
+  "task": "Run the R4.4 multi-publish compile session. Read the complete compile context and every declared input, submit a strict version 2 plan through a non-shell file tool, and apply it. Publish two observations into the same managed carrier as one canonical aggregated machine segment, route one observation to the human-owned proposal carrier with a promotion queue, and archive one observation as no_change. Do not invent IDs, timestamps, hashes, paths, or lifecycle fields. Preserve all carrier bytes outside the machine-owned region and return the required compile products and evidence envelope."
+}

@@ -1,6 +1,7 @@
 // Protocol-driven compile-plan parser. It validates both the M2 legacy input
 // and the R4 action/disposition shape used by compile transactions.
 
+import crypto from "node:crypto";
 import * as protocol from "./protocol.mjs";
 
 function fail(message) {
@@ -165,4 +166,20 @@ export function sortPlanItems(items) {
       String(a.carrier?.artifact_id ?? "").localeCompare(String(b.carrier?.artifact_id ?? ""))
     );
   });
+}
+
+function canonicalValue(value) {
+  if (Array.isArray(value)) return value.map(canonicalValue);
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonicalValue(value[key])]));
+  }
+  return value;
+}
+
+export function canonicalizePlan(plan) {
+  return canonicalValue({ ...plan, items: sortPlanItems(plan.items) });
+}
+
+export function digestPlan(plan) {
+  return crypto.createHash("sha256").update(JSON.stringify(canonicalizePlan(plan))).digest("hex");
 }
