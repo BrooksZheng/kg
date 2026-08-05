@@ -12,3 +12,4 @@ evidence:
   - { type: log, ref: "attempt-03/runner-output.json: API Error: Unable to connect to API (ENOTFOUND)" }
   - { type: test, ref: "attempt-03/result.json: no file reads, tool events, permissions, or products" }
 urgency: batch
+compiled_to_kn: KN-0036

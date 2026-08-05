@@ -1,0 +1,18 @@
+id: Q-20260805-003
+at: 2026-08-05T02:45:35Z
+kind: promotion
+category: project_contract
+claim: "Promote KN-0036: a real-agent gate that dies before its first tool call is an environment verdict — attribute it to the runner adapter, leave the oracle untouched, do not retry in the same environment, and report the milestone as unclosed."
+evidence:
+  - { type: observation, ref: OBS-20260803-004 }
+  - { type: observation, ref: OBS-20260803-011 }
+  - { type: quote, ref: ".mission/kg-v2-refactor/feedback-r44.md: six sessions across R3.3, R3.4, R4.2 and R4.4 died at provider ENOTFOUND with zero tool events; all four rerun gates passed first try on a networked host with no oracle or product change." }
+options:
+  - "accept as project contract (activate KN-0036)"
+  - "keep as project_knowledge (advisory only)"
+  - "reject (retire KN-0036)"
+recommendation: "Accept. Zero tool events is a machine-checkable discriminator, so the rule is enforceable rather than a matter of judgment. It exists to resist a specific pressure — a red gate at the end of a round tempts oracle relaxation — and the pressure recurs every milestone. Six occurrences, zero false attributions."
+entry: KN-0036
+source_observations: [OBS-20260803-004, OBS-20260803-011]
+resolution: accepted
+resolution_note: "Human delegated queue rulings to the compiler agent in-session (裁决有你帮我决定, 2026-07-31); delegation not scoped to a single round. Ruled per the recorded recommendation."

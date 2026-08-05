@@ -12,3 +12,4 @@ context:
 evidence:
   - { type: quote, ref: "contract-4.md §3.1 and §3.5: raw outside-byte proof and taxonomy-derived coverage" }
 urgency: batch
+compiled_to_kn: KN-0035

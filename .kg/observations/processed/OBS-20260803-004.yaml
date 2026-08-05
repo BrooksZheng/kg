@@ -10,3 +10,4 @@ context:
 evidence:
   - { type: log, ref: "R3.3 D65 and R3.4: three attempt-01 sessions died at provider ENOTFOUND with zero tool events; the generator reported 5/6 rather than declaring closure, and both gates passed first try on a networked host (G-B3 246s, G-B4 210s) with no oracle or product change" }
 urgency: batch
+compiled_to_kn: KN-0036

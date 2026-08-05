@@ -13,3 +13,4 @@ evidence:
   - { type: test, ref: scan_reports_registered_document_schema_failures_deterministically }
   - { type: test, ref: scan_groups_coverage_by_taxonomy_derived_quadrant }
 urgency: batch
+compiled_to_kn: KN-0041

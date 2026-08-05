@@ -12,3 +12,4 @@ evidence:
   - { type: test, ref: inverse_map_and_protocol_rank_are_deterministic }
   - { type: diff, ref: "protocol/routing.yaml: disposition_rank and ownership_update_matrix" }
 urgency: batch
+compiled_to_kn: KN-0034

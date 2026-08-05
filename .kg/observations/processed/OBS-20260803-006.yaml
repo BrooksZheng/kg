@@ -9,3 +9,4 @@ evidence:
   - { type: test, ref: human_edit_between_sessions_is_refresh_not_tamper }
   - { type: diff, ref: "scripts/lib/harness.mjs: humanSegmentHashState and assertTransactionByteFence" }
 urgency: batch
+compiled_to_kn: KN-0038

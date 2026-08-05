@@ -13,3 +13,4 @@ evidence:
   - { type: test, ref: "node scripts/sync-vendored.mjs --check" }
   - { type: diff, ref: "scripts/sync-vendored.mjs filters eval-*.mjs and removes excluded files after refresh" }
 urgency: batch
+compiled_to_kn: KN-0003

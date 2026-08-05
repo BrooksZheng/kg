@@ -8,6 +8,7 @@ evidence:
   - { type: observation, ref: OBS-20260712-002 }
   - { type: observation, ref: OBS-20260712-004 }
   - { type: observation, ref: OBS-20260713-002 }
+  - { type: observation, ref: OBS-20260803-010 }
   - { type: quote, ref: "scripts/lib/protocol.mjs: PROTOCOL_DIR = LIB_DIR/../../protocol" }
   - { type: diff, ref: "install.mjs --copy embeds scripts/lib and protocol inside each vendored skill dir" }
   - { type: diff, ref: "commit c009c4c: vendored copies committed; skills CLI local-source install verified end-to-end in /tmp/host-npx" }
@@ -46,3 +47,13 @@ commit.
 
 Breaking any of these invariants makes installed skills fail only at the
 consumer's site, which is the worst place to discover it.
+
+## What must NOT be vendored
+
+The sync is not "copy everything under `scripts/lib/`". Evaluator-only
+modules (`scripts/lib/eval-*.mjs`) belong to the plugin checkout and must
+be filtered out, and `sync-vendored.mjs` deletes them from skill
+directories after each refresh so a previously vendored copy cannot
+linger. A host that installs kg gets the product, not the harness that
+judges it — shipping evaluator code would contradict KN-0004's statement
+of what an installed layout contains.

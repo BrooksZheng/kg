@@ -8,3 +8,4 @@ context:
 evidence:
   - { type: log, ref: "2026-08-03 compile round: appending resolution/resolution_note to Q-20260803-001 emitted a second resolution_note key alongside the template's resolution_note: null, requiring a manual repair pass" }
 urgency: batch
+compiled_to_kn: KN-0028

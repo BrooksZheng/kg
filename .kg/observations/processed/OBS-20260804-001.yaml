@@ -14,3 +14,4 @@ evidence:
   - { type: test, ref: scripts/test-v2.mjs:scan_reports_dangling_kn_carrier_line_and_schema_findings }
   - { type: diff, ref: "skills/kg-scan/scripts/report-builder.mjs and protocol/scan.yaml" }
 urgency: batch
+compiled_to_kn: KN-0039
