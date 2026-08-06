@@ -46,9 +46,17 @@ the observation pipeline.
 
 ### Brownfield Bootstrap
 
-`kg-scan` performs a static deterministic inventory, then guides the Agent
-through evidence-based semantic shaping. It produces draft documents and
-patch proposals. It never reads `.kg/`.
+`kg-scan` performs a static deterministic inventory. `kg-docs` turns that
+inventory into draft documents and patch proposals through an atomic batch
+that rechecks its own eligibility rather than trusting the inventory's
+exclusions. Neither reads `.kg/`.
+
+### Task Entry
+
+`kg-kickoff` retrieves the accepted documents and knowledge bearing on a
+task, asks one question at a time with a recommended answer and its evidence,
+and records where the task collides with an accepted constraint. `kg-spec`
+synthesizes that session into a task spec without asking anything further.
 
 ### Continuous Learning
 
@@ -69,14 +77,27 @@ evidence, authority, confidence, lifecycle, scope, and regret metadata.
 ### Harness routing
 
 The v2 protocol separates observation-to-knowledge compilation from
-knowledge-to-harness routing. M1 defines Markdown document, skill proposal,
-and script proposal carrier identities. Carrier write behavior arrives in a
-later milestone.
+knowledge-to-harness routing. A carrier is a Markdown document region, a
+skill proposal, or a script proposal, and its sidecar records ownership —
+`managed`, `co_managed`, or `human` — which decides what compile may write.
+Managed regions are rendered in place, human-owned targets receive proposals
+and are never written.
+
+### Harness health
+
+`kg-scan` measures whether the harness still matches the repository: stale
+source anchors, broken references, schema and hash drift, coverage gaps by
+document type, and the always-loaded instruction surface budget. Findings are
+tiered so that warnings report and only hard errors gate.
 
 ### Protocol and shared library
 
-`protocol/` holds nine machine interfaces. `scripts/lib/` implements the
-KYAML parser, validation, protocol loading, and host path logic.
+`protocol/` holds every machine-parsed interface — observation, knowledge,
+project document, harness, task spec, kickoff, spec synthesis, compile, scan,
+proposal and evaluation schemas, plus the taxonomy, lifecycle, authority and
+routing tables. Any table code branches on is read from its protocol file at
+runtime rather than restated in code. `scripts/lib/` implements the KYAML
+parser, validation, protocol loading, and host path logic.
 
 ### Distribution
 
@@ -91,7 +112,9 @@ docs accepted sources ─┐
                       ├→ kg-compile → knowledge ledger → harness carriers
 observations ──────────┘
 
-existing code → kg-scan → draft docs → human review → accepted sources
+existing code → kg-scan inventory → kg-docs drafts → human review → accepted sources
+
+accepted sources + ledger → kg-kickoff → kg-spec → task spec → work → observations
 ```
 
 ## Trust boundaries

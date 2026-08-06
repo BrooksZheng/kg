@@ -96,7 +96,7 @@ export class ManualMigrationError extends MigrationError {
 
 export class QueueMigrationError extends MigrationError {
   constructor(items) {
-    super("queue contains items that M2 cannot map");
+    super("queue contains items the migration cannot map");
     this.items = items;
   }
 }
@@ -863,7 +863,7 @@ export function detectMigration(rootValue) {
 
 function assertHealthyV1(detection, config) {
   if (detection.classification !== "v1") {
-    throw new MigrationError(`M2 migration requires a healthy v1 host; detected ${detection.classification}`);
+    throw new MigrationError(`migration requires a healthy v1 host; detected ${detection.classification}`);
   }
   assertExactKeys(config, V1_CONFIG_KEYS, "v1 config");
   if (!Number.isInteger(config.observation_threshold) || config.observation_threshold <= 0) {
@@ -1114,7 +1114,7 @@ function validateInstalledSkillNames(root) {
   const allowed = new Set([...V1_SKILL_NAMES, ...SKILL_NAMES]);
   const unknown = names.filter((name) => !allowed.has(name));
   if (unknown.length) {
-    throw new MigrationError(`M2 cannot classify installed kg skill directories: ${unknown.join(", ")}`);
+    throw new MigrationError(`cannot classify installed kg skill directories: ${unknown.join(", ")}`);
   }
   return names;
 }

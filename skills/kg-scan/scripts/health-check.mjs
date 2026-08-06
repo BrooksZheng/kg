@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-// Public health-check entrypoint for the deterministic M2 staleness scanner.
+// Public health-check entrypoint for the deterministic staleness scanner.
 
 import fs from "node:fs";
 import path from "node:path";

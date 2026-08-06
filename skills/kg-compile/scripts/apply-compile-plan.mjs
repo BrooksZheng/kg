@@ -1,4 +1,4 @@
-// The only M2 compile mutation entry. It consumes an agent-authored JSON plan,
+// The only compile mutation entry. It consumes an agent-authored JSON plan,
 // performs complete preflight, then applies every result through the existing
 // record writers and archive entrypoint.
 //
@@ -29,7 +29,7 @@ const CARRIER_FIELDS = ["artifact_id", "content"];
 const QUEUE_FIELDS = ["claim", "evidence", "options", "recommendation"];
 const EVIDENCE_FIELDS = ["type", "ref"];
 const KNOWN_LIMITATIONS = [
-  "M2 deterministic validation proves bidirectional reference existence and managed-block hash consistency. It does not prove that rendered prose is semantically equivalent to sidecar source_kn_ids; M5 agent-assisted scan owns that check.",
+  "Deterministic validation proves bidirectional reference existence and managed-block hash consistency. It does not prove that rendered prose is semantically equivalent to sidecar source_kn_ids; the agent-assisted scan layer owns that check.",
 ];
 
 function fail(message) {
@@ -1072,7 +1072,7 @@ function buildFreshJournal(root, context, plan, planDigest, now) {
       const targetFile = harness.resolveCompileInput(root, artifact.target_path).full;
       const sidecar = harness.readHarnessSidecar(root, sidecarFile);
       harness.validateHarnessReferences(root, sidecar);
-      if (sidecar.source_kn_ids.length !== 0) fail(`M2 carrier must start with no source_kn_ids: ${artifact.artifact_id}`);
+      if (sidecar.source_kn_ids.length !== 0) fail(`a first-publish carrier must start with no source_kn_ids: ${artifact.artifact_id}`);
       const beforeDocument = fs.readFileSync(targetFile, "utf8");
       const beforeBlock = harness.inspectManagedBlock(beforeDocument, artifact.artifact_id);
       const knId = incrementKnId(firstKnId, knOffset);

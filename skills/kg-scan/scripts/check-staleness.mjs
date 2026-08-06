@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-// Public CLI for the deterministic R4.3 report builder.
+// Public CLI for the deterministic report builder.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -62,8 +62,8 @@ function writeReport(report, outputValue) {
   process.stdout.write(text);
 }
 
-// Keep the M2 library entrypoint available to callers while both public CLIs
-// consume the R4.3 builder.
+// Keep the original library entrypoint available to callers while both public
+// CLIs consume the shared builder.
 export function scanStaleness(rootValue, nowValue) {
   return buildScanReport(rootValue, nowValue);
 }

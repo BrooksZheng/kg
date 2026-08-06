@@ -204,6 +204,7 @@ node scripts/lib/protocol.mjs
 node scripts/sync-vendored.mjs          # refresh skills/*/scripts/lib + skills/*/protocol
 node scripts/sync-vendored.mjs --check  # CI / pre-push guard: exit 1 on drift
 node scripts/test-v2.mjs                # seven-part black-box suite across all seven skills
+node scripts/test-rfc004.mjs            # RFC-004 safety boundaries for the authoring plane
 ```
 
 A skill published with drifted copies fails only at the consumer's site —

@@ -1,4 +1,4 @@
-// Deterministic R4.3 scan report builder.
+// Deterministic scan report builder.
 //
 // This module is deliberately read-only. It never enters .kg, follows a
 // symlink, or executes a host file. check-staleness.mjs and health-check.mjs

@@ -1,4 +1,4 @@
-// Deterministic two-phase context gathering for the M1 kickoff spike.
+// Deterministic two-phase context gathering for kickoff retrieval.
 // Index mode reads fixed project surfaces and metadata summaries. Deep mode
 // reads only caller-selected paths that were present in the saved index.
 

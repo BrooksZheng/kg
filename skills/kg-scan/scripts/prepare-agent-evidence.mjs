@@ -2,7 +2,7 @@
 
 // Build the read-only input packet consumed by an agent-assisted scan session.
 // The packet has no kg.* product identity. Only kg.scan_agent_report is a new
-// R5.4 machine product.
+// Machine product consumed by the scan agent layer.
 
 import fs from "node:fs";
 import path from "node:path";

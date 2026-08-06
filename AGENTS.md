@@ -6,8 +6,9 @@
 
 ```bash
 # 构建（无构建步骤：零依赖 Node ESM，脚本直接运行）
-# 测试（七个 part 全绿才算通过）
+# 测试（七个 part 全绿才算通过；RFC-004 的安全边界另有一套）
 node scripts/test-v2.mjs
+node scripts/test-rfc004.mjs
 # lint（无 linter；改为校验 skills/ 下 vendored 的 lib/ 与 protocol/ 无漂移）
 node scripts/sync-vendored.mjs --check
 ```
