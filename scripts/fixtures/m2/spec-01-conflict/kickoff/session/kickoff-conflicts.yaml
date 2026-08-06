@@ -1,5 +1,9 @@
 kind: kg.kickoff_conflicts
-version: 1
+version: 2
+recorded_at: 2026-08-06T07:04:19.914Z
+session_id: KSESSION-943BB27D1F2F
+assessment: conflict
 conflicts:
-  - { summary: "任务中「写入」可字面解读为 Payment 直接写入 Order 数据库，违反决策 0001「Payment must not write the Order database directly」", source_path: docs/decisions/0001-payment-order-event-bus.md, line: 15 }
-  - { summary: "直接写入重试会绕过事件去重导致重复状态转换，违反陷阱文档的安全路径", source_path: docs/traps/payment-direct-write.md, line: 14 }
+  - { conflict_id: KC-D9ECC1ECE665, summary: "任务要求「Payment 到 Order 的写入」增加重试，但已接受决策明确禁止 Payment 直接写入 Order 数据库，任务中的「写入」一词指代了被替换的直接数据库写入机制", task_message_index: 0, task_message_sha256: sha256:de269562eae745539c907197d002b93a23a8c6b35db016cb2324a01303e9863a, constraint_source_path: docs/decisions/0001-payment-order-event-bus.md, constraint_line: 15, constraint_sha256: sha256:b1170658a7618bd2d53c81a7ae349947cb41f57ef889b7994dac2bb4ff495a10, finding_id: KF-5545FD215E0F }
+  - { conflict_id: KC-29C4AC8DD5D9, summary: "任务要求对「写入」增加重试，而已接受的陷阱文档指出重试直接数据库写入会绕过事件去重并产生重复状态转换", task_message_index: 0, task_message_sha256: sha256:de269562eae745539c907197d002b93a23a8c6b35db016cb2324a01303e9863a, constraint_source_path: docs/traps/payment-direct-write.md, constraint_line: 14, constraint_sha256: sha256:96f5994a9dd9492461b0f58c0fcbff2dfdeda10f8fe2d466d6c571e8e6ac0176, finding_id: KF-F30E815CDDB9 }
+no_conflict_reason_refs: []

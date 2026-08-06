@@ -11,8 +11,8 @@ expected_sources:
 expected_conflict_sources:
   - docs/decisions/0001-payment-order-event-bus.md
   - docs/traps/payment-direct-write.md
-expected_kickoff_session_id: a2a74916-3957-40ac-8a90-77f0b797e484
-expected_turn_session_id: 4bd4a71c-c999-4fd7-bc42-52dee786419a
+expected_kickoff_session_id: 5f8a0eda-26b0-4ee5-845d-4a2ece5ca3b3
+expected_turn_session_id: KSESSION-943BB27D1F2F
 required_sections: "Context|Requirements|Constraints|References|Out of Scope|Acceptance Criteria|Open Questions|Session History"
 c1_zero_interview_score: 4
 forbid_user_questions: true

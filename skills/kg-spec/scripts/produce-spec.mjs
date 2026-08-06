@@ -232,20 +232,29 @@ function structuredPacketFacts(packet, root) {
   let turnIds;
   if (turn.version === protocol.loadKickoffTurnSchema().product_version) {
     productSchemaErrors(turn, protocol.loadKickoffTurnSchema(), "packet kg.kickoff_turn");
+    // The kickoff harness packs its instructions and the task into one user
+    // message, so the turn states the text it responded to and the pointer is
+    // grounded by containment in the transcript's bytes rather than equality.
     const userMessage = packet.transcript[turn.user_message_index];
     if (
       !userMessage ||
       userMessage.role !== "user" ||
-      machineContract.sha256Bytes(userMessage.content) !== turn.user_message_sha256
+      machineContract.sha256Bytes(turn.user_message) !== turn.user_message_sha256 ||
+      !String(userMessage.content).includes(turn.user_message)
     ) {
       throw new Error("packet kg.kickoff_turn user pointer does not match transcript bytes");
     }
+    // The recorded assistant_message is the script-rendered question, which the
+    // agent sends inside a longer message carrying its findings. The kickoff
+    // gate grounds it by containment for that reason, and the two readers have
+    // to agree on the relation or a session can satisfy only one of them.
     const assistantMessage = packet.transcript[turn.question.assistant_message_index];
     if (
       !assistantMessage ||
       assistantMessage.role !== "assistant" ||
-      assistantMessage.content !== turn.question.assistant_message ||
-      machineContract.sha256Bytes(assistantMessage.content) !== turn.question.assistant_message_sha256
+      machineContract.sha256Bytes(turn.question.assistant_message) !==
+        turn.question.assistant_message_sha256 ||
+      !String(assistantMessage.content).includes(turn.question.assistant_message)
     ) {
       throw new Error("packet kg.kickoff_turn assistant pointer does not match transcript bytes");
     }
@@ -280,6 +289,8 @@ function structuredPacketFacts(packet, root) {
 
   const conflictProduct = productByKind(packet, "kg.kickoff_conflicts", { required: false });
   const conflictById = new Map();
+  const turnUserMessage = turn.user_message ?? null;
+  const turnUserMessageSha = turn.user_message_sha256 ?? null;
   if (conflictProduct) {
     const conflicts = readMachineProduct(conflictProduct);
     if (conflicts.version === protocol.loadKickoffConflictSchema().product_version) {
@@ -288,7 +299,17 @@ function structuredPacketFacts(packet, root) {
         const message = packet.transcript[conflict.task_message_index];
         const finding = findingById.get(conflict.finding_id);
         const sourceFile = host.resolveSafeRelative(root, conflict.constraint_source_path).full;
-        if (!message || message.role !== "user" || machineContract.sha256Bytes(message.content) !== conflict.task_message_sha256) {
+        // A conflict points at the same user message the turn does, so it is
+        // grounded the same way: the recorded task text must hash to the
+        // conflict's digest and appear in the transcript message it names.
+        // The harness delivers instructions and task together, which is why
+        // equality against the whole message is the wrong relation.
+        if (
+          !message ||
+          message.role !== "user" ||
+          conflict.task_message_sha256 !== turnUserMessageSha ||
+          !String(message.content).includes(turnUserMessage)
+        ) {
           throw new Error(`packet conflict task pointer is invalid: ${conflict.conflict_id}`);
         }
         if (

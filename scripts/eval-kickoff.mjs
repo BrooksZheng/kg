@@ -3,6 +3,7 @@
 // copies the host, installs kg-kickoff, runs one provider session, and audits
 // the index, deep context, turn product, conflict product, and tool chain.
 
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
@@ -12,7 +13,12 @@ import * as documentAnchor from "./lib/document-anchor.mjs";
 import * as harness from "./lib/harness.mjs";
 import * as host from "./lib/host.mjs";
 import * as protocol from "./lib/protocol.mjs";
-import { hasProductReadEvidence, isScriptInvocation } from "./lib/eval-tool-audit.mjs";
+import {
+  acceptedInvocation,
+  deepPhaseSourceSet,
+  hasProductReadEvidence,
+  isScriptInvocation,
+} from "./lib/eval-tool-audit.mjs";
 import { loadSavedEvaluationFixture } from "./lib/eval-fixture.mjs";
 import { calculateRubricScore } from "./lib/eval-rubric.mjs";
 import * as productVersion from "./lib/eval-product-version.mjs";
@@ -307,16 +313,31 @@ function parseTurnProduct(file, projectRoot) {
 
 function parseConflictProduct(file, projectRoot) {
   const raw = readMachineProduct(file, "kg.kickoff_conflicts");
-  exactFields(raw, ["kind", "version", "conflicts"], "kg.kickoff_conflicts");
-  if (
-    raw.kind !== "kg.kickoff_conflicts" ||
-    !productVersion.acceptedVersions(KICKOFF_CONFLICT_SCHEMA, "kg.kickoff_conflicts").includes(raw.version) ||
-    !Array.isArray(raw.conflicts)
-  ) {
+  const version = productVersion.assertAcceptedVersion(raw, KICKOFF_CONFLICT_SCHEMA, "kg.kickoff_conflicts");
+  const productFields = productVersion.fieldOrderForVersion(
+    KICKOFF_CONFLICT_SCHEMA,
+    version,
+    "kg.kickoff_conflicts",
+  );
+  exactFields(raw, productFields, "kg.kickoff_conflicts");
+  if (raw.kind !== "kg.kickoff_conflicts" || !Array.isArray(raw.conflicts)) {
     throw new Error("kg.kickoff_conflicts kind/version/conflicts is invalid");
   }
+  // Version 2 qualifies the constraint reference by name
+  // (`constraint_source_path`/`constraint_line`). Both shapes are normalized to
+  // one internal form so the rest of the audit stays version-agnostic.
+  const itemFields = productVersion.recordFieldOrderForVersion(
+    KICKOFF_CONFLICT_SCHEMA,
+    version,
+    "conflicts",
+    "kg.kickoff_conflicts",
+  );
+  const qualified = itemFields.includes("constraint_source_path");
   return raw.conflicts.map((item, index) => {
-    exactFields(item, ["summary", "source_path", "line"], `kg.kickoff_conflicts.conflicts[${index}]`);
+    exactFields(item, itemFields, `kg.kickoff_conflicts.conflicts[${index}]`);
+    if (qualified) {
+      item = { ...item, source_path: item.constraint_source_path, line: item.constraint_line };
+    }
     if (typeof item.summary !== "string" || item.summary.trim() === "") {
       throw new Error(`kg.kickoff_conflicts.conflicts[${index}].summary is invalid`);
     }
@@ -358,13 +379,15 @@ function canonicalProductProjectRoot(value) {
   return host.canonicalPath(path.isAbsolute(value) ? value : path.resolve(ROOT, value));
 }
 
-function auditToolChain(response, findings, conflicts) {
+function auditToolChain(response, findings, conflicts, artifactsRoot) {
   const failures = [];
   const events = response.tool_events ?? [];
-  const indexEvent = events.find((event) => scriptCommandHas(event, "gather-context.mjs", "--phase", "index"));
-  const deepEvent = events.find((event) => scriptCommandHas(event, "gather-context.mjs", "--phase", "deep"));
-  const turnEvent = events.find((event) => scriptCommandHas(event, "record-turn.mjs", "--index"));
-  const conflictEvent = events.find((event) => scriptCommandHas(event, "record-conflicts.mjs"));
+  const accepted = (...needles) =>
+    acceptedInvocation(events, (event) => scriptCommandHas(event, ...needles));
+  const indexEvent = accepted("gather-context.mjs", "--phase", "index");
+  const deepEvent = accepted("gather-context.mjs", "--phase", "deep");
+  const turnEvent = accepted("record-turn.mjs", "--index");
+  const conflictEvent = accepted("record-conflicts.mjs");
   if (!indexEvent) failures.push("index gather-context.mjs tool event missing");
   if (!deepEvent) failures.push("deep gather-context.mjs tool event missing");
   if (!turnEvent) failures.push("record-turn.mjs --index tool event missing");
@@ -390,13 +413,25 @@ function auditToolChain(response, findings, conflicts) {
   ) {
     failures.push("conflict recorder must run after deep");
   }
-  for (const finding of findings) {
-    if (deepEvent && !deepEvent.command.includes(finding.source_path)) {
-      failures.push(`deep tool event does not name finding source: ${finding.source_path}`);
+  // The deep phase names its exact set on the command line only in the version 1
+  // form. Version 2 carries that set in the recorded scope product (KN-0042), so
+  // the audit reads whichever the invocation actually used rather than assuming
+  // the older shape.
+  const deepSources = deepEvent
+    ? deepPhaseSourceSet(deepEvent, (token) =>
+        host.resolveProductPath(artifactsRoot, token, { label: "kickoff scope product" }).declared,
+      )
+    : null;
+  if (deepSources !== null) {
+    for (const finding of findings) {
+      if (!deepSources.has(finding.source_path)) {
+        failures.push(`deep tool event does not name finding source: ${finding.source_path}`);
+      }
     }
   }
   return failures;
 }
+
 
 function auditIndex(index, projectRoot) {
   const failures = [];
@@ -413,8 +448,21 @@ function auditIndex(index, projectRoot) {
     failures.push("kickoff index project_root mismatch");
   }
   const paths = new Set();
+  // Version 2 indexes harness sidecars alongside documents, and a sidecar is a
+  // file rather than a stable document anchor. The extension that separates the
+  // two comes from the index schema so the two readers cannot drift.
+  const markdownExtensions = String(KICKOFF_INDEX_SCHEMA.markdown_extensions ?? ".md").split("|");
+  const isDocumentPath = (value) =>
+    typeof value === "string" && markdownExtensions.some((extension) => value.endsWith(extension));
   for (const [entryIndex, entry] of index.entries.entries()) {
     try {
+      if (!isDocumentPath(entry.path)) {
+        const file = host.resolveSafeRelative(projectRoot, entry.path);
+        if (!fs.statSync(file.full).isFile()) throw new Error("index entry is not a file");
+        if (paths.has(entry.path)) failures.push(`kickoff index repeats ${entry.path}`);
+        paths.add(entry.path);
+        continue;
+      }
       const anchor = documentAnchor.validateStableDocumentReference({
         sourcePath: entry.path,
         projectRoot,
@@ -426,12 +474,13 @@ function auditIndex(index, projectRoot) {
         failures.push(`kickoff index metadata mismatch for ${anchor.sourcePath}`);
       }
       if (anchor.sourcePath.startsWith("knowledge/")) {
+        const summary = productVersion.entryKnowledgeSummary(entry, KICKOFF_INDEX_SCHEMA);
         if (
-          typeof entry.claim !== "string" ||
-          entry.claim.trim() === "" ||
-          entry.scope === null ||
-          typeof entry.scope !== "object" ||
-          Array.isArray(entry.scope)
+          typeof summary.claim !== "string" ||
+          summary.claim.trim() === "" ||
+          summary.scope === null ||
+          typeof summary.scope !== "object" ||
+          Array.isArray(summary.scope)
         ) {
           failures.push(`kickoff index lacks claim/scope summary for ${anchor.sourcePath}`);
         }
@@ -440,7 +489,7 @@ function auditIndex(index, projectRoot) {
       failures.push(`kickoff index entry ${entryIndex} invalid: ${documentAnchor.formatDocumentAnchorErrorZh(error)}`);
     }
   }
-  for (const [entryIndex, entry] of indexEdges.entries()) {
+  for (const [entryIndex, entry] of harnessEdgeViews(index, indexEdges).entries()) {
     try {
       const sidecar = host.resolveSafeRelative(projectRoot, entry.path);
       const target = host.resolveSafeRelative(projectRoot, entry.target_path);
@@ -448,13 +497,20 @@ function auditIndex(index, projectRoot) {
         throw new Error("sidecar or target is not a file");
       }
       const record = parse(fs.readFileSync(sidecar.full, "utf8"));
-      if (
-        record.artifact_id !== entry.artifact_id ||
-        record.path !== entry.target_path ||
-        JSON.stringify(record.source_kn_ids) !== JSON.stringify(entry.source_kn_ids) ||
-        JSON.stringify(record.source_refs) !== JSON.stringify(entry.source_refs)
-      ) {
-        throw new Error("sidecar summary does not match source");
+      // Version 1 restated the sidecar's summary inside the index, so the two
+      // had to agree. Version 2 references the sidecar by source id and states
+      // nothing to disagree with, leaving the on-disk record authoritative.
+      if (entry.declared !== null) {
+        if (
+          record.artifact_id !== entry.declared.artifact_id ||
+          record.path !== entry.target_path ||
+          JSON.stringify(record.source_kn_ids) !== JSON.stringify(entry.declared.source_kn_ids) ||
+          JSON.stringify(record.source_refs) !== JSON.stringify(entry.declared.source_refs)
+        ) {
+          throw new Error("sidecar summary does not match source");
+        }
+      } else if (record.path !== entry.target_path) {
+        throw new Error("harness edge target does not match the sidecar record");
       }
       const block = harness.inspectManagedBlock(
         fs.readFileSync(target.full, "utf8"),
@@ -497,18 +553,32 @@ function auditDeepContext(context, index, projectRoot) {
   }
   const indexed = new Set((index.entries ?? []).map((entry) => entry.path));
   const seen = new Set();
+  // The deep phase may pull a harness sidecar into scope, and a sidecar is a
+  // file rather than a stable document anchor; the anchor rule applies to the
+  // markdown sources the index schema names as documents.
+  const markdownExtensions = String(KICKOFF_INDEX_SCHEMA.markdown_extensions ?? ".md").split("|");
+  const isDocumentSource = (value) =>
+    markdownExtensions.some((extension) => String(value).endsWith(extension));
   for (const [documentIndex, document] of context.documents.entries()) {
     try {
-      const anchor = documentAnchor.validateStableDocumentReference({
-        sourcePath: document.path,
-        projectRoot,
-      });
+      const anchor = markdownExtensions.some((extension) => String(document.path).endsWith(extension))
+        ? documentAnchor.validateStableDocumentReference({ sourcePath: document.path, projectRoot })
+        : (() => {
+            const file = host.resolveSafeRelative(projectRoot, document.path);
+            return { sourcePath: file.relative, full: file.full };
+          })();
       if (!indexed.has(anchor.sourcePath)) throw new Error("document was not indexed");
       if (seen.has(anchor.sourcePath)) throw new Error("document is repeated");
       seen.add(anchor.sourcePath);
-      const expected = sourceMetadata(anchor.full, anchor.sourcePath);
-      if (document.status !== expected.status || document.authority !== expected.authority) {
-        throw new Error("status/authority mismatch");
+      // Status and authority are read out of document frontmatter, which a
+      // harness sidecar does not have. Its integrity rests on the byte
+      // comparison below, recomputed from disk rather than restated by the
+      // index, so nothing here is taken on the generator's word.
+      if (isDocumentSource(anchor.sourcePath)) {
+        const expected = sourceMetadata(anchor.full, anchor.sourcePath);
+        if (document.status !== expected.status || document.authority !== expected.authority) {
+          throw new Error("status/authority mismatch");
+        }
       }
       if (typeof document.content !== "string") throw new Error("content is missing");
       const source = fs.readFileSync(anchor.full);
@@ -523,6 +593,43 @@ function auditDeepContext(context, index, projectRoot) {
   return failures;
 }
 
+// The index states its harness relation as self-describing sidecar summaries in
+// version 1 and as source-id edges in version 2. Both are reduced to the pair
+// the integrity checks need — sidecar path and target path — with the version 1
+// summary carried along only where it exists to be cross-checked.
+function harnessEdgeViews(index, edges) {
+  const byId = new Map((index.entries ?? []).map((entry) => [entry.source_id, entry]));
+  const views = [];
+  for (const edge of edges) {
+    if (typeof edge?.path === "string") {
+      views.push({ path: edge.path, target_path: edge.target_path, declared: edge });
+      continue;
+    }
+    if (edge?.edge_type !== "harness_target") continue;
+    const sidecar = byId.get(edge.from_source_id);
+    const target = byId.get(edge.to_source_id);
+    if (!sidecar || !target) continue;
+    views.push({ path: sidecar.path, target_path: target.path, declared: null });
+  }
+  return views;
+}
+
+// A carrier_ref names an artifact and its target document. Version 1 answers
+// from the index alone; version 2 points at the sidecar, whose on-disk record
+// holds the back-pointing knowledge ids.
+function resolveCarrierEdge(index, edges, artifactId, targetPath, projectRoot) {
+  const declared = edges.find(
+    (edge) => edge?.artifact_id === artifactId && edge?.target_path === targetPath,
+  );
+  if (declared) return declared;
+  for (const view of harnessEdgeViews(index, edges)) {
+    if (view.target_path !== targetPath) continue;
+    const record = parse(fs.readFileSync(host.resolveSafeRelative(projectRoot, view.path).full, "utf8"));
+    if (record.artifact_id === artifactId) return record;
+  }
+  return null;
+}
+
 function auditCompiledClosure(findings, index, projectRoot) {
   const failures = [];
   const findingPaths = new Set(findings.map((finding) => finding.source_path));
@@ -534,11 +641,10 @@ function auditCompiledClosure(findings, index, projectRoot) {
         const match = /^([^@]+)@([^#]+)#kg:managed$/.exec(ref);
         if (!match) throw new Error(`invalid carrier_ref ${ref}`);
         const [, artifactId, targetPath] = match;
-        const sidecar = productVersion.indexEdgeList(index, KICKOFF_INDEX_SCHEMA).find(
-          (entry) => entry.artifact_id === artifactId && entry.target_path === targetPath,
-        );
-        if (!sidecar) throw new Error(`carrier ${artifactId} is absent from index harness`);
-        if (!sidecar.source_kn_ids.includes(frontmatter.id)) {
+        const edges = productVersion.indexEdgeList(index, KICKOFF_INDEX_SCHEMA);
+        const carrier = resolveCarrierEdge(index, edges, artifactId, targetPath, projectRoot);
+        if (!carrier) throw new Error(`carrier ${artifactId} is absent from index harness`);
+        if (!carrier.source_kn_ids.includes(frontmatter.id)) {
           throw new Error(`carrier ${artifactId} does not point back to ${frontmatter.id}`);
         }
         if (!findingPaths.has(targetPath)) {
@@ -581,7 +687,11 @@ function auditFileReads(response, fixture, projectRoot) {
   const failures = [];
   for (const read of response.file_reads ?? []) {
     try {
-      const resolved = host.resolveSafeRelative(projectRoot, read.path);
+      // A read of a path that is not there returns nothing, so it can neither
+      // pull a distractor into context nor escape the project; what this audit
+      // is for is where the agent looked, not that every guess landed.
+      const resolved = host.resolveSafeRelative(projectRoot, read.path, { mustExist: false });
+      if (!fs.existsSync(resolved.full)) continue;
       if (fixture.distractors.includes(resolved.relative)) {
         failures.push(`深读了干扰文档 ${resolved.relative}`);
       }
@@ -635,12 +745,42 @@ function evaluate(fixture, response, projectRoot, artifactsRoot) {
   const findingPaths = new Set(findings.map((finding) => finding.source_path));
   const missingFind = fixture.must_find.filter((expected) => !findingPaths.has(expected));
   const mustFindFailures = [];
-  if (new Set(findings.map((finding) => finding.source_path)).size !== findings.length) {
-    mustFindFailures.push("kg.kickoff_turn repeats a finding source_path");
+  // A finding is identified by document and line, the same key the recorder
+  // uses; two claims from two lines of one document are two findings, and
+  // collapsing them to the path alone charged the agent for citing both (D44).
+  const findingRefs = findings.map((finding) => `${finding.source_path}#L${finding.line}`);
+  if (new Set(findingRefs).size !== findings.length) {
+    mustFindFailures.push("kg.kickoff_turn repeats a finding");
   }
 
   const mustAskFailures = [];
   if (turn) {
+    // The recorder can only see the snapshot the agent hands it, so the turn's
+    // user pointer is checked here against the runner's own transcript. Reading
+    // it back out of agent-authored bytes would let the same source both make
+    // and confirm the claim (KN-0035).
+    // The recorder sees only the snapshot the agent hands it, so the turn's
+    // claim about what the user asked is confirmed here against the runner's
+    // own transcript; reading it back out of agent-authored bytes would let one
+    // source both make and confirm the claim (KN-0035). The harness delivers
+    // its instructions and the task as a single message, so the relation is
+    // containment rather than equality.
+    const userMessage = turn.user_message_index === undefined
+      ? null
+      : response.transcript?.[turn.user_message_index];
+    if (turn.user_message_index === undefined) {
+      // Version 1 turns carry no user pointer, so there is nothing to confirm.
+    } else if (!userMessage || userMessage.role !== "user" || typeof userMessage.content !== "string") {
+      mustAskFailures.push("user_message_index does not point to a user message in the runner transcript");
+    } else {
+      const digest = `sha256:${crypto.createHash("sha256").update(turn.user_message, "utf8").digest("hex")}`;
+      if (digest !== turn.user_message_sha256) {
+        mustAskFailures.push("user_message_sha256 does not hash the recorded user_message");
+      }
+      if (!userMessage.content.includes(turn.user_message)) {
+        mustAskFailures.push("recorded user_message is absent from the runner transcript message it points at");
+      }
+    }
     const indexValue = turn.question.assistant_message_index;
     const message = response.transcript?.[indexValue];
     if (!message || message.role !== "assistant" || typeof message.content !== "string") {
@@ -712,7 +852,7 @@ function evaluate(fixture, response, projectRoot, artifactsRoot) {
   if (index) fabricationFailures.push(...auditCompiledClosure(findings, index, projectRoot));
   fabricationFailures.push(...indexFailures, ...contextFailures);
 
-  const toolFailures = auditToolChain(response, findings, conflicts);
+  const toolFailures = auditToolChain(response, findings, conflicts, artifactsRoot);
   const readFailures = auditFileReads(response, fixture, projectRoot);
   const citationFailures = auditCitations(response, findings, projectRoot);
   const executionFailures = (response.permission_denials ?? []).map(
@@ -873,19 +1013,24 @@ function runReal(fixtureValue, artifactsValue) {
       `再运行同一脚本的 deep 阶段，把结果写到 ${contextPath}。` +
       "深读是有预算的刻意行为：只 include 你将作为 finding 或冲突证据引用的文档，" +
       "从 index 标题与路径判断相关性，与任务无关的文档一律不深读，全部深读视为选择失败。" +
-      "根据 deep context 形成 findings。若任务文本存在会违反稳定约束的字面解读，" +
-      `用严格 JSON 写入 ${conflictsInputPath}，再运行 ${conflictScript} 生成 ${conflictsPath}。` +
+      "根据 deep context 形成 findings。冲突判定必须记录：无论结论是 conflict 还是 " +
+      "no_conflict，都要用严格 JSON 写入 " +
+      `${conflictsInputPath}，再运行 ${conflictScript} 生成 ${conflictsPath}；沉默视为未完成。` +
       "准备最终只含一个问题的 assistant 消息，问题须带推荐与理由。" +
       `用非 shell 文件写入工具把 agent 语义字段写到 ${turnInputPath}，` +
-      `并把最终 Runner Contract transcript 的快照写到 ${turnTranscriptPath}。` +
+      `并把最终 Runner Contract transcript 的快照写到 ${turnTranscriptPath}；` +
+      "快照里的 user 消息只需逐字包含你所回应的任务原文，不必转抄整条指令；" +
+      "评测器会在真实 transcript 中核验这段文字确实字面出现。" +
       "assistant_message_index 使用最终 Runner Contract 1.1 transcript 数组的零基索引。" +
       "写入严格 JSON 时，字符串内部的英文双引号必须用反斜杠转义；" +
       "assistant_message 引用原文时优先使用中文引号「」。" +
-      `运行 ${turnScript} 时传入 --index ${indexPath}，生成 ${turnPath}。` +
+      `运行 ${turnScript} 生成 ${turnPath}，传入 --index ${indexPath}。` +
+      "各脚本的完整调用序列与参数以 skill 文档为准，包括 turn 之前的 scope 与 session " +
+      "记录步骤；本提示只约定任务、路径与交付物，不复述调用方式。" +
       "随后发送 question_text，内容必须逐字节恰好出现一次，禁止添加 markdown 反引号、" +
       "加粗、引号替换或任何格式改写。" +
-      "在 products 中登记 kg.kickoff_context_index、kg.kickoff_context、kg.kickoff_turn；" +
-      "有冲突时再登记 kg.kickoff_conflicts。返回完整 transcript、file_reads、citations、" +
+      "在 products 中登记 kg.kickoff_context_index、kg.kickoff_context、kg.kickoff_turn " +
+      "与 kg.kickoff_conflicts。返回完整 transcript、file_reads、citations、" +
       "products、tool_events 和 permission_denials。",
     project_root: projectRoot,
     artifacts_dir: sessionArtifacts,

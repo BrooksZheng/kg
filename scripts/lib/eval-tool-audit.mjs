@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import path from "node:path";
 
 const SHELL_TOOL_TOKENS = new Set([
@@ -156,4 +157,34 @@ export function hasProductReadEvidence(response, productFile, canonicalPath) {
       return token.split("/").pop() === basename;
     });
   });
+}
+
+// The deep gather phase names its exact set on the command line in the version 1
+// form and carries it in a recorded scope product in the version 2 form
+// (KN-0042). Both evaluators need the same answer, so the shape question is
+// settled once here rather than in each of them (KN-0045).
+export function deepPhaseSourceSet(deepEvent, resolveScopeFile) {
+  const tokens = commandPathTokens(deepEvent.command);
+  const includes = new Set();
+  for (let index = 0; index < tokens.length; index += 1) {
+    if (tokens[index] === "--include" && tokens[index + 1]) includes.add(tokens[index + 1]);
+  }
+  if (includes.size > 0) return includes;
+  const scopeIndex = tokens.indexOf("--scope");
+  if (scopeIndex === -1 || !tokens[scopeIndex + 1]) return null;
+  const scopeFile = resolveScopeFile(tokens[scopeIndex + 1]);
+  if (scopeFile === null) return null;
+  const scope = JSON.parse(fs.readFileSync(scopeFile, "utf8"));
+  const out = new Set();
+  for (const entry of scope?.selected_sources ?? []) {
+    if (typeof entry?.source_path === "string") out.add(entry.source_path);
+  }
+  return out;
+}
+
+// An invocation the recorder rejected is the recorder working, not a step in
+// the chain; auditing the first match rather than the accepted one charges an
+// agent for an error it went on to correct.
+export function acceptedInvocation(events, matches) {
+  return (events ?? []).find((event) => event?.ok === true && matches(event));
 }

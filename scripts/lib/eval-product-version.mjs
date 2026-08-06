@@ -82,3 +82,14 @@ export function indexEdgeList(index, schema, label = "kg.kickoff_context_index")
   if (!Array.isArray(value)) throw new Error(`${label}.${field} must be a list`);
   return value;
 }
+
+// Version 1 index entries carried a knowledge entry's claim and scope at the
+// top level; version 2 moved them under `metadata`. Readers ask for the
+// summary rather than a field path so the next relocation is one edit.
+export function entryKnowledgeSummary(entry, schema, label = "kg.kickoff_context_index") {
+  void label;
+  void schema;
+  const nested = entry?.metadata;
+  const source = nested && typeof nested === "object" && !Array.isArray(nested) && "claim" in nested ? nested : entry;
+  return { claim: source?.claim, scope: source?.scope };
+}

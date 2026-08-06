@@ -1,12 +1,16 @@
 {
   "kind": "kg.kickoff_context",
-  "version": 1,
-  "project_root": "scripts/fixtures/m2/spec-03-compiled/project",
-  "index_path": "scripts/fixtures/m2/spec-03-compiled/kickoff/session/kickoff-index.json",
+  "version": 2,
+  "read_at": "2026-08-06T07:14:32.503Z",
+  "project_root": "/Users/brooks/Desktop/workspace/bigbigbo/kg/.mission/kg-v2-refactor/evidence/gk3-r56/attempt-01/workspace/project",
+  "index_sha256": "sha256:cb2e89d349d123908b9d377824970d563f18cd6858ffdac0b07edd2bb9814b11",
+  "scope_sha256": "sha256:ecdc0aede022df58c62ef2692e8a23c918fae23b5f96eb93df97ac3e7b5ac9f0",
   "documents": [
     {
       "path": "docs/accepted-compile-contract.md",
-      "source": "project_document",
+      "source_id": "SRC-4DBEF9925E41",
+      "source_class": "harness_document_closure",
+      "sha256": "sha256:e6066e14565012e0fca453bee559d42a5e0d2c644db2df3ef327b1b434a99139",
       "status": "accepted",
       "authority": "formal_decision",
       "content": "---\nkind: kg.project_document\ntitle: \"M2 compile fixture contract\"\ndoc_type: rfc\nstatus: accepted\nowners: [\"kg\"]\naccepted_at: 2026-07-31\nsupersedes: null\nsource_refs: []\n---\n\n# M2 compile fixture contract\n\nThe managed runbook carrier is an accepted route target for the isolated compile fixture.\n",
@@ -15,30 +19,46 @@
       "truncated": false
     },
     {
-      "path": "knowledge/KN-0002-compile-managed-runbooks-must-preserve-human.md",
-      "source": "knowledge",
-      "status": "active",
-      "authority": "verified_runtime_behavior",
-      "content": "---\nid: KN-0002\nclaim: \"Compile-managed runbooks must preserve human text outside their managed block.\"\ncategory: project_knowledge\nscope:\n  paths: [\"docs/runbooks/**\"]\nevidence:\n  - { type: observation, ref: OBS-20260731-101 }\nauthority: verified_runtime_behavior\nconfidence: 1\nlifecycle: active\nsupersedes: null\nlast_verified: 2026-07-31\nregret: null\nsource_obs_ids: [OBS-20260731-101]\ncarrier_refs:\n  - \"HAR-COMPILE-NOTES@docs/runbooks/compile-notes.md#kg:managed\"\n---\n\n## Constraint\n\nManaged carrier updates replace only the uniquely identified marker content.\n",
-      "bytes": 565,
-      "original_bytes": 565,
-      "truncated": false
-    },
-    {
       "path": "docs/runbooks/compile-notes.md",
-      "source": "project_document",
+      "source_id": "SRC-E2E606D1BED9",
+      "source_class": "harness_document_closure",
+      "sha256": "sha256:9afa6ed6b466f292676b136982d9043dd21d3400721b5202f842289b0956eac7",
       "status": "unregistered",
       "authority": "reference_only",
       "content": "# Compile notes\n\nHuman preface that compile must preserve byte for byte.\n\n<!-- kg:managed HAR-COMPILE-NOTES begin -->\n<!-- kg:source KN-0002 -->\nCompile updates this block while preserving both surrounding human sections.\n<!-- kg:managed HAR-COMPILE-NOTES end -->\n\nHuman epilogue that compile must preserve byte for byte.\n",
       "bytes": 322,
       "original_bytes": 322,
       "truncated": false
+    },
+    {
+      "path": "harness/artifacts/HAR-COMPILE-NOTES.yaml",
+      "source_id": "SRC-2B4282E5170C",
+      "source_class": "harness_inventory",
+      "sha256": "sha256:06771fa5612f2f0546eca25d58cb5c3bd9e4be251bc4449ebd3c39389126eacb",
+      "status": "active",
+      "authority": "inventory_only",
+      "content": "artifact_id: HAR-COMPILE-NOTES\ntype: markdown_document\npath: docs/runbooks/compile-notes.md\nownership: managed\nstatus: active\nsource_kn_ids: [KN-0002]\nsource_refs: [\"docs/accepted-compile-contract.md#L14\"]\ncontent_hash: sha256:eb4c1194965389d066426eb04f3f1fbf189f3704f7f4df8a9fa8231e5707c711\nmachine_segment_hash: sha256:eb4c1194965389d066426eb04f3f1fbf189f3704f7f4df8a9fa8231e5707c711\nhuman_segment_hash: null\noutside_hash: sha256:984e981017660d5b410c1f433ff008f157485f5694083c2be697266986a845be\nproposal_id: null\ncandidate_path: null\ngenerator_version: kg-compile/2.0.0-m2\nlast_verified: 2026-07-31\nupdate_policy: automatic\n",
+      "bytes": 626,
+      "original_bytes": 626,
+      "truncated": false
+    },
+    {
+      "path": "knowledge/KN-0002-compile-managed-runbooks-must-preserve-human.md",
+      "source_id": "SRC-98FE7CC74B9E",
+      "source_class": "knowledge_ledger",
+      "sha256": "sha256:aa5fe019c3387509b1f3cdb3334b951b8b2e88ba78fc945e33628b6f16c8642f",
+      "status": "active",
+      "authority": "verified_runtime_behavior",
+      "content": "---\nid: KN-0002\nclaim: \"Compile-managed runbooks must preserve human text outside their managed block.\"\ncategory: project_knowledge\nscope:\n  paths: [\"docs/runbooks/**\"]\nevidence:\n  - { type: observation, ref: OBS-20260731-101 }\nauthority: verified_runtime_behavior\nconfidence: 1\nlifecycle: active\nsupersedes: null\nlast_verified: 2026-07-31\nregret: null\nsource_obs_ids: [OBS-20260731-101]\ncarrier_refs:\n  - \"HAR-COMPILE-NOTES@docs/runbooks/compile-notes.md#kg:managed\"\n---\n\n## Constraint\n\nManaged carrier updates replace only the uniquely identified marker content.\n",
+      "bytes": 565,
+      "original_bytes": 565,
+      "truncated": false
     }
   ],
   "budget": {
     "limit_bytes": 131072,
-    "consumed_bytes": 1183,
-    "remaining_bytes": 129889,
+    "consumed_bytes": 1809,
+    "remaining_bytes": 129263,
     "truncated": false
   }
 }

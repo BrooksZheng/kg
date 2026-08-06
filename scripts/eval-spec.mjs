@@ -12,6 +12,8 @@ import { fileURLToPath } from "node:url";
 import { parse } from "./lib/kyaml.mjs";
 import * as documentAnchor from "./lib/document-anchor.mjs";
 import {
+  acceptedInvocation,
+  deepPhaseSourceSet,
   hasProductReadEvidence,
   isScriptInvocation,
   isUserInteractionToolName,
@@ -31,6 +33,7 @@ const SPEC_SYNTHESIS_SCHEMA = protocol.loadSpecSynthesisSchema();
 const KICKOFF_TURN_SCHEMA = protocol.loadKickoffTurnSchema();
 const KICKOFF_INDEX_SCHEMA = protocol.loadKickoffIndexSchema();
 const KICKOFF_DEEP_SCHEMA = protocol.loadKickoffDeepSchema();
+const KICKOFF_CONFLICT_SCHEMA = protocol.loadKickoffConflictSchema();
 const REQUIRED_SECTIONS = protocol.loadTaskSpecSchema().required_sections;
 const M2_FIXTURE_FIELDS = [
   "kind",
@@ -114,10 +117,14 @@ function stringList(value, label, { allowEmpty = false } = {}) {
   return value;
 }
 
-function exactStringSet(actual, expected, label) {
+// `allowRepeats` is for lists whose members are identified by more than the
+// string being compared — two findings from two lines of one document are two
+// findings, and rejecting the repeated path charges the session for citing
+// both (same identity question as D44).
+function exactStringSet(actual, expected, label, { allowRepeats = false } = {}) {
   const left = [...new Set(actual)].sort();
   const right = [...new Set(expected)].sort();
-  if (actual.length !== left.length || JSON.stringify(left) !== JSON.stringify(right)) {
+  if ((!allowRepeats && actual.length !== left.length) || JSON.stringify(left) !== JSON.stringify(right)) {
     throw new Error(`${label} differs; actual=${left.join(", ")} expected=${right.join(", ")}`);
   }
 }
@@ -327,13 +334,15 @@ function scriptCommandHas(event, scriptPath, ...needles) {
   return isScriptInvocation(event, scriptPath) && needles.every((needle) => event.command.includes(needle));
 }
 
-function auditKickoffToolChain(response, turn, hasConflicts) {
+function auditKickoffToolChain(response, turn, hasConflicts, kickoffArtifactsRoot) {
   const failures = [];
   const events = response.tool_events ?? [];
-  const indexEvent = events.find((event) => scriptCommandHas(event, "gather-context.mjs", "--phase", "index"));
-  const deepEvent = events.find((event) => scriptCommandHas(event, "gather-context.mjs", "--phase", "deep"));
-  const turnEvent = events.find((event) => scriptCommandHas(event, "record-turn.mjs", "--index"));
-  const conflictEvent = events.find((event) => scriptCommandHas(event, "record-conflicts.mjs"));
+  const accepted = (...needles) =>
+    acceptedInvocation(events, (event) => scriptCommandHas(event, ...needles));
+  const indexEvent = accepted("gather-context.mjs", "--phase", "index");
+  const deepEvent = accepted("gather-context.mjs", "--phase", "deep");
+  const turnEvent = accepted("record-turn.mjs", "--index");
+  const conflictEvent = accepted("record-conflicts.mjs");
   if (!indexEvent) failures.push("index gather-context.mjs tool event missing");
   if (!deepEvent) failures.push("deep gather-context.mjs tool event missing");
   if (!turnEvent) failures.push("record-turn.mjs --index tool event missing");
@@ -349,8 +358,19 @@ function auditKickoffToolChain(response, turn, hasConflicts) {
   if (hasConflicts && deepEvent && conflictEvent && !(deepEvent.at_step < conflictEvent.at_step)) {
     failures.push("conflict recorder must run after deep");
   }
-  for (const finding of turn.findings) {
-    if (deepEvent && !deepEvent.command.includes(finding.source_path)) {
+  // An archived session's command line holds paths from the host that ran it,
+  // so a scope product is found by basename under the fixture's artifacts root
+  // (D49) rather than at the absolute path recorded in the transcript.
+  const deepSources = deepEvent
+    ? deepPhaseSourceSet(deepEvent, (token) => {
+        const direct = path.isAbsolute(token) ? token : path.join(kickoffArtifactsRoot, token);
+        if (fs.existsSync(direct)) return direct;
+        const rebased = path.join(kickoffArtifactsRoot, path.basename(token));
+        return fs.existsSync(rebased) ? rebased : null;
+      })
+    : null;
+  for (const finding of deepSources === null ? [] : turn.findings) {
+    if (!deepSources.has(finding.source_path)) {
       failures.push(`deep tool event does not name finding source: ${finding.source_path}`);
     }
   }
@@ -420,8 +440,13 @@ function auditKickoffEvidence(loaded, response) {
   let productKinds = [];
   try {
     productKinds = (response.products ?? []).map((product) => product.kind);
+    // A kickoff session records its conflict assessment either way, so the
+    // conflicts product is present even when the verdict is no_conflict; only
+    // archived version 1 sessions omitted it.
     const expectedKinds = [...KICKOFF_PRODUCT_KINDS];
-    if (loaded.fixture.expected_conflict_sources.length > 0) expectedKinds.push("kg.kickoff_conflicts");
+    if (productKinds.includes("kg.kickoff_conflicts") || loaded.fixture.expected_conflict_sources.length > 0) {
+      expectedKinds.push("kg.kickoff_conflicts");
+    }
     exactStringSet(productKinds, expectedKinds, "kickoff product kind set");
 
     const turnFile = resolveProduct(
@@ -438,6 +463,7 @@ function auditKickoffEvidence(loaded, response) {
       turn.findings.map((finding) => finding.source_path),
       loaded.fixture.expected_sources,
       "kickoff source set",
+      { allowRepeats: true },
     );
     const index = readMachine(
       resolveProduct(
@@ -473,19 +499,38 @@ function auditKickoffEvidence(loaded, response) {
       );
       if (
         conflictRecord.kind !== "kg.kickoff_conflicts" ||
-        conflictRecord.version !== 1 ||
+        !productVersion
+          .acceptedVersions(KICKOFF_CONFLICT_SCHEMA, "kg.kickoff_conflicts")
+          .includes(conflictRecord.version) ||
         !Array.isArray(conflictRecord.conflicts)
       ) {
         throw new Error("kg.kickoff_conflicts shape is invalid");
       }
-      conflicts = conflictRecord.conflicts;
+      // Version 2 qualifies the constraint reference by name; downstream reads
+      // one internal shape rather than branching per version.
+      const conflictFields = productVersion.recordFieldOrderForVersion(
+        KICKOFF_CONFLICT_SCHEMA,
+        conflictRecord.version,
+        "conflicts",
+        "kg.kickoff_conflicts",
+      );
+      conflicts = conflictFields.includes("constraint_source_path")
+        ? conflictRecord.conflicts.map((conflict) => ({
+            ...conflict,
+            source_path: conflict.constraint_source_path,
+            line: conflict.constraint_line,
+          }))
+        : conflictRecord.conflicts;
     }
     exactStringSet(
       conflicts.map((conflict) => conflict.source_path),
       loaded.fixture.expected_conflict_sources,
       "kickoff conflict source set",
+      { allowRepeats: true },
     );
-    failures.push(...auditKickoffToolChain(response, turn, conflicts.length > 0));
+    failures.push(
+      ...auditKickoffToolChain(response, turn, conflicts.length > 0, loaded.kickoffArtifactsRoot),
+    );
   } catch (error) {
     failures.push(error.message);
   }
@@ -739,21 +784,31 @@ function legacyReplayDraft(packet, legacy) {
     source_path: finding.source_path,
     line: finding.line,
   }).slice(-12).toUpperCase()}`;
-  const conflictId = (conflict) => `KC-${machineContract.sha256CanonicalJson({
-    source_path: conflict.source_path,
-    line: conflict.line,
-  }).slice(-12).toUpperCase()}`;
+  const conflictId = (conflict) =>
+    conflict.conflict_id ??
+    `KC-${machineContract.sha256CanonicalJson({
+      source_path: conflict.source_path,
+      line: conflict.line,
+    }).slice(-12).toUpperCase()}`;
+  const conflictPath = (conflict) => conflict.constraint_source_path ?? conflict.source_path;
+  const anchorOf = (finding) => `${finding.source_path}#L${finding.line}`;
+  const idOf = (finding) => finding.finding_id ?? findingId(finding);
   return {
     task: { title: legacy.task.title },
     context: legacy.context.map((statement) => ({ statement, source_refs: ["transcript#message=0"] })),
     requirements: legacy.requirements.map((statement) => ({ statement, source_refs: ["transcript#message=0"] })),
-    constraints: legacy.constraints.map((item) => {
-      const finding = turn.findings.find((candidate) => `${candidate.source_path}#L${candidate.line}` === item.source_path);
-      return { ...item, finding_id: finding ? findingId(finding) : "KF-000000000000" };
-    }),
+    // An archived draft's anchors carry the line numbers of the session it was
+    // saved from, so replaying it against a later kickoff binds by document and
+    // adopts the packet's own anchors, ids, and any finding the archive
+    // predates. Matching on the saved line would tie the fixture to one
+    // recorded session.
+    constraints: replayConstraints(legacy.constraints, turn, anchorOf, idOf),
     references: legacy.references.map((referencePath) => ({ path: referencePath, purpose: "Implementation reference" })),
     out_of_scope: legacy.out_of_scope.map((item) => {
-      const conflict = conflicts.find((candidate) => candidate.source_path === item.conflict_source_path);
+      const conflictDocument = String(item.conflict_source_path).split("#")[0];
+      const conflict = conflicts.find(
+        (candidate) => String(conflictPath(candidate)).split("#")[0] === conflictDocument,
+      );
       return {
         statement: item.statement,
         source_class: conflict ? "conflict" : "explicit_no",
@@ -772,12 +827,40 @@ function legacyReplayDraft(packet, legacy) {
       };
     }),
     open_questions: legacy.open_questions.map((question) => ({ question, source_refs: ["transcript#message=0"] })),
+    // Session identity belongs to the packet being replayed against, not to the
+    // session the draft was archived from.
     session_history: legacy.session_history.map((item) => ({
-      session_id: item.session_id,
-      turn_ids: [item.turn_session_id],
-      product_kinds: item.product_kinds,
+      session_id: packet.session_id ?? item.session_id,
+      turn_ids: [turn.turn_id ?? item.turn_session_id],
+      product_kinds: [...new Set((packet.intermediate_products ?? []).map((entry) => entry.kind))].sort(),
     })),
   };
+}
+
+function replayConstraints(legacyConstraints, turn, anchorOf, idOf) {
+  const used = new Set();
+  const constraints = legacyConstraints.map((item) => {
+    const document = String(item.source_path).split("#")[0];
+    const finding =
+      turn.findings.find((candidate) => anchorOf(candidate) === item.source_path && !used.has(idOf(candidate))) ??
+      turn.findings.find((candidate) => candidate.source_path === document && !used.has(idOf(candidate)));
+    if (!finding) return { ...item, finding_id: "KF-000000000000" };
+    used.add(idOf(finding));
+    return { ...item, source_path: anchorOf(finding), finding_id: idOf(finding) };
+  });
+  const template = legacyConstraints[0] ?? {};
+  for (const finding of turn.findings) {
+    if (used.has(idOf(finding))) continue;
+    constraints.push({
+      ...template,
+      constraint: `Honor the accepted constraint recorded at ${anchorOf(finding)}.`,
+      source_path: anchorOf(finding),
+      source_status: finding.status,
+      authority: finding.authority,
+      finding_id: idOf(finding),
+    });
+  }
+  return constraints;
 }
 
 function archiveSynthesis(loaded, kickoffResponseFile, specResponse, synthesisFile, projectRoot, tempRoot) {
@@ -887,7 +970,12 @@ function archiveSynthesis(loaded, kickoffResponseFile, specResponse, synthesisFi
   if (!body.includes(loaded.fixture.expected_kickoff_session_id)) {
     throw new Error("Session History omits the kickoff runner session");
   }
-  if (!body.includes(loaded.fixture.expected_turn_session_id)) {
+  // Session History names the turn it consumed by turn id; the kickoff session
+  // that turn belongs to is confirmed separately against the turn product, and
+  // is not rendered into the document as a bare string.
+  const archivedTurn = packetRecord(readJson(packet, "spec packet"), "kg.kickoff_turn");
+  const archivedTurnId = archivedTurn?.turn_id ?? loaded.fixture.expected_turn_session_id;
+  if (!body.includes(archivedTurnId)) {
     throw new Error("Session History omits the structured kickoff turn session");
   }
   for (const kind of (specResponse.products ?? []).map((product) => product.kind)) {

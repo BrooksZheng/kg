@@ -10,8 +10,8 @@ expected_sources:
   - docs/traps/payment-direct-write.md
   - knowledge/KN-0001-payment-boundary.md
 expected_conflict_sources: []
-expected_kickoff_session_id: ae6fecfb-06ea-40c2-babf-28df7c2f2644
-expected_turn_session_id: f5f684f4-3125-4223-bc64-2e2c92033344
+expected_kickoff_session_id: 2b04742d-61e5-48ff-9f4c-ec7a9ea30f29
+expected_turn_session_id: KSESSION-B791B7C94249
 required_sections: "Context|Requirements|Constraints|References|Out of Scope|Acceptance Criteria|Open Questions|Session History"
 c1_zero_interview_score: 4
 forbid_user_questions: true

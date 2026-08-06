@@ -468,6 +468,7 @@ function mainV2(argv) {
       turn_id: `KTURN-${suffix}-${String(sequence).padStart(3, "0")}`,
       sequence,
       user_message_sha256: machineContract.sha256Bytes(userMessage.content),
+      user_message: userMessage.content,
       findings,
       question,
     },
@@ -480,8 +481,20 @@ function mainV2(argv) {
 
 export function main(argv = process.argv.slice(2)) {
   try {
-    if (argv.includes("--session")) mainV2(argv);
-    else mainLegacy(argv);
+    // Choosing the product version by the presence of an optional flag meant a
+    // caller who forgot --session was silently downgraded to the superseded
+    // shape, and the current surface went unexercised (D73). Omission is now an
+    // error. The superseded path survives only to replay archived version 1
+    // fixtures, so it is reached through an environment variable the test
+    // harness sets — never a flag a session could discover and take.
+    const wantsCurrent = argv.includes("--session");
+    const replayLegacy = process.env.KG_RECORD_TURN_LEGACY === "1";
+    if (wantsCurrent && replayLegacy) {
+      throw new Error("KG_RECORD_TURN_LEGACY 回放模式不接受 --session");
+    }
+    if (wantsCurrent) mainV2(argv);
+    else if (replayLegacy) mainLegacy(argv);
+    else throw new Error("必须传 --session <session-file> 记录本轮 turn");
   } catch (error) {
     fail(`turn 记录校验失败：${error.message}`);
   }

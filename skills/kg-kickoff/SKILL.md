@@ -187,12 +187,44 @@ user message and a stable constraint finding from the same turn. Submit
 `assessment: conflict` with one or more pairs, or `assessment: no_conflict`
 with non-empty finding refs. Silence is rejected.
 
-The interpretation must be what the task *asks for*, not a reading the task
-merely fails to rule out. If your summary needs "could be read as" or
-"可被解读为" to reach the constraint, you have found underspecification, not
-a conflict — ask a question about it instead. A task that names a mechanism
-without naming where its logic lives has left an implementation choice open;
-that is not the same as requesting something the constraint forbids.
+Decide it by running the same three steps every time, in order, against each
+stable constraint finding of the turn.
+
+1. Name the operation the task asks for, in the task's own words. Do not
+   substitute a mechanism the task did not name.
+2. Ask whether someone implementing exactly that would trip the constraint. A
+   constraint that replaces one mechanism with another forbids the replaced one,
+   so a task naming the replaced mechanism trips it even where the task omits
+   the constraint's qualifying words — their absence is not permission. A task
+   acting on the whole of something trips a constraint reserving part of it. A
+   trap whose failure mode is the operation the task names is tripped by it.
+3. If it trips, record `assessment: conflict` against that finding. If it does
+   not — because the task's own words already name the sanctioned mechanism, or
+   scope, or qualifier — record `no_conflict`.
+
+Two tasks against a constraint reading "requests reach the store through the
+write queue; services must not write the store directly" show the line. "Add
+backoff to the service's store write" conflicts: its object is the direct write
+the constraint replaced, and the missing word "directly" does not license it.
+"Add backoff to the queue producer" does not: the task named the sanctioned
+mechanism itself.
+
+The conflict record and the turn's question are not alternatives, and treating
+them as a choice is the most common way this step goes wrong. They answer
+different things: the record states that the task's words, as written, collide
+with a constraint the project has accepted; the question asks the author what
+they meant. A task can be both in conflict and underspecified — indeed it
+usually is, since an author who meant the compliant thing would have said so.
+When both hold, record the conflict *and* ask the question. Deciding to ask
+instead of record leaves the collision undocumented for everything downstream.
+
+`no_conflict` is for the task whose own words already name the sanctioned
+mechanism, scope, or qualifier, and for the reading the task's words do not
+support at all — if reaching the constraint needs "could be read as" or
+"可被解读为" applied to words the task never used, there is nothing to record.
+What it is not for is the tension you resolved yourself: if reaching
+`no_conflict` needs you to pick the compliant implementation on the author's
+behalf, you have not resolved the collision, you have hidden it.
 
 ```bash
 node <skill>/scripts/record-conflicts.mjs \

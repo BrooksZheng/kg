@@ -4460,7 +4460,9 @@ function writeM5Turn(context, setup, { scope, deep, session, sequence = 1, trans
       "--output", output,
       "--now", `2026-08-05T02:0${3 + sequence}:00Z`,
     ],
-    { cwd: ROOT },
+    // This suite runs in replay mode for the archived version 1 fixtures; this
+    // call exercises the current shape, so it opts out explicitly.
+    { cwd: ROOT, env: { KG_RECORD_TURN_LEGACY: "" } },
   );
   return { input, transcript, output, value: readJson(output), messages };
 }
@@ -5035,6 +5037,57 @@ function runPart5(context) {
     );
   });
 
+  testCase(context, "record_turn_requires_an_explicit_product_version", () => {
+    const caseRoot = path.join(context.root, "record-turn-version-choice");
+    const projectRoot = path.join(caseRoot, "project");
+    fs.mkdirSync(projectRoot, { recursive: true });
+    const input = path.join(caseRoot, "input.json");
+    const output = path.join(caseRoot, "turn.yaml");
+    writeJson(input, { findings: [], question: {} });
+    // Selecting the version by flag presence let a caller who dropped --session
+    // fall through to the superseded shape without a word, which is why the
+    // version 2 surface went unexercised through three passing gates (D73).
+    const bare = runNode(
+      context,
+      RECORD_KICKOFF_TURN,
+      ["--project-root", projectRoot, "--input", input, "--output", output],
+      { expectFailure: true, env: { KG_RECORD_TURN_LEGACY: "" } },
+    );
+    ensure(
+      context,
+      bare.stderr.includes("必须传 --session"),
+      "record-turn fell back to a version instead of demanding --session",
+    );
+    ensure(context, !fs.existsSync(output), "record-turn wrote a product before resolving its version");
+    // The replay affordance must stay unreachable from a session's argument
+    // list, or an agent blocked by the error above simply takes it instead.
+    ensure(
+      context,
+      !fs.readFileSync(RECORD_KICKOFF_TURN, "utf8").includes('"--legacy"'),
+      "record-turn exposes the replay path as a flag a session could pass",
+    );
+    const both = runNode(
+      context,
+      RECORD_KICKOFF_TURN,
+      [
+        "--session",
+        path.join(caseRoot, "session.json"),
+        "--project-root",
+        projectRoot,
+        "--input",
+        input,
+        "--output",
+        output,
+      ],
+      { expectFailure: true, env: { KG_RECORD_TURN_LEGACY: "1" } },
+    );
+    ensure(
+      context,
+      both.stderr.includes("回放模式不接受 --session"),
+      "record-turn accepted replay mode and --session at once",
+    );
+  });
+
   testCase(context, "record_turn_rejects_agent_envelope_fields_and_validates_semantics", () => {
     const caseRoot = path.join(context.root, "record-turn");
     fs.mkdirSync(caseRoot, { recursive: true });
@@ -5085,7 +5138,7 @@ function runPart5(context) {
       context,
       RECORD_KICKOFF_TURN,
       [
-        "--project-root",
+          "--project-root",
         projectRoot,
         "--index",
         kickoffIndex,
@@ -5181,7 +5234,7 @@ function runPart5(context) {
         context,
         RECORD_KICKOFF_TURN,
         [
-          "--project-root",
+              "--project-root",
           projectRoot,
           "--index",
           kickoffIndex,
@@ -5213,7 +5266,7 @@ function runPart5(context) {
         context,
         RECORD_KICKOFF_TURN,
         [
-          "--project-root",
+              "--project-root",
           projectRoot,
           "--index",
           invalidIndex,
@@ -5234,7 +5287,7 @@ function runPart5(context) {
       context,
       RECORD_KICKOFF_TURN,
       [
-        "--project-root",
+          "--project-root",
         projectRoot,
         "--input",
         input,
@@ -5323,7 +5376,7 @@ function runPart5(context) {
       context,
       RECORD_KICKOFF_TURN,
       [
-        "--project-root",
+          "--project-root",
         project,
         "--index",
         indexFile,
@@ -5580,28 +5633,70 @@ function packetMachineProduct(packet, kind) {
     : kyaml.parse(product.content);
 }
 
-function legacySpecDraft(packet, legacy) {
+// Replays an archived draft's constraints against whatever packet the case is
+// handed. It binds by document rather than by the archived line number, adopts
+// the packet's own anchor and finding id, and covers any finding the archive
+// predates — a synthesis must account for every finding of its turn, and tying
+// the fixture to one recorded session would break it on every rebind.
+function replayConstraints(legacyConstraints, turn, findingId, rebindAnchors = true) {
+  const anchorOf = (finding) => `${finding.source_path}#L${finding.line}`;
+  const idOf = (finding) => finding.finding_id ?? findingId(finding);
+  const used = new Set();
+  const constraints = legacyConstraints.map((item) => {
+    const document = String(item.source_path).split("#")[0];
+    const finding =
+      turn.findings.find((candidate) => anchorOf(candidate) === item.source_path && !used.has(idOf(candidate))) ??
+      turn.findings.find((candidate) => candidate.source_path === document && !used.has(idOf(candidate)));
+    if (!finding) return { ...item, finding_id: "KF-000000000000" };
+    used.add(idOf(finding));
+    if (!rebindAnchors) return { ...item, finding_id: idOf(finding) };
+    return { ...item, source_path: anchorOf(finding), finding_id: idOf(finding) };
+  });
+  const template = legacyConstraints[0] ?? {};
+  for (const finding of turn.findings) {
+    if (used.has(idOf(finding))) continue;
+    constraints.push({
+      ...template,
+      constraint: `Honor the accepted constraint recorded at ${anchorOf(finding)}.`,
+      source_path: anchorOf(finding),
+      source_status: finding.status,
+      authority: finding.authority,
+      finding_id: idOf(finding),
+    });
+  }
+  return constraints;
+}
+
+function legacySpecDraft(packet, legacy, { rebindAnchors = true } = {}) {
   const turn = packetMachineProduct(packet, "kg.kickoff_turn");
   const conflicts = packetMachineProduct(packet, "kg.kickoff_conflicts")?.conflicts ?? [];
   const findingId = (finding) => `KF-${machineContract.sha256CanonicalJson({
     source_path: finding.source_path,
     line: finding.line,
   }).slice(-12).toUpperCase()}`;
-  const conflictId = (conflict) => `KC-${machineContract.sha256CanonicalJson({
-    source_path: conflict.source_path,
-    line: conflict.line,
-  }).slice(-12).toUpperCase()}`;
+  const conflictId = (conflict) =>
+    conflict.conflict_id ??
+    `KC-${machineContract.sha256CanonicalJson({
+      source_path: conflict.source_path,
+      line: conflict.line,
+    }).slice(-12).toUpperCase()}`;
+  // Version 2 qualifies the conflict's constraint reference by name.
+  const conflictPath = (conflict) => conflict.constraint_source_path ?? conflict.source_path;
   const draft = {
     task: { title: legacy.task.title },
     context: legacy.context.map((statement) => ({ statement, source_refs: ["transcript#message=0"] })),
     requirements: legacy.requirements.map((statement) => ({ statement, source_refs: ["transcript#message=0"] })),
-    constraints: legacy.constraints.map((item) => {
-      const finding = turn.findings.find((candidate) => `${candidate.source_path}#L${candidate.line}` === item.source_path);
-      return { ...item, finding_id: finding ? findingId(finding) : "KF-000000000000" };
-    }),
+    // This adapter replays an archived draft against whatever packet it is
+    // handed, so it binds by document and adopts the packet's own anchor and
+    // finding id. Matching on the archived line number would tie the fixture
+    // to one recorded session and break on every rebind.
+    constraints: replayConstraints(legacy.constraints, turn, findingId, rebindAnchors),
     references: legacy.references.map((referencePath) => ({ path: referencePath, purpose: "Implementation reference" })),
     out_of_scope: legacy.out_of_scope.map((item) => {
-      const conflict = conflicts.find((candidate) => candidate.source_path === item.conflict_source_path);
+      const conflictDocument = String(item.conflict_source_path).split("#")[0];
+      const conflict = conflicts.find(
+        (candidate) => String(conflictPath(candidate)).split("#")[0] === conflictDocument,
+      );
       return {
         statement: item.statement,
         source_class: conflict ? "conflict" : "explicit_no",
@@ -5620,10 +5715,12 @@ function legacySpecDraft(packet, legacy) {
       };
     }),
     open_questions: legacy.open_questions.map((question) => ({ question, source_refs: ["transcript#message=0"] })),
+    // Session identity belongs to the packet being replayed against, not to the
+    // session the draft was archived from.
     session_history: legacy.session_history.map((item) => ({
-      session_id: item.session_id,
-      turn_ids: [item.turn_session_id],
-      product_kinds: item.product_kinds,
+      session_id: packet.session_id ?? item.session_id,
+      turn_ids: [turn.turn_id ?? item.turn_session_id],
+      product_kinds: [...new Set((packet.intermediate_products ?? []).map((entry) => entry.kind))].sort(),
     })),
   };
   for (const key of Object.keys(legacy)) {
@@ -5664,7 +5761,13 @@ function archiveSpec(context, setup, synthesis = setup.synthesis, options = {}) 
   if (input.version !== protocol.loadSpecSynthesisSchema().product_version) {
     const draft = nextSpecArtifact(setup, "draft");
     validated = nextSpecArtifact(setup, "validated");
-    writeJson(draft, legacySpecDraft(readJson(setup.packet), input));
+    // A case expecting rejection has deliberately corrupted its input, so the
+    // replay adapter passes anchors through untouched rather than repairing the
+    // very thing under test.
+    writeJson(
+      draft,
+      legacySpecDraft(readJson(setup.packet), input, { rebindAnchors: options.expectFailure !== true }),
+    );
     const validateArgs = [
       "--validate-synthesis",
       "--project-root",
@@ -5780,6 +5883,7 @@ function setupR53SpecCase(context, name) {
     sequence: 1,
     user_message_index: 0,
     user_message_sha256: machineContract.sha256Bytes(transcript[0].content),
+    user_message: transcript[0].content,
     findings,
     question: {
       clarification_axis: "notification_retry_boundary",
@@ -6326,20 +6430,33 @@ function runPart6(context) {
     const secondText = fs.readFileSync(secondFile, "utf8");
     const secondFrontmatter = protocol.splitFrontmatter(secondText).frontmatter;
     ensure(context, secondFrontmatter.status === "draft", "archived task status is not draft");
+    // What this case is for is that a compiled knowledge entry and its managed
+    // carrier both survive the whole chain into the archived spec. The line each
+    // is cited at belongs to the recorded session, so the assertion names the
+    // documents and lets the anchor come from the packet.
+    const archivedAnchor = (document) => {
+      const finding = packetMachineProduct(readJson(setup.packet), "kg.kickoff_turn").findings.find(
+        (candidate) => candidate.source_path === document,
+      );
+      return finding ? `${finding.source_path}#L${finding.line}` : document;
+    };
     ensure(
       context,
-      secondText.includes("knowledge/KN-0002-compile-managed-runbooks-must-preserve-human.md#L3"),
+      secondText.includes(archivedAnchor("knowledge/KN-0002-compile-managed-runbooks-must-preserve-human.md")),
       "compiled active KN constraint is missing",
     );
     ensure(
       context,
-      secondText.includes("docs/runbooks/compile-notes.md#L3"),
+      secondText.includes(archivedAnchor("docs/runbooks/compile-notes.md")),
       "compiled managed document constraint is missing",
     );
+    // Session History binds the runner session and the kickoff turn it consumed.
+    // The turn is named by its turn id, which is what the synthesis shape
+    // records; the kickoff session id it belongs to is not rendered separately.
+    const archivedTurnId = packetMachineProduct(readJson(setup.packet), "kg.kickoff_turn").turn_id;
     ensure(
       context,
-      secondText.includes(setup.record.expected_kickoff_session_id) &&
-        secondText.includes(setup.record.expected_turn_session_id),
+      secondText.includes(setup.record.expected_kickoff_session_id) && secondText.includes(archivedTurnId),
       "Session History does not bind the kickoff sessions",
     );
     for (const section of setup.record.required_sections.split("|")) {
@@ -7791,6 +7908,12 @@ function runPart7(context) {
     runSevenStepChain(context);
   });
 }
+
+// The kickoff turn recorder reaches its superseded version 1 shape only in
+// replay mode (D73). Most of this suite replays archived version 1 fixtures, so
+// the mode is set process-wide and inherited by the scripts and mock runners
+// spawned below; the cases that assert the current shape opt out per call.
+process.env.KG_RECORD_TURN_LEGACY = "1";
 
 function parseArgs(argv) {
   const selected = [];
