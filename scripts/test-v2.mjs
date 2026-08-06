@@ -613,6 +613,33 @@ function runPart1(context) {
     ensure(context, treeHash(setup.project) === before, "repair-plan route mutated the v1 host");
   });
 
+  testCase(context, "symlink_alias_blocks_a_plan_only_where_the_plan_writes", () => {
+    const inert = setupMigrationCase(context, "v1-symlink-inert");
+    fs.writeFileSync(path.join(inert.project, "docs", "runbook.md"), "# Runbook\n");
+    fs.symlinkSync("runbook.md", path.join(inert.project, "docs", "runbook-alias.md"));
+    const plan = generateMigrationPlan(context, inert);
+    const preserved = plan.preserved.map((entry) => entry.path);
+    ensure(
+      context,
+      preserved.includes("docs/runbook.md") && preserved.includes("docs/runbook-alias.md"),
+      "an alias among untouched files was not preserved under both names",
+    );
+
+    const reaching = setupMigrationCase(context, "v1-symlink-reaching");
+    fs.symlinkSync("AGENTS.md", path.join(reaching.project, "AGENTS-alias.md"));
+    const refused = runNode(
+      context,
+      MIGRATION_EXECUTE,
+      ["--root", reaching.project, "--output", reaching.plan, "--now", MIGRATION_NOW],
+      { cwd: reaching.project, expectFailure: true },
+    );
+    ensure(
+      context,
+      `${refused.stdout}${refused.stderr}`.includes("share a canonical identity"),
+      "an alias reaching a written file did not stop the plan",
+    );
+  });
+
   testCase(context, "phase0_is_read_only_and_plan_is_outside_host", () => {
     const setup = setupMigrationCase(context, "phase0-read-only");
     const before = treeHash(setup.project);

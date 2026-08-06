@@ -243,10 +243,13 @@ function validateCommandsSection(text, { injected }) {
     throw new MigrationError("AGENTS.md Commands bash block must contain at least three comment lines");
   }
   const labels = commentLines.map((line) => line.trimStart().slice(1).trim().toLowerCase());
+  // A label may carry a qualifier after the keyword. A repository with no build
+  // step or no linter still owes the reader that slot — saying "no build step"
+  // in the comment is an answer; omitting the slot leaves the reader guessing.
   const requiredLabels = [
-    { name: "build", present: labels.some((label) => label === "build" || label === "构建") },
+    { name: "build", present: labels.some((label) => label === "build" || label.startsWith("构建")) },
     { name: "test", present: labels.some((label) => label === "test" || label.startsWith("测试")) },
-    { name: "lint", present: labels.some((label) => label === "lint") },
+    { name: "lint", present: labels.some((label) => label.startsWith("lint")) },
   ];
   const missingLabels = requiredLabels.filter((label) => !label.present).map((label) => label.name);
   if (missingLabels.length) {
@@ -1633,11 +1636,23 @@ function assertOwnershipSets(plan, root, { requireInitialCompleteness = false } 
   assertNoCrossOverlap("quarantine destinations", quarantineDestinations, "rollback backups", rollbackBackups);
 
   if (!requireInitialCompleteness) return;
-  const canonicalSets = [operationTargets, preservedRoots, quarantineTargets, quarantineDestinations, rollbackBackups]
-    .flat()
-    .map((relative) => ({ relative, canonical: host.canonicalPath(operationPath(root, relative)) }));
+  // Two relative paths resolving to one file is only a danger when the plan
+  // writes, moves, or backs up through one of them: the second reach would hit
+  // bytes the first already changed (KN-0005). Preserved entries are read once
+  // for a fingerprint and never touched, so a symlink alias among them — which
+  // any real repository may hold — is an aliasing fact, not a collision.
+  const mutating = [
+    ...operationTargets.map((relative) => ({ relative, mutating: true })),
+    ...quarantineTargets.map((relative) => ({ relative, mutating: true })),
+    ...quarantineDestinations.map((relative) => ({ relative, mutating: true })),
+    ...rollbackBackups.map((relative) => ({ relative, mutating: true })),
+  ];
+  const canonicalSets = [...mutating, ...preservedRoots.map((relative) => ({ relative, mutating: false }))].map(
+    (entry) => ({ ...entry, canonical: host.canonicalPath(operationPath(root, entry.relative)) }),
+  );
   for (let left = 0; left < canonicalSets.length; left += 1) {
     for (let right = left + 1; right < canonicalSets.length; right += 1) {
+      if (!canonicalSets[left].mutating && !canonicalSets[right].mutating) continue;
       if (canonicalSets[left].relative !== canonicalSets[right].relative && canonicalSets[left].canonical === canonicalSets[right].canonical) {
         throw new MigrationError(
           `migration ownership paths share a canonical identity: ${canonicalSets[left].relative} <> ${canonicalSets[right].relative}`,

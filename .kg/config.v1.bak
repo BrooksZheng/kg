@@ -1,0 +1,4 @@
+# kg pipeline configuration (KYAML). Edit freely; kg-init never overwrites.
+observation_threshold: 5
+agents_block_budget_lines: 30
+skills_path: .agents/skills
