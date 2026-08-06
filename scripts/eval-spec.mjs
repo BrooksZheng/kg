@@ -11,18 +11,26 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { parse } from "./lib/kyaml.mjs";
 import * as documentAnchor from "./lib/document-anchor.mjs";
-import { isScriptInvocation, isUserInteractionToolName, normalizedToolName } from "./lib/eval-tool-audit.mjs";
+import {
+  hasProductReadEvidence,
+  isScriptInvocation,
+  isUserInteractionToolName,
+  normalizedToolName,
+} from "./lib/eval-tool-audit.mjs";
 import * as host from "./lib/host.mjs";
 import * as machineContract from "./lib/machine-contract.mjs";
 import * as protocol from "./lib/protocol.mjs";
 import { loadSavedEvaluationFixture, loadSplitEvaluationFixture, scoreableOracle } from "./lib/eval-fixture.mjs";
 import { buildEvaluationScore, calculateRubricScore } from "./lib/eval-rubric.mjs";
+import * as productVersion from "./lib/eval-product-version.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PRODUCE = path.join(ROOT, "skills", "kg-spec", "scripts", "produce-spec.mjs");
 const FIXED_NOW = "2026-07-31T08:00:00.000Z";
 const SPEC_SYNTHESIS_SCHEMA = protocol.loadSpecSynthesisSchema();
 const KICKOFF_TURN_SCHEMA = protocol.loadKickoffTurnSchema();
+const KICKOFF_INDEX_SCHEMA = protocol.loadKickoffIndexSchema();
+const KICKOFF_DEEP_SCHEMA = protocol.loadKickoffDeepSchema();
 const REQUIRED_SECTIONS = protocol.loadTaskSpecSchema().required_sections;
 const M2_FIXTURE_FIELDS = [
   "kind",
@@ -55,8 +63,7 @@ const M1_FIXTURE_FIELDS = [
 const KICKOFF_PRODUCT_KINDS = SPEC_SYNTHESIS_SCHEMA.legacy_kickoff_product_kinds
   .split("|")
   .filter((kind) => kind !== "kg.kickoff_conflicts");
-const TURN_FIELDS = KICKOFF_TURN_SCHEMA.legacy_field_order.split("|");
-const FINDING_FIELDS = KICKOFF_TURN_SCHEMA.legacy_record_field_order.findings.split("|");
+const TURN_LABEL = "kg.kickoff_turn";
 
 function fail(message) {
   console.error(`kg: 错误：${message}`);
@@ -283,10 +290,18 @@ function sourceMetadata(file, sourcePath) {
 
 function parseTurn(file, projectRoot) {
   const turn = readMachine(file, "kg.kickoff_turn");
-  exactFields(turn, TURN_FIELDS, "kg.kickoff_turn");
-  if (turn.kind !== "kg.kickoff_turn" || turn.version !== 1) {
-    throw new Error("kg.kickoff_turn kind/version is invalid");
+  if (turn.kind !== "kg.kickoff_turn") {
+    throw new Error("kg.kickoff_turn kind is invalid");
   }
+  const turnVersion = productVersion.assertAcceptedVersion(turn, KICKOFF_TURN_SCHEMA, TURN_LABEL);
+  const TURN_FIELDS = productVersion.fieldOrderForVersion(KICKOFF_TURN_SCHEMA, turnVersion, TURN_LABEL);
+  const FINDING_FIELDS = productVersion.recordFieldOrderForVersion(
+    KICKOFF_TURN_SCHEMA,
+    turnVersion,
+    "findings",
+    TURN_LABEL,
+  );
+  exactFields(turn, TURN_FIELDS, "kg.kickoff_turn");
   if (typeof turn.session_id !== "string" || turn.session_id.trim() === "") {
     throw new Error("kg.kickoff_turn session_id is invalid");
   }
@@ -346,13 +361,17 @@ function auditIndexAndContext(index, context, turn, projectRoot) {
   const failures = [];
   if (
     index?.kind !== "kg.kickoff_context_index" ||
-    index?.version !== 1 ||
+    !productVersion.acceptedVersions(KICKOFF_INDEX_SCHEMA, "kg.kickoff_context_index").includes(index?.version) ||
     !Array.isArray(index.entries) ||
-    !Array.isArray(index.harness)
+    !Array.isArray(productVersion.indexEdgeList(index, KICKOFF_INDEX_SCHEMA))
   ) {
     return ["kickoff index shape is invalid"];
   }
-  if (context?.kind !== "kg.kickoff_context" || context?.version !== 1 || !Array.isArray(context.documents)) {
+  if (
+    context?.kind !== "kg.kickoff_context" ||
+    !productVersion.acceptedVersions(KICKOFF_DEEP_SCHEMA, "kg.kickoff_context").includes(context?.version) ||
+    !Array.isArray(context.documents)
+  ) {
     return ["kickoff context shape is invalid"];
   }
   const indexed = new Map(index.entries.map((entry) => [entry.path, entry]));
@@ -683,24 +702,8 @@ function citationAudit(response, projectRoot, expectedSources) {
   return { failures, warnings };
 }
 
-function commandPathTokens(command) {
-  return (String(command).match(/(?:"[^"]*"|'[^']*'|\S+)/g) ?? [])
-    .map((token) => token.replace(/^[("'`]+/, "").replace(/[)"'`,;]+$/, ""))
-    .filter(Boolean);
-}
-
 function hasPacketReadEvidence(response, packetFile) {
-  const basename = path.basename(packetFile);
-  const canonicalPacket = host.canonicalPath(packetFile);
-  return (response.tool_events ?? []).some((event) => {
-    if (event?.ok !== true || !normalizedToolName(event?.name).split(" ").includes("read")) return false;
-    return commandPathTokens(event.command).some((token) => {
-      if (path.isAbsolute(token)) {
-        return host.canonicalPath(token) === canonicalPacket;
-      }
-      return path.basename(token) === basename;
-    });
-  });
+  return hasProductReadEvidence(response, packetFile, (value) => host.canonicalPath(value));
 }
 
 function fileSnapshot(root, { excludeSpecs = false } = {}) {

@@ -12,13 +12,17 @@ import * as documentAnchor from "./lib/document-anchor.mjs";
 import * as harness from "./lib/harness.mjs";
 import * as host from "./lib/host.mjs";
 import * as protocol from "./lib/protocol.mjs";
-import { isScriptInvocation } from "./lib/eval-tool-audit.mjs";
+import { hasProductReadEvidence, isScriptInvocation } from "./lib/eval-tool-audit.mjs";
 import { loadSavedEvaluationFixture } from "./lib/eval-fixture.mjs";
 import { calculateRubricScore } from "./lib/eval-rubric.mjs";
+import * as productVersion from "./lib/eval-product-version.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const KICKOFF_SOURCE = path.join(ROOT, "skills", "kg-kickoff");
 const KICKOFF_TURN_SCHEMA = protocol.loadKickoffTurnSchema();
+const KICKOFF_INDEX_SCHEMA = protocol.loadKickoffIndexSchema();
+const KICKOFF_DEEP_SCHEMA = protocol.loadKickoffDeepSchema();
+const KICKOFF_CONFLICT_SCHEMA = protocol.loadKickoffConflictSchema();
 const FIXTURE_FIELDS = [
   "kind",
   "version",
@@ -30,9 +34,7 @@ const FIXTURE_FIELDS = [
   "must_report",
   "distractors",
 ];
-const TURN_FIELDS = KICKOFF_TURN_SCHEMA.legacy_field_order.split("|");
-const FINDING_FIELDS = KICKOFF_TURN_SCHEMA.legacy_record_field_order.findings.split("|");
-const QUESTION_FIELDS = KICKOFF_TURN_SCHEMA.legacy_record_field_order.question.split("|");
+const TURN_LABEL = "kg.kickoff_turn";
 
 function fail(message) {
   console.error(`kg: 错误：${message}`);
@@ -241,10 +243,24 @@ function sourceMetadata(file, sourcePath) {
 
 function parseTurnProduct(file, projectRoot) {
   const raw = readMachineProduct(file, "kg.kickoff_turn");
-  exactFields(raw, TURN_FIELDS, "kg.kickoff_turn");
-  if (raw.kind !== "kg.kickoff_turn" || raw.version !== 1) {
-    throw new Error("kg.kickoff_turn kind/version is invalid");
+  if (raw.kind !== "kg.kickoff_turn") {
+    throw new Error("kg.kickoff_turn kind is invalid");
   }
+  const turnVersion = productVersion.assertAcceptedVersion(raw, KICKOFF_TURN_SCHEMA, TURN_LABEL);
+  const TURN_FIELDS = productVersion.fieldOrderForVersion(KICKOFF_TURN_SCHEMA, turnVersion, TURN_LABEL);
+  const FINDING_FIELDS = productVersion.recordFieldOrderForVersion(
+    KICKOFF_TURN_SCHEMA,
+    turnVersion,
+    "findings",
+    TURN_LABEL,
+  );
+  const QUESTION_FIELDS = productVersion.recordFieldOrderForVersion(
+    KICKOFF_TURN_SCHEMA,
+    turnVersion,
+    "question",
+    TURN_LABEL,
+  );
+  exactFields(raw, TURN_FIELDS, "kg.kickoff_turn");
   if (typeof raw.recorded_at !== "string" || Number.isNaN(new Date(raw.recorded_at).getTime())) {
     throw new Error("kg.kickoff_turn recorded_at is invalid");
   }
@@ -292,7 +308,11 @@ function parseTurnProduct(file, projectRoot) {
 function parseConflictProduct(file, projectRoot) {
   const raw = readMachineProduct(file, "kg.kickoff_conflicts");
   exactFields(raw, ["kind", "version", "conflicts"], "kg.kickoff_conflicts");
-  if (raw.kind !== "kg.kickoff_conflicts" || raw.version !== 1 || !Array.isArray(raw.conflicts)) {
+  if (
+    raw.kind !== "kg.kickoff_conflicts" ||
+    !productVersion.acceptedVersions(KICKOFF_CONFLICT_SCHEMA, "kg.kickoff_conflicts").includes(raw.version) ||
+    !Array.isArray(raw.conflicts)
+  ) {
     throw new Error("kg.kickoff_conflicts kind/version/conflicts is invalid");
   }
   return raw.conflicts.map((item, index) => {
@@ -380,12 +400,13 @@ function auditToolChain(response, findings, conflicts) {
 
 function auditIndex(index, projectRoot) {
   const failures = [];
-  if (
-    index?.kind !== "kg.kickoff_context_index" ||
-    index?.version !== 1 ||
-    !Array.isArray(index.entries) ||
-    !Array.isArray(index.harness)
-  ) {
+  let indexEdges;
+  try {
+    indexEdges = productVersion.indexEdgeList(index, KICKOFF_INDEX_SCHEMA);
+  } catch (error) {
+    return [`kickoff index shape is invalid: ${error.message}`];
+  }
+  if (index?.kind !== "kg.kickoff_context_index" || !Array.isArray(index.entries)) {
     return ["kickoff index shape is invalid"];
   }
   if (canonicalProductProjectRoot(index.project_root) !== projectRoot) {
@@ -419,7 +440,7 @@ function auditIndex(index, projectRoot) {
       failures.push(`kickoff index entry ${entryIndex} invalid: ${documentAnchor.formatDocumentAnchorErrorZh(error)}`);
     }
   }
-  for (const [entryIndex, entry] of index.harness.entries()) {
+  for (const [entryIndex, entry] of indexEdges.entries()) {
     try {
       const sidecar = host.resolveSafeRelative(projectRoot, entry.path);
       const target = host.resolveSafeRelative(projectRoot, entry.target_path);
@@ -464,7 +485,11 @@ function auditIndex(index, projectRoot) {
 
 function auditDeepContext(context, index, projectRoot) {
   const failures = [];
-  if (context?.kind !== "kg.kickoff_context" || context?.version !== 1 || !Array.isArray(context.documents)) {
+  if (
+    context?.kind !== "kg.kickoff_context" ||
+    !productVersion.acceptedVersions(KICKOFF_DEEP_SCHEMA, "kg.kickoff_context").includes(context?.version) ||
+    !Array.isArray(context.documents)
+  ) {
     return ["kickoff deep context shape is invalid"];
   }
   if (canonicalProductProjectRoot(context.project_root) !== projectRoot) {
@@ -509,7 +534,7 @@ function auditCompiledClosure(findings, index, projectRoot) {
         const match = /^([^@]+)@([^#]+)#kg:managed$/.exec(ref);
         if (!match) throw new Error(`invalid carrier_ref ${ref}`);
         const [, artifactId, targetPath] = match;
-        const sidecar = (index.harness ?? []).find(
+        const sidecar = productVersion.indexEdgeList(index, KICKOFF_INDEX_SCHEMA).find(
           (entry) => entry.artifact_id === artifactId && entry.target_path === targetPath,
         );
         if (!sidecar) throw new Error(`carrier ${artifactId} is absent from index harness`);
@@ -580,9 +605,11 @@ function evaluate(fixture, response, projectRoot, artifactsRoot) {
   } catch (error) {
     productFailures.push(error.message);
   }
+  let contextFile = null;
   try {
     const file = resolveProduct(productOfKind(response, "kg.kickoff_context"), artifactsRoot, "context");
     context = readMachineProduct(file, "kg.kickoff_context");
+    contextFile = file;
   } catch (error) {
     productFailures.push(error.message);
   }
@@ -658,6 +685,14 @@ function evaluate(fixture, response, projectRoot, artifactsRoot) {
     }
   }
   const fabricationFailures = [];
+  // Since R5.2 the deep phase reads sources through a script bound to the
+  // recorded scope (KN-0042), so the agent has no direct runner file_read for
+  // a source it legitimately cited. Byte provenance is proven by the deep
+  // context instead: the reader script produced it, and the agent read that
+  // product. A direct runner read still counts, but is no longer the only
+  // admissible proof.
+  const deepContextRead =
+    contextFile !== null && hasProductReadEvidence(response, contextFile, (value) => host.canonicalPath(value));
   for (const finding of findings) {
     if (!indexedPaths.has(finding.source_path)) {
       fabricationFailures.push(`finding source was absent from index entries: ${finding.source_path}`);
@@ -665,8 +700,10 @@ function evaluate(fixture, response, projectRoot, artifactsRoot) {
     if (!deepPaths.has(finding.source_path)) {
       fabricationFailures.push(`finding source lacks a deep-read document: ${finding.source_path}`);
     }
-    if (!runnerReadPaths.has(finding.source_path)) {
-      fabricationFailures.push(`finding source lacks a runner file_read event: ${finding.source_path}`);
+    if (!deepContextRead && !runnerReadPaths.has(finding.source_path)) {
+      fabricationFailures.push(
+        `finding source has neither a runner file_read event nor an agent read of the deep context: ${finding.source_path}`,
+      );
     }
   }
   for (const distractor of fixture.distractors) {

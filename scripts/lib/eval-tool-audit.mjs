@@ -135,3 +135,25 @@ export function scriptInvocationEvents(events, scriptPath) {
 export function countScriptInvocations(events, scriptPath) {
   return scriptInvocationEvents(events, scriptPath).length;
 }
+
+// Tool events preserve absolute paths where runner `file_reads` are relativized
+// to the project root, so a read of a product outside that root is only visible
+// here (D52). Callers pass a canonicalizer rather than importing host, keeping
+// this module free of host-layout assumptions.
+export function commandPathTokens(command) {
+  return (String(command).match(/(?:"[^"]*"|'[^']*'|\S+)/g) ?? [])
+    .map((token) => token.replace(/^[("'`]+/, "").replace(/[)"'`,;]+$/, ""))
+    .filter(Boolean);
+}
+
+export function hasProductReadEvidence(response, productFile, canonicalPath) {
+  const basename = productFile.split("/").pop();
+  const canonicalProduct = canonicalPath(productFile);
+  return (response?.tool_events ?? []).some((event) => {
+    if (event?.ok !== true || !normalizedToolName(event?.name).split(" ").includes("read")) return false;
+    return commandPathTokens(event.command).some((token) => {
+      if (token.startsWith("/")) return canonicalPath(token) === canonicalProduct;
+      return token.split("/").pop() === basename;
+    });
+  });
+}

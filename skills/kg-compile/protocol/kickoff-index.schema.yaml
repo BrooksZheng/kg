@@ -4,6 +4,14 @@ kind: kg.kickoff_index_schema
 version: 2
 product_kind: kg.kickoff_context_index
 product_version: 2
+# Version 1 index products live in the M1 and M2 saved fixtures and must keep
+# replaying. Declared rather than omitted so "still accepted" is a decision on
+# the page instead of an oversight (KN-0012).
+legacy_versions: [1]
+# Version 1 named the harness edge list `harness`; version 2 renamed it to
+# `edges`. Both shapes are protocol-owned so readers resolve the field name
+# from the version rather than probing for it (KN-0034).
+legacy_field_order: "kind|version|project_root|task|entries|harness|budget"
 
 # KN-0034: this is the only source-class table. Discovery code reads these
 # rows and the referenced protocol surfaces at runtime.

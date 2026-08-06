@@ -187,6 +187,13 @@ user message and a stable constraint finding from the same turn. Submit
 `assessment: conflict` with one or more pairs, or `assessment: no_conflict`
 with non-empty finding refs. Silence is rejected.
 
+The interpretation must be what the task *asks for*, not a reading the task
+merely fails to rule out. If your summary needs "could be read as" or
+"可被解读为" to reach the constraint, you have found underspecification, not
+a conflict — ask a question about it instead. A task that names a mechanism
+without naming where its logic lives has left an implementation choice open;
+that is not the same as requesting something the constraint forbids.
+
 ```bash
 node <skill>/scripts/record-conflicts.mjs \
   --project-root <project-root> \

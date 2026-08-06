@@ -1,0 +1,14 @@
+id: OBS-20260806-001
+at: 2026-08-06T02:29:25Z
+source: task_outcome
+claim: "A writer that picks its output version by the presence of an optional flag will silently emit the obsolete shape whenever a caller omits it, so the new surface gets built, documented, and never exercised."
+context:
+  task: "R5.5 Host reruns after the D72 repair"
+  paths:
+    - skills/kg-kickoff/scripts/record-turn.mjs
+    - skills/kg-kickoff/SKILL.md
+evidence:
+  - { type: quote, ref: "skills/kg-kickoff/scripts/record-turn.mjs main(): if (argv.includes(\"--session\")) mainV2(argv); else mainLegacy(argv) — omission selects version 1 with no diagnostic" }
+  - { type: log, ref: "All three kickoff gates passed 10/10 after the D72 repair and all three emitted version 1 index and turn products, so the version 2 surface R5.2 delivered is still uncovered by any passing real session" }
+  - { type: log, ref: "SKILL.md documents the --session form, so the agents were not following stale instructions; they dropped one flag and the writer downgraded them without complaint" }
+urgency: batch
