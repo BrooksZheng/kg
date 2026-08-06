@@ -209,7 +209,7 @@ the batch with zero new output.
 
 ### Version 1 compatibility
 
-The M2 architecture-only version 1 plan remains accepted. It continues to
+The architecture-only version 1 plan remains accepted. It continues to
 create only `docs/architecture/overview.md` with its original four sections.
 New brownfield sessions use version 2.
 

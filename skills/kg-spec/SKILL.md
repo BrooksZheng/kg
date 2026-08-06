@@ -97,8 +97,8 @@ The legacy renderer validates frontmatter, all eight sections, stable
 `docs/**/*.md#L<number>` constraint anchors, and every GIVEN/WHEN/THEN
 acceptance item. Implementation paths belong in References.
 
-The explicit `--finalize --output` path remains available for M1 fixture
-compatibility. New work uses archive mode.
+The explicit `--finalize --output` path remains available for replaying saved
+sessions. New work uses archive mode.
 
 Report completion to the human in Chinese:
 

@@ -44,8 +44,8 @@ kg treats this as a **compilation problem, not a memory problem**:
   productive).
 - **Publishing targets native carriers.** The v2 protocol separates
   observation-to-knowledge compilation from knowledge-to-harness routing.
-  M1 defines Markdown document, skill proposal, and script proposal carriers
-  without adding a retrieval runtime, database, or vector store.
+  Carriers are Markdown document regions, skill proposals, and script
+  proposals — no retrieval runtime, database, or vector store.
 - **Knowledge must also shrink.** A lifecycle state machine plus a mandatory
   subtraction duty (every compile round answers "what did we merge / demote /
   retire") and a regret log keep the corpus small enough to stay credible.
@@ -73,16 +73,17 @@ real output, not fixtures.
 
 ```text
 skills/
-  kg-init/      SKILL.md + scripts/ + assets/   setup, profiles, install
-  kg-docs/      SKILL.md + scripts/   evidence-backed brownfield bootstrap
+  kg-init/      SKILL.md + scripts/ + assets/   setup, profiles, install, v1 to v2 migration
+  kg-kickoff/   SKILL.md + scripts/ + references/   two-stage retrieval and one-question-at-a-time grilling
+  kg-spec/      SKILL.md + scripts/   zero-interview synthesis of a kickoff session into a task spec
+  kg-docs/      SKILL.md + scripts/   document scaffolds, ADR discipline, brownfield bootstrap
   kg-observe/   SKILL.md + scripts/   record observations (light, in-task)
-  kg-compile/   SKILL.md + scripts/   compile observations into knowledge (heavy, dedicated session)
-  kg-scan/      SKILL.md + scripts/ + references/   existing static-scan compatibility
-  kg-kickoff/   SKILL.md + scripts/ + references/   M1 retrieval and grill spike
-  kg-spec/      SKILL.md + scripts/   M1 zero-interview task-spec spike
-protocol/       nine interfaces: observation, knowledge, project-document,
-                harness and task-spec schemas, taxonomy, lifecycle, authority,
-                and two-stage routing
+  kg-compile/   SKILL.md + scripts/   compile observations into knowledge and carriers (heavy, dedicated session)
+  kg-scan/      SKILL.md + scripts/ + references/   harness health: staleness, references, coverage
+protocol/       every machine-parsed interface: observation, knowledge,
+                project-document, harness, task-spec, kickoff, spec-synthesis,
+                compile, scan, proposal and evaluation schemas, plus the
+                taxonomy, lifecycle, authority, scan and routing tables
 scripts/lib/    shared Node stdlib modules (KYAML parser, validator, host and
                 repository helpers, and protocol loaders); the SOURCE OF TRUTH; skill scripts
                 reach it via each skill's scripts/_lib.mjs resolver
@@ -187,7 +188,7 @@ ship. After editing either, regenerate and commit the vendored copies:
 node scripts/lib/protocol.mjs
 node scripts/sync-vendored.mjs          # refresh skills/*/scripts/lib + skills/*/protocol
 node scripts/sync-vendored.mjs --check  # CI / pre-push guard: exit 1 on drift
-node scripts/test-rfc004.mjs             # setup, document, and scan black-box tests
+node scripts/test-v2.mjs                # seven-part black-box suite across all seven skills
 ```
 
 A skill published with drifted copies fails only at the consumer's site —
@@ -195,6 +196,31 @@ run the `--check` before pushing anything that touched `scripts/lib/`,
 `protocol/`, or `skills/`.
 
 ## Daily use
+
+A task runs through the skills in this order. Each step leaves an artifact the
+next one reads, so nothing depends on a session remembering the last one.
+
+1. **Kickoff.** `kg-kickoff` retrieves the accepted documents and knowledge that
+   bear on the task, then asks one question at a time — each with a recommended
+   answer and the evidence behind it — and records where the task collides with
+   an accepted constraint.
+2. **Spec.** `kg-spec` synthesizes that session into a task spec under
+   `docs/specs/` without asking anything further: requirements, constraints
+   bound to their document anchors, GIVEN/WHEN/THEN acceptance criteria, and an
+   Out of Scope section tracing back to the conflicts and explicit refusals.
+3. **Work**, against the spec.
+4. **Observe.** `kg-observe` records reusable signals at task end, and
+   immediately on a human correction.
+5. **Compile.** `kg-compile` turns pending observations and accepted documents
+   into atomic knowledge entries, then routes them to carriers — managed
+   document regions, skill proposals, script proposals.
+6. **Scan.** `kg-scan` reports harness health: stale references, broken
+   anchors, coverage gaps by document type, and whether the always-loaded
+   `AGENTS.md` surface still fits its line budget.
+
+`AGENTS.md` stays a short pointer surface — a hard rule, the project's
+commands, and which skill to reach for. Knowledge is not pasted into it;
+kickoff retrieves what a task needs.
 
 Draft complete ADRs, RFCs, and technical plans directly under `docs/`.
 Registered documents move through `draft`, `proposed`, `accepted`, `rejected`,
@@ -234,9 +260,38 @@ printf '%s\n' \
 # accepted registered documents, observations, and existing knowledge
 ```
 
+Check harness health at any time:
+
+```bash
+node .agents/skills/kg-scan/scripts/health-check.mjs --root .
+```
+
+Findings are tiered: hard errors gate, warnings do not, so the report stays
+usable on a repository that has not finished cleaning up.
+
 Working agents must never read `.kg/` during tasks — writes go through
 kg-observe only; reads happen only in kg-compile sessions. Host project
 instructions carry this rule.
+
+## Migrating a v1 install
+
+A host running the four-skill v1 layout upgrades through kg-init. Detection is
+read-only and classifies the host first; migration then runs from a sealed
+plan written outside the host, so an interrupted run resumes from the same
+plan rather than re-deriving one against a half-migrated tree.
+
+```bash
+node <plugin>/skills/kg-init/scripts/detect-migration.mjs --root <host>
+node <plugin>/skills/kg-init/scripts/migrate-v1.mjs \
+  --root <host> --skills-source <plugin>/skills --output <outside-host>/plan.json
+node <plugin>/skills/kg-init/scripts/migrate-v1.mjs \
+  --root <host> --execute --plan <outside-host>/plan.json
+```
+
+Knowledge entries, `docs/`, and queue items are preserved; queue items that
+cannot be converted are quarantined rather than dropped. `AGENTS.md` keeps its
+human bytes and loses the v1 managed block. Keep the plan file — it is both
+the recovery input and the executor's identity check.
 
 ## KYAML — the machine-parsed YAML subset
 

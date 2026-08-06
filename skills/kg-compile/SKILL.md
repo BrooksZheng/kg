@@ -36,13 +36,12 @@ ownership/update-policy compatibility, and `disposition_rank` ordering.
 Compile update actions carry `actor`, `update_scope`, and `body_action` in the
 plan/report shape. When a human-authored body edit is detected, the future
 update transaction uses `update_scope: evidence_scope_refresh` and
-`body_action: preserved`; R4.1 defines this shape and its preflight parser,
-while the mutation path remains deferred to R4.2.
+`body_action: preserved`: the evidence scope is refreshed and the human's
+prose is carried through untouched.
 
-## M2 deterministic plan/apply path
+## Deterministic plan/apply path
 
-This section overrides the older per-record publishing instructions below for
-the M2-supported path. The compiler agent produces one strict JSON plan. It
+This section overrides the older per-record publishing instructions below. The compiler agent produces one strict JSON plan. It
 never writes a KN, queue item, carrier, sidecar, processed observation, or
 report directly.
 
@@ -77,10 +76,10 @@ review candidates remain inactive until their promotion queue item is ruled.
 
 The apply script calls `archive-observations.mjs` once per completed
 observation and records the exact arguments in the machine report. The report
-also records the M2 known limitation: deterministic validation proves
-reference existence and managed-block hash consistency, while semantic
-equivalence between rendered prose and `source_kn_ids` remains for the M5
-agent-assisted scan.
+also records the standing limitation of the deterministic layer: it proves
+reference existence and managed-block hash consistency, but whether the
+rendered prose still says what its `source_kn_ids` claim is a semantic
+question, answered by the agent-assisted layer of `kg-scan`.
 
 ## Session procedure
 

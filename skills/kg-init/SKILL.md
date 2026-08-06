@@ -28,7 +28,7 @@ installer.
 
 ## Healthy v1 migration
 
-R2.2 supports one healthy v1 shape. Detect the host first:
+Migration accepts one shape: a healthy v1 host. Detect it first:
 
 ```bash
 node <plugin>/skills/kg-init/scripts/detect-migration.mjs --root <host-root>
@@ -70,7 +70,7 @@ progressed:
   re-run `--execute` with the **same** plan file.  Do NOT regenerate a new
   plan on a partially-migrated host — the host is no longer classified as v1
   and plan generation will refuse.  If you lose the plan in this state, the
-  host requires manual repair (M3).
+  host requires manual repair.
 
 ## Install
 
