@@ -1,0 +1,12 @@
+id: OBS-20260806-002
+at: 2026-08-06T10:02:48Z
+source: task_outcome
+claim: "A canonical-identity collision check must be scoped to the paths the plan writes; two read-only paths resolving to one file is aliasing, not a collision."
+context:
+  task: kg-v2-R6.1
+  paths: [skills/kg-init/scripts/migration-lib.mjs]
+evidence:
+  - { type: log, ref: "migrate-v1 --output refused this repo: migration ownership paths share a canonical identity: scripts/fixtures/m5/kickoff-full-surface/project/docs/api/orders.md <> .../docs/runbooks/orders-link.md" }
+  - { type: diff, ref: "assertOwnershipSets now tags each set as mutating or not and skips preserved-to-preserved pairs" }
+urgency: batch
+compiled_to_kn: KN-0005

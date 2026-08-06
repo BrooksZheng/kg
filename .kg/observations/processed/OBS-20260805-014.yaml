@@ -10,3 +10,4 @@ evidence:
   - { type: log, ref: "kg-scan against this repository reports 47 legacy_v1_without_v2_trace findings, which is every active entry: the block has not been re-rendered since v1" }
   - { type: quote, ref: "knowledge/KN-0013: the always-loaded managed block must stay a compact pointer index because instruction compliance degrades as the always-on count grows — the budget is not to be raised" }
 urgency: batch
+compiled_to_kn: KN-0051

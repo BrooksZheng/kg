@@ -13,3 +13,4 @@ evidence:
   - { type: quote, ref: "skills/kg-scan/SKILL.md:174 'Use narrow #Lstart or #Lstart-Lend anchors' — the agent followed the instruction it was given" }
   - { type: quote, ref: "protocol/scan-agent-report.schema.yaml:57 source_refs is an unpatterned string_list, so nothing rejects the range spelling at write time" }
 urgency: batch
+compiled_to_kn: KN-0050

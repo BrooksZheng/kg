@@ -1,0 +1,15 @@
+id: OBS-20260806-006
+at: 2026-08-06T10:02:49Z
+source: task_outcome
+claim: "KN-0016 names kg-scan as the brownfield bootstrap adapter, but bootstrap now lives in kg-docs while kg-scan reports harness health; the entry needs re-scoping to the boundaries rather than the skill name."
+context:
+  task: kg-v2-R6.2
+  paths:
+    - knowledge/KN-0016-kg-scan-is-the-brownfield-bootstrap.md
+    - skills/kg-scan/SKILL.md
+    - skills/kg-docs/SKILL.md
+evidence:
+  - { type: quote, ref: "skills/kg-docs/SKILL.md section Brownfield bootstrap owns inventory.mjs and bootstrap.mjs" }
+  - { type: diff, ref: "kg-scan SKILL.md rewritten to lead with the deterministic health check and point at kg-docs for authoring" }
+urgency: batch
+compiled_to_kn: KN-0016

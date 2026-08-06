@@ -12,3 +12,4 @@ evidence:
   - { type: log, ref: "All three kickoff gates passed 10/10 after the D72 repair and all three emitted version 1 index and turn products, so the version 2 surface R5.2 delivered is still uncovered by any passing real session" }
   - { type: log, ref: "SKILL.md documents the --session form, so the agents were not following stale instructions; they dropped one flag and the writer downgraded them without complaint" }
 urgency: batch
+compiled_to_kn: KN-0053

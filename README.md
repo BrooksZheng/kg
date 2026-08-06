@@ -14,6 +14,21 @@ The protocol design and all rulings live in
 (Chinese — the incubation working language for human-facing docs; skill bodies,
 schemas, and code are English).
 
+## 中文速览
+
+kg 是一个与平台无关的 agent 插件，以 skill 集合分发，把人机协作过程中产生的
+信号——人类纠正、任务结果、测试失败、评审意见——连同已 accepted 的项目文档，
+编译成有证据、可裁决、会退役的原子知识，再投递到 agent 原生消费的载体上。
+
+七个 skill 覆盖一次任务的完整链路：`kg-kickoff` 逐条澄清约束，`kg-spec` 把共识
+固化成 task spec，`kg-docs` 负责文档脚手架与棕地 bootstrap，`kg-observe` 在任务
+中记录信号，`kg-compile` 把信号编译成知识与载体，`kg-scan` 报告 harness 健康度，
+`kg-init` 负责安装与 v1→v2 迁移。日常流程见下方 Daily use，迁移见 Migrating a
+v1 install。
+
+语言约定：面向人的文档、会话内输出、spec 与报告用中文；skill 正文、schema、
+代码与本 README 主体用英文，因为它们的读者是全球的开源使用者和 agent 本身。
+
 ## Why this project exists
 
 Agents forget. Every session starts from zero: the same wrong assumption gets

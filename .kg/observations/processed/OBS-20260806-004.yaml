@@ -1,0 +1,12 @@
+id: OBS-20260806-004
+at: 2026-08-06T10:02:48Z
+source: task_outcome
+claim: "An installer that refuses to replace a skill directory which is its own source is correct; the plugin source repo therefore wires .agents/skills/kg-* as symlinks and cannot be migrated in place."
+context:
+  task: kg-v2-R6.1
+  paths: [".agents/skills/**", skills/kg-init/scripts/migrate-v1.mjs]
+evidence:
+  - { type: log, ref: "migrate-v1 on this repo: skill source and migration destination resolve to the same directory: kg-init" }
+  - { type: quote, ref: "resolution: reconstruct the v1 host from main as real copies, migrate, then restore symlinks; detection still reports healthy v2" }
+urgency: batch
+compiled_to_kn: KN-0004

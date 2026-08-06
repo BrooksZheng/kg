@@ -13,3 +13,4 @@ evidence:
   - { type: test, ref: "scripts/test-v2.mjs Part 7 scan_agent_writer_canonicalizes_degenerate_line_ranges" }
   - { type: diff, ref: "R5.4 D71 repair: #Ln-Ln and #Ln inputs produce byte-identical reports while #Ln-Lm remains unchanged" }
 urgency: batch
+compiled_to_kn: KN-0050

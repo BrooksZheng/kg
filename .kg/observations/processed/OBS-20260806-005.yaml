@@ -1,0 +1,12 @@
+id: OBS-20260806-005
+at: 2026-08-06T10:02:48Z
+source: agent_insight
+claim: "Two evaluation runs sharing one artifacts directory both pass the empty-directory check at start, and the first run's archive output makes the second run fail as if the session misbehaved; concurrent gate runs must use distinct directories."
+context:
+  task: kg-v2-R5.6
+  paths: [scripts/eval-spec.mjs]
+evidence:
+  - { type: log, ref: "gs1/gs2/gs3 all failed with session ran archive; the evaluator owns the archive step, while no session tool event invoked --archive" }
+  - { type: log, ref: "stat birth times: TASK-20260731-001.md, result.json and runner-output.json share one birth instant 2.5 minutes before the final result mtime" }
+urgency: batch
+compiled_to_kn: KN-0055

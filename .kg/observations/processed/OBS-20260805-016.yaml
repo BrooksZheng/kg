@@ -12,3 +12,4 @@ evidence:
   - { type: log, ref: ".mission/kg-v2-refactor/evidence/gk1-r55/attempt-01/runner-output.json: zero tool events, zero file reads, and zero products" }
   - { type: log, ref: ".mission/kg-v2-refactor/evidence/r55/evidence-index.json: G-S1 through G-S3 remain unadmitted without their corresponding fresh kickoff products" }
 urgency: batch
+compiled_to_kn: KN-0036

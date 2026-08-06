@@ -13,3 +13,4 @@ evidence:
   - { type: log, ref: "R5.2 upgraded record-turn.mjs to emit v2 with turn_id, sequence and user_message_index whenever a session records more than one turn, which is the normal case for a grill skill; G-K1 escaped two of three failures only because that session happened to record a single turn" }
   - { type: log, ref: "Same round, second symptom: R5.2 moved deep retrieval into a script so the agent no longer reads sources directly (KN-0042), but forbid_fabrication still demanded a runner file_read event per cited source, and must_find reported three sources missing that were present in kickoff-context.json" }
 urgency: batch
+compiled_to_kn: KN-0052
