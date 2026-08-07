@@ -76,6 +76,8 @@ const record = {
   supersedes: frontmatter.supersedes ?? null,
   last_verified: frontmatter.last_verified ?? new Date().toISOString().slice(0, 10),
   regret: null,
+  source_obs_ids: frontmatter.source_obs_ids ?? [],
+  carrier_refs: frontmatter.carrier_refs ?? [],
 };
 
 const errors = protocol.validateRecord(record, knowledgeSchema);
@@ -86,22 +88,21 @@ if (errors.length) {
 }
 if (body.trim() === "") host.fail("entry body is empty — write the explanation, the entry IS the reference doc");
 
-const slug =
-  record.claim
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .split("-")
-    .slice(0, 6)
-    .join("-") || "entry";
-const outFile = path.join(paths.knowledge, `${id}-${slug}.md`);
+const outFile = path.join(paths.knowledge, host.knowledgeFilename(id, record.claim));
 if (fs.existsSync(outFile)) host.fail(`refusing to overwrite ${outFile}`);
-fs.writeFileSync(outFile, `---\n${kyaml.stringify(record)}---\n\n${body.trim()}\n`);
+const temporary = path.join(paths.knowledge, `.${path.basename(outFile)}.kg-entry-write.tmp`);
+try {
+  if (fs.existsSync(temporary)) fs.rmSync(temporary, { force: true });
+  fs.writeFileSync(temporary, `---\n${kyaml.stringify(record)}---\n\n${body.trim()}\n`, { flag: "wx" });
+  fs.renameSync(temporary, outFile);
+} finally {
+  if (fs.existsSync(temporary)) fs.rmSync(temporary, { force: true });
+}
 host.appendRoundAction(paths, { action: "add", entry: id, category, lifecycle: derivedLifecycle });
 
 console.log(`kg: created ${id} (${derivedLifecycle}) -> ${path.relative(process.cwd(), outFile) || outFile}`);
 if (derivedLifecycle === "candidate") {
   console.log(`kg: category \`${category}\` is human_review — file a queue item now (add-queue-item.mjs) and do NOT activate without a human ruling.`);
 } else {
-  console.log("kg: entry is active — re-render the AGENTS.md managed block (render-agents.mjs) before ending the session.");
+  console.log("kg: entry is active; validate knowledge and continue the compile report.");
 }

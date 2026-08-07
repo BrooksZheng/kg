@@ -1,0 +1,12 @@
+id: OBS-20260803-006
+at: 2026-08-03T06:35:52Z
+source: task_outcome
+claim: "The R4 carrier parser treats human_segment_hash as a cross-session refresh observation, while the transaction byte fence compares the previously read human bytes byte-for-byte and fails on divergence."
+context:
+  task: "R4.1 protocol and carrier preflight"
+  paths: [scripts/lib/harness.mjs, scripts/test-v2.mjs]
+evidence:
+  - { type: test, ref: human_edit_between_sessions_is_refresh_not_tamper }
+  - { type: diff, ref: "scripts/lib/harness.mjs: humanSegmentHashState and assertTransactionByteFence" }
+urgency: batch
+compiled_to_kn: KN-0038

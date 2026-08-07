@@ -1,0 +1,15 @@
+id: OBS-20260731-010
+at: 2026-07-31T07:24:43Z
+source: task_outcome
+claim: "Kickoff turn recording must require the session context index, reject duplicate or unindexed finding paths during the session, and leave authoritative index re-audit to the evaluator."
+context:
+  task: "R2.4 D44 recorder and evaluator symmetry repair"
+  paths:
+    - skills/kg-kickoff/scripts/record-turn.mjs
+    - scripts/eval-kickoff.mjs
+    - scripts/test-v2.mjs
+evidence:
+  - { type: test, ref: "node scripts/test-v2.mjs --part 5: record_turn_rejects_agent_envelope_fields_and_validates_semantics and structured_negative_cases_fail_the_target_criteria passed" }
+  - { type: diff, ref: "skills/kg-kickoff/scripts/record-turn.mjs requires --index and validates finding membership independently of scripts/eval-kickoff.mjs auditIndex" }
+urgency: batch
+compiled_to_kn: KN-0026

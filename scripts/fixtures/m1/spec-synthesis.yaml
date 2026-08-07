@@ -1,0 +1,29 @@
+kind: kg.spec_synthesis
+version: 1
+task:
+  task_id: TASK-20260730-001
+  status: draft
+  title: "Retry Payment event publication to Order"
+context:
+  - "Payment and Order communicate through an accepted event boundary."
+  - "The requested retry must preserve Order deduplication."
+requirements:
+  - "Retry publication of the payment.authorized event after a transient failure."
+  - "Reuse the original idempotency key for every retry attempt."
+constraints:
+  - { constraint: "Payment must not write the Order database directly.", source_path: "docs/decisions/0001-payment-order-event-bus.md#L15", source_status: accepted, authority: formal_decision }
+  - { constraint: "Retries must preserve event deduplication.", source_path: "docs/traps/payment-direct-write.md#L14", source_status: accepted, authority: formal_decision }
+references:
+  - "docs/architecture/overview.md"
+  - "src/payment/retry.mjs (planned implementation path)"
+out_of_scope:
+  - "Direct writes from Payment to the Order database."
+  - "Changing the event bus technology."
+acceptance_criteria:
+  - "GIVEN a transient publication failure WHEN Payment retries the event THEN every attempt uses the original idempotency key."
+  - "GIVEN duplicate delivery WHEN Order consumes the retried event THEN Order applies the state transition once."
+open_questions:
+  - "The retry count and backoff policy remain to be selected during implementation planning."
+session_history:
+  - "kickoff session m1-kickoff-fixture-01"
+  - "Evidence selected from the accepted boundary decision and direct-write trap."

@@ -1,0 +1,19 @@
+# kg protocol: deterministic scan policy.
+# Values here are inputs to the scan report. The scanner must not duplicate
+# resident-surface targets or finding guidance in code.
+
+kind: kg.scan_policy
+version: 1
+
+# Structural coverage belongs to the deterministic report. Agent-assisted
+# semantic coverage uses a disjoint type table in scan-agent-report.schema.yaml.
+structural_coverage:
+  missing_issue: missing_core_type
+  uncovered_issue: uncovered_core_type
+
+resident_surface:
+  path: AGENTS.md
+  target_lines: 30
+  finding_issue: agents_line_budget_exceeded
+  knowledge_id: KN-0013
+  guidance: "做减法而非扩面"

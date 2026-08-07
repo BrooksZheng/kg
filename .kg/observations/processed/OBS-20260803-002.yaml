@@ -1,0 +1,12 @@
+id: OBS-20260803-002
+at: 2026-08-03T04:15:57Z
+source: task_outcome
+claim: "Content-addressed bootstrap proposals must bind an existing target to the source inventory and revalidate its sha256 while preparing the candidate and immediately before mutation so an old plan cannot follow target drift."
+context:
+  task: kg-v2-refactor-r34-proposal
+  paths: [skills/kg-docs/scripts/bootstrap.mjs, scripts/test-v2.mjs]
+evidence:
+  - { type: diff, ref: "skills/kg-docs/scripts/bootstrap.mjs proposal target hash checks and final preflight" }
+  - { type: test, ref: "Part 2 proposal_rejects_target_drift and proposal_rerun_is_idempotent_and_target_is_unchanged" }
+urgency: batch
+compiled_to_kn: KN-0023

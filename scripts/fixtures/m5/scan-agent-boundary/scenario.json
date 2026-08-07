@@ -1,0 +1,23 @@
+{
+  "kind": "kg.evaluation_scenario",
+  "version": 1,
+  "fixture_id": "m5-scan-agent-boundary",
+  "evaluator": "scan",
+  "task": "Read the evidence packet, report the real semantic contradiction and module semantic coverage gap, and leave the compatible same-topic source unreported.",
+  "source_roots": ["host", "variants"],
+  "judged_artifact_roots": ["artifacts"],
+  "visible_inputs": [
+    "host/docs/architecture/payment-boundary.md",
+    "host/docs/runbooks/payment-incident.md",
+    "host/docs/runbooks/payment-retry.md",
+    "host/src/modules/refunds/index.mjs"
+  ],
+  "turns": [
+    {
+      "sequence": 1,
+      "role": "user",
+      "content": "Use narrow source lines, exact module identity, and exact missing evidence keys from the packet. Do not report compatible same-topic sources."
+    }
+  ],
+  "approvals": []
+}

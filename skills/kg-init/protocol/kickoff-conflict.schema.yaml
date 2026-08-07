@@ -1,0 +1,43 @@
+# kg protocol: kickoff task-interpretation to stable-constraint bindings.
+
+kind: kg.kickoff_conflict_schema
+version: 2
+legacy_versions: [1]
+product_kind: kg.kickoff_conflicts
+product_version: 2
+assessment_values: [conflict, no_conflict]
+
+field_order:
+  - kind
+  - version
+  - recorded_at
+  - session_id
+  - assessment
+  - conflicts
+  - no_conflict_reason_refs
+
+record_field_order:
+  conflicts: "conflict_id|summary|task_message_index|task_message_sha256|constraint_source_path|constraint_line|constraint_sha256|finding_id"
+
+script_owned_fields: "kind|version|recorded_at|session_id|conflicts[].conflict_id|conflicts[].task_message_sha256|conflicts[].constraint_sha256"
+
+legacy_field_order: "kind|version|conflicts"
+legacy_record_field_order:
+  conflicts: "summary|source_path|line"
+
+fields:
+  kind: { type: enum, required: true, values: "kg.kickoff_conflicts" }
+  version: { type: integer, required: true, values: "2" }
+  recorded_at: { type: timestamp, required: true }
+  session_id: { type: string, required: true, pattern: "^KSESSION-[A-F0-9]{12}$" }
+  assessment: { type: enum_from, required: true, values_from: assessment_values }
+  conflicts: { type: map_list, required: true, unique_by: conflict_id }
+  conflicts[].conflict_id: { type: string, required: true, pattern: "^KC-[A-F0-9]{12}$" }
+  conflicts[].summary: { type: string, required: true }
+  conflicts[].task_message_index: { type: integer, required: true, min: 0 }
+  conflicts[].task_message_sha256: { type: string, required: true, pattern: "^sha256:[a-f0-9]{64}$" }
+  conflicts[].constraint_source_path: { type: string, required: true }
+  conflicts[].constraint_line: { type: integer, required: true, min: 1 }
+  conflicts[].constraint_sha256: { type: string, required: true, pattern: "^sha256:[a-f0-9]{64}$" }
+  conflicts[].finding_id: { type: string, required: true, pattern: "^KF-[A-F0-9]{12}$" }
+  no_conflict_reason_refs: { type: string_list, required: true }

@@ -1,0 +1,21 @@
+{
+  "source": "human_correction",
+  "claim": "JSON observation input preserves paths, # anchors, and multiple evidence records.",
+  "context": {
+    "task": "observe-json",
+    "paths": [
+      "src/app/**",
+      "docs/architecture/overview.md#L12"
+    ]
+  },
+  "evidence": [
+    {
+      "type": "quote",
+      "ref": "human: keep # anchors intact"
+    },
+    {
+      "type": "test",
+      "ref": "node scripts/test-v2.mjs --part 3"
+    }
+  ]
+}

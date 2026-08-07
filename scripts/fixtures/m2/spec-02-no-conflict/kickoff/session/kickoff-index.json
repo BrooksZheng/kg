@@ -1,0 +1,226 @@
+{
+  "kind": "kg.kickoff_context_index",
+  "version": 2,
+  "indexed_at": "2026-08-06T07:07:26.127Z",
+  "project_root": "/Users/brooks/Desktop/workspace/bigbigbo/kg/.mission/kg-v2-refactor/evidence/gk2-r56/attempt-01/workspace/project",
+  "task_sha256": "sha256:e81de734c9fb5e1be5d31dec2c936dc7d46dd9c0103b22e30bc37ff2f6fe71a7",
+  "catalog_status": "complete",
+  "source_counts": [
+    {
+      "source_class": "project_instruction",
+      "total": 1,
+      "included": 1,
+      "excluded": 0
+    },
+    {
+      "source_class": "document_map",
+      "total": 1,
+      "included": 1,
+      "excluded": 0
+    },
+    {
+      "source_class": "taxonomy_document",
+      "total": 5,
+      "included": 5,
+      "excluded": 0
+    },
+    {
+      "source_class": "knowledge_ledger",
+      "total": 1,
+      "included": 1,
+      "excluded": 0
+    },
+    {
+      "source_class": "harness_inventory",
+      "total": 0,
+      "included": 0,
+      "excluded": 0
+    },
+    {
+      "source_class": "harness_document_closure",
+      "total": 0,
+      "included": 0,
+      "excluded": 0
+    }
+  ],
+  "entries": [
+    {
+      "source_id": "SRC-6D05B3DE9D1F",
+      "source_class": "project_instruction",
+      "path": "AGENTS.md",
+      "sha256": "sha256:42d61d60e180d5e622a6e0b3430daf6805b1948d2b0d1668b861848ab4d309aa",
+      "title": "Project Instructions",
+      "line_count": 4,
+      "doc_type": null,
+      "status": "unregistered",
+      "authority": "project_instruction",
+      "domain_keys": [
+        "agents"
+      ],
+      "summary": null,
+      "metadata": {},
+      "metadata_truncated": false
+    },
+    {
+      "source_id": "SRC-75E515C01004",
+      "source_class": "taxonomy_document",
+      "path": "docs/architecture/overview.md",
+      "sha256": "sha256:949abfa6f0ee03f42bc1f7d6ccfe19534da86e0cbcae838498b358853f8b0035",
+      "title": "Payment and Order overview",
+      "line_count": 11,
+      "doc_type": "architecture",
+      "status": "draft",
+      "authority": "reference_only",
+      "domain_keys": [
+        "architecture",
+        "docs",
+        "overview"
+      ],
+      "summary": null,
+      "metadata": {},
+      "metadata_truncated": false
+    },
+    {
+      "source_id": "SRC-8CB1C122F6C3",
+      "source_class": "taxonomy_document",
+      "path": "docs/decisions/0001-payment-order-event-bus.md",
+      "sha256": "sha256:b1170658a7618bd2d53c81a7ae349947cb41f57ef889b7994dac2bb4ff495a10",
+      "title": "Payment to Order event boundary",
+      "line_count": 19,
+      "doc_type": "decision",
+      "status": "accepted",
+      "authority": "formal_decision",
+      "domain_keys": [
+        "0001",
+        "bus",
+        "decision",
+        "decisions",
+        "docs",
+        "event",
+        "order",
+        "payment"
+      ],
+      "summary": null,
+      "metadata": {},
+      "metadata_truncated": false
+    },
+    {
+      "source_id": "SRC-0FFE2F572712",
+      "source_class": "taxonomy_document",
+      "path": "docs/glossary.md",
+      "sha256": "sha256:2684deedc529724325996e3de0efaa9e144cd5ef43a313b236729acb0b865902",
+      "title": "Glossary",
+      "line_count": 6,
+      "doc_type": "glossary",
+      "status": "unregistered",
+      "authority": "reference_only",
+      "domain_keys": [
+        "docs",
+        "glossary"
+      ],
+      "summary": null,
+      "metadata": {},
+      "metadata_truncated": false
+    },
+    {
+      "source_id": "SRC-A4E7620D72E9",
+      "source_class": "document_map",
+      "path": "docs/README.md",
+      "sha256": "sha256:b9e51e3f12bebced07ba6d3fd1853f7e6b1a90d3ac09bf38dbf3698422ef5ae7",
+      "title": "Project Documents",
+      "line_count": 4,
+      "doc_type": null,
+      "status": "unregistered",
+      "authority": "reference_only",
+      "domain_keys": [
+        "docs",
+        "readme"
+      ],
+      "summary": null,
+      "metadata": {
+        "registration_hint": true
+      },
+      "metadata_truncated": false
+    },
+    {
+      "source_id": "SRC-51BA35651A48",
+      "source_class": "taxonomy_document",
+      "path": "docs/standards/api.md",
+      "sha256": "sha256:0fb507f16a674c4815c417c1a9f2aba4fc013f5529e780acaa6e3f41773169e3",
+      "title": "Internal API standard",
+      "line_count": 11,
+      "doc_type": "standard",
+      "status": "draft",
+      "authority": "reference_only",
+      "domain_keys": [
+        "api",
+        "docs",
+        "standard",
+        "standards"
+      ],
+      "summary": null,
+      "metadata": {},
+      "metadata_truncated": false
+    },
+    {
+      "source_id": "SRC-FD0782A70A95",
+      "source_class": "taxonomy_document",
+      "path": "docs/traps/payment-direct-write.md",
+      "sha256": "sha256:96f5994a9dd9492461b0f58c0fcbff2dfdeda10f8fe2d466d6c571e8e6ac0176",
+      "title": "Payment direct write trap",
+      "line_count": 18,
+      "doc_type": "trap",
+      "status": "accepted",
+      "authority": "formal_decision",
+      "domain_keys": [
+        "direct",
+        "docs",
+        "payment",
+        "trap",
+        "traps",
+        "write"
+      ],
+      "summary": null,
+      "metadata": {},
+      "metadata_truncated": false
+    },
+    {
+      "source_id": "SRC-89DE3DABAE30",
+      "source_class": "knowledge_ledger",
+      "path": "knowledge/KN-0001-payment-boundary.md",
+      "sha256": "sha256:d6172576770b6acc3aa2fcdffe5fa87d3074864af51398abd3cd25d3b5e95714",
+      "title": "Payment communicates with Order through the accepted event boundary.",
+      "line_count": 19,
+      "doc_type": null,
+      "status": "active",
+      "authority": "formal_decision",
+      "domain_keys": [
+        "0001",
+        "boundary",
+        "kn",
+        "knowledge",
+        "order",
+        "payment",
+        "services"
+      ],
+      "summary": "Payment communicates with Order through the accepted event boundary.",
+      "metadata": {
+        "knowledge_id": "KN-0001",
+        "claim": "Payment communicates with Order through the accepted event boundary.",
+        "scope": {
+          "paths": [
+            "services/payment/**",
+            "services/order/**"
+          ]
+        },
+        "lifecycle": "active"
+      },
+      "metadata_truncated": false
+    }
+  ],
+  "edges": [],
+  "exclusions": [],
+  "omission_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+  "metadata_budget_bytes": 65536,
+  "metadata_bytes_used": 1242
+}

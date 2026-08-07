@@ -1,0 +1,18 @@
+id: Q-20260803-001
+at: 2026-08-03T05:49:57Z
+kind: promotion
+category: project_contract
+claim: "Promote KN-0033: a security boundary must be re-derived by the component that acts on it; a writer that trusts an upstream record's self-declared eligibility can be walked past the boundary by a hash-valid forged record."
+evidence:
+  - { type: observation, ref: OBS-20260803-001 }
+  - { type: test, ref: "test-v2 Part 2 kn0016_host_code_never_executes rejects a forged .env inventory record" }
+  - { type: quote, ref: ".mission/kg-v2-refactor/feedback-r33.md D62: the writer trusted inventory excluded membership, so a forged record could bypass the KN-0016 boundary until a writer-side eligibility recheck was added." }
+options:
+  - "accept as project contract (activate KN-0033)"
+  - "keep as project_knowledge (demote to explanatory, not binding)"
+  - "reject (retire KN-0033)"
+recommendation: "Accept. KN-0016 already binds the inventory boundary as contract, but D62 proved stating it at the producer is insufficient — the consumer must re-derive. Making the recheck binding closes the gap for every future writer that consumes an inventory, manifest, or allowlist, at negligible cost."
+entry: KN-0033
+source_observations: [OBS-20260803-001]
+resolution: accepted
+resolution_note: "Human delegated queue rulings to the compiler agent in-session (裁决有你帮我决定, 2026-07-31); the delegation was not scoped to a single round. Ruled per the recorded recommendation."

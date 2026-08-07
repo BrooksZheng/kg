@@ -1,0 +1,52 @@
+{
+  "kind": "kg.kickoff_context",
+  "version": 2,
+  "read_at": "2026-08-06T07:00:42.841Z",
+  "project_root": "/Users/brooks/Desktop/workspace/bigbigbo/kg/.mission/kg-v2-refactor/evidence/gk1-r56/attempt-01/workspace/project",
+  "index_sha256": "sha256:0bd69872abfd6c4eeb75bd35ae7f9313c46ed6940474963763b62773bd7858d0",
+  "scope_sha256": "sha256:69837d8c29247b04ccbe21f32026e2ae68551f4d631e1da31bcd472d38efe2f6",
+  "documents": [
+    {
+      "path": "docs/decisions/0001-payment-order-event-bus.md",
+      "source_id": "SRC-8CB1C122F6C3",
+      "source_class": "taxonomy_document",
+      "sha256": "sha256:b1170658a7618bd2d53c81a7ae349947cb41f57ef889b7994dac2bb4ff495a10",
+      "status": "accepted",
+      "authority": "formal_decision",
+      "content": "---\nkind: kg.project_document\ntitle: \"Payment to Order event boundary\"\ndoc_type: decision\nstatus: accepted\nowners: [payments, orders]\naccepted_at: 2026-07-28\nsupersedes: null\n---\n\n# Payment to Order event boundary\n\n## Decision\n\nPayment emits `payment.authorized`; Order consumes the event. Payment must not write the Order database directly.\n\n## Retry constraint\n\nPublication retries must reuse the same idempotency key so Order can discard duplicate delivery.\n",
+      "bytes": 461,
+      "original_bytes": 461,
+      "truncated": false
+    },
+    {
+      "path": "docs/traps/payment-direct-write.md",
+      "source_id": "SRC-FD0782A70A95",
+      "source_class": "taxonomy_document",
+      "sha256": "sha256:96f5994a9dd9492461b0f58c0fcbff2dfdeda10f8fe2d466d6c571e8e6ac0176",
+      "status": "accepted",
+      "authority": "formal_decision",
+      "content": "---\nkind: kg.project_document\ntitle: \"Payment direct write trap\"\ndoc_type: trap\nstatus: accepted\naccepted_at: 2026-07-29\nsupersedes: null\n---\n\n# Payment direct write trap\n\n## Failure mode\n\nRetrying a direct Order database write bypasses event deduplication and can produce duplicate state transitions.\n\n## Safe path\n\nRetry event publication with the original idempotency key.\n",
+      "bytes": 376,
+      "original_bytes": 376,
+      "truncated": false
+    },
+    {
+      "path": "knowledge/KN-0001-payment-boundary.md",
+      "source_id": "SRC-89DE3DABAE30",
+      "source_class": "knowledge_ledger",
+      "sha256": "sha256:d6172576770b6acc3aa2fcdffe5fa87d3074864af51398abd3cd25d3b5e95714",
+      "status": "active",
+      "authority": "formal_decision",
+      "content": "---\nid: KN-0001\nclaim: \"Payment communicates with Order through the accepted event boundary.\"\ncategory: project_contract\nscope:\n  paths: [services/payment/**, services/order/**]\nevidence:\n  - { type: quote, ref: \"docs/decisions/0001-payment-order-event-bus.md Decision\" }\nauthority: formal_decision\nconfidence: 0.95\nlifecycle: active\nsupersedes: null\nlast_verified: 2026-07-29\nregret: null\n---\n\n# Payment boundary\n\nUse the accepted decision as the stable source.\n",
+      "bytes": 463,
+      "original_bytes": 463,
+      "truncated": false
+    }
+  ],
+  "budget": {
+    "limit_bytes": 131072,
+    "consumed_bytes": 1300,
+    "remaining_bytes": 129772,
+    "truncated": false
+  }
+}

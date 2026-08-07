@@ -10,10 +10,11 @@ version: 1
 fields:
   kind: { type: enum, required: true, values: "kg.project_document" }
   title: { type: string, required: true }
-  doc_type: { type: enum, required: true, values: "architecture|decision|rfc|glossary|standard|development|api|runbook|inventory|proposal" }
+  doc_type: { type: enum, required: true, values: "architecture|decision|rfc|glossary|standard|development|api|runbook|inventory|proposal|trap|debt|spec" }
   status: { type: enum, required: true, values: "draft|proposed|accepted|rejected|superseded" }
   owners: { type: string_list, required: false }
   accepted_at: { type: date, required: false }
   supersedes: { type: string_or_null, required: true }
   superseded_by: { type: string_or_null, required: false }
   source_refs: { type: string_list, required: false }
+  coverage_limitations: { type: string_list, required: false }

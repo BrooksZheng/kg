@@ -1,0 +1,42 @@
+# kg protocol — Lifecycle State Machine (RFC-001 §5.4)
+# Machine-enforced by kg-compile's transition-entry.mjs: illegal transitions
+# fail hard. There is NO `experimental` state (RFC D2 — tiered autonomy
+# already covers gradual rollout).
+#
+# `observation` is the pre-entry stage (files in .kg/observations/), not an
+# entry lifecycle value: compiling an observation CREATES an entry in one of
+# the `initial` states below.
+
+kind: kg.lifecycle
+version: 1
+
+states: [candidate, active, deprecated, archived, rejected, conflicted]
+
+# States a brand-new entry may be created in. Creating an entry directly as
+# `active` is legal ONLY for categories whose routing autonomy is `auto`
+# (routing.yaml: project_knowledge, procedure). human_review categories start
+# as `candidate` plus a .kg/queue/ item.
+initial: [candidate, active]
+
+# from: "to1|to2..." — empty string marks a terminal state.
+# `conflicted` is enterable from any live state (candidate/active/deprecated)
+# when evidence collides; a human ruling routes it back out.
+transitions:
+  candidate: "active|rejected|conflicted|archived"
+  active: "deprecated|conflicted|archived"
+  deprecated: "archived|conflicted"
+  conflicted: "active|rejected|deprecated|archived"
+  rejected: ""
+  archived: ""
+
+# Entering these states REQUIRES a non-empty `regret` on the entry — what harm
+# the wrong/obsolete knowledge caused (RFC D6). Demote/retire without regret
+# is machine-rejected.
+regret_required_on_enter: [deprecated]
+
+# Archiving from any live state (candidate/active/conflicted) must carry a
+# reason: either it is a MERGE — `superseded_by` set to the surviving entry
+# id (the tool writes the survivor's `supersedes` back-pointer) — or a direct
+# RETIRE with `regret` recording what the knowledge cost. Only retiring a
+# `deprecated` entry needs nothing extra: its regret was recorded on demotion.
+archive_from_live_requires_reason: [candidate, active, conflicted]

@@ -1,0 +1,14 @@
+id: OBS-20260731-002
+at: 2026-07-31T03:56:25Z
+source: review
+claim: "Every compile result that completes an observation must have an explicit archive mode: KN-producing routes write compiled_to_kn, while protocol-declared no-KN routes archive by verdict and omit the field."
+context:
+  task: kg-v2-r21-repair
+  paths:
+    - skills/kg-compile/scripts/archive-observations.mjs
+    - protocol/routing.yaml
+    - scripts/test-v2.mjs
+evidence:
+  - { type: test, ref: "node scripts/test-v2.mjs --part 3: archive_accepts_no_kn_routing_verdicts and archive_rejects_invalid_result_selection_and_preserves_pending passed" }
+  - { type: diff, ref: "R2.1 repair D25 adds mutually exclusive --compiled-to-kn and protocol-derived --verdict archive paths" }
+urgency: batch

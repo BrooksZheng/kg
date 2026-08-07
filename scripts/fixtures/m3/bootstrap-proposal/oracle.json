@@ -1,0 +1,20 @@
+{
+  "kind": "kg.eval_bootstrap_oracle",
+  "version": 1,
+  "expected_document_count": 8,
+  "expected_proposal_target_paths": [
+    "docs/architecture/overview.md",
+    "docs/standards/evidence-policy.md"
+  ],
+  "required_evidence_source_paths": [
+    "package.json",
+    "src/server.mjs",
+    "src/shipment-store.mjs"
+  ],
+  "prompt_isolation_values": [
+    "docs/architecture/overview.md",
+    "docs/standards/evidence-policy.md",
+    "src/shipment-store.mjs",
+    "should-not-run.executed"
+  ]
+}

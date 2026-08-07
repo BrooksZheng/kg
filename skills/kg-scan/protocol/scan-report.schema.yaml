@@ -1,0 +1,46 @@
+# kg protocol: deterministic scan report shape.
+
+kind: kg.scan_report_schema
+version: 2
+
+field_order:
+  - kind
+  - version
+  - scanned_at
+  - artifacts_scanned
+  - findings
+  - staleness_count
+  - hard_error_count
+  - warning_count
+  - resident_surface
+  - coverage_audit
+  - scan_limits
+
+fields:
+  kind: { type: enum, required: true, values: "kg.staleness_report" }
+  version: { type: integer, required: true, values: "2" }
+  scanned_at: { type: timestamp, required: true }
+  artifacts_scanned: { type: integer, required: true }
+  findings: { type: map_list, required: true }
+  staleness_count: { type: integer, required: true }
+  hard_error_count: { type: integer, required: true }
+  warning_count: { type: integer, required: true }
+  resident_surface: { type: map, required: true }
+  coverage_audit: { type: map, required: true }
+  scan_limits: { type: map, required: true }
+
+finding_field_order:
+  - detection_mode
+  - artifact_id
+  - source_ref
+  - issue
+  - severity
+  - side
+  - kn_id
+  - carrier_ref
+  - source_path
+  - line_start
+  - line_end
+  - expected
+  - actual
+  - message

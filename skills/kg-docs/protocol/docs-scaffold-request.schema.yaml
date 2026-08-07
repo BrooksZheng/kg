@@ -1,0 +1,32 @@
+# kg protocol: strict agent input for one lazy project-document scaffold.
+
+kind: kg.docs_scaffold_request_schema
+version: 1
+approval_action_prefix: "scaffold:"
+
+field_order:
+  - doc_type
+  - slug
+  - title
+  - candidate_ref
+  - source_refs
+  - sections
+  - adr_assessment
+  - human_approval_message_index
+
+record_field_order:
+  sections: "key|content"
+
+fields:
+  doc_type: { type: enum_from, required: true, values_from: "taxonomy.core_types" }
+  slug: { type: string_or_null, required: true }
+  title: { type: string, required: true }
+  candidate_ref: { type: string_or_null, required: true }
+  source_refs: { type: string_list, required: true, min_items: 1, unique: true }
+  sections: { type: map_list, required: true, min_items: 1, unique_by: key }
+  sections[].key: { type: string, required: true }
+  sections[].content: { type: json, required: true }
+  adr_assessment: { type: string_or_null, required: true }
+  human_approval_message_index: { type: integer, required: true, min: 0 }
+
+taxonomy: document-taxonomy.yaml

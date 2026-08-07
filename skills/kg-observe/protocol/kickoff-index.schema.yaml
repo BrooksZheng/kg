@@ -1,0 +1,134 @@
+# kg protocol: metadata-only kickoff source catalog and index product.
+
+kind: kg.kickoff_index_schema
+version: 2
+product_kind: kg.kickoff_context_index
+product_version: 2
+# Version 1 index products live in the M1 and M2 saved fixtures and must keep
+# replaying. Declared rather than omitted so "still accepted" is a decision on
+# the page instead of an oversight (KN-0012).
+legacy_versions: [1]
+# Version 1 named the harness edge list `harness`; version 2 renamed it to
+# `edges`. Both shapes are protocol-owned so readers resolve the field name
+# from the version rather than probing for it (KN-0034).
+legacy_field_order: "kind|version|project_root|task|entries|harness|budget"
+
+# KN-0034: this is the only source-class table. Discovery code reads these
+# rows and the referenced protocol surfaces at runtime.
+source_classes:
+  project_instruction:
+    discovery: root_agents_md
+    route_source: fixed_root
+    include_patterns: AGENTS.md
+    index_fields: "path|sha256|title|line_count"
+    deep_qualification: task_or_human_scope
+  document_map:
+    discovery: docs_readme_links
+    route_source: document_links
+    include_patterns: docs/README.md
+    index_fields: "path|sha256|title|line_count|graph_edges|registration_hint"
+    deep_qualification: graph_scope_match
+  taxonomy_document:
+    discovery: taxonomy_routes
+    route_source: document-taxonomy.yaml
+    include_patterns: protocol:document-taxonomy.yaml
+    index_fields: "path|sha256|title|doc_type|status|authority|frontmatter_summary"
+    deep_qualification: route_domain_or_scope_match
+  knowledge_ledger:
+    discovery: active_knowledge_glob
+    route_source: knowledge.schema.yaml
+    include_patterns: knowledge/KN-*.md
+    index_fields: "path|sha256|knowledge_id|claim|scope|lifecycle|authority|carrier_refs"
+    deep_qualification: active_scope_or_explicit_trace
+  harness_inventory:
+    discovery: harness_sidecars
+    route_source: harness.schema.yaml
+    include_patterns: harness/**/*.yaml|harness/**/*.yml
+    index_fields: "path|sha256|artifact_id|type|target_path|ownership|status|source_kn_ids|source_refs|parse_issues"
+    deep_qualification: selected_graph_connection
+  harness_document_closure:
+    discovery: harness_target_and_source_refs
+    route_source: harness.schema.yaml
+    include_patterns: protocol:harness.schema.yaml
+    index_fields: "path|sha256|edge_type|anchor"
+    deep_qualification: graph_closure_match
+
+catalog_status_values: [complete, metadata_truncated]
+exclusion_reason_values: [binary, dependency, generated, kg_isolation, outside_root, oversized, sensitive, symlink]
+edge_type_values: [document_link, harness_source, harness_target, knowledge_carrier]
+
+# Discovery safety and metadata budgets are policy tables. Runtime code reads
+# them here so the source catalog has no second directory or threshold list.
+discovery_policy:
+  metadata_header_bytes: 65536
+  maximum_source_bytes: 1048576
+  dependency_directories: "node_modules|vendor|third_party"
+  generated_directories: "build|dist|generated|coverage"
+  sensitive_segments: ".git|.ssh|secrets|credentials|private"
+  sensitive_file_names: ".env|.npmrc|.pypirc|credentials.json"
+  sensitive_extensions: ".pem|.key|.p12|.pfx|.sqlite|.db"
+  markdown_extensions: ".md"
+  sidecar_extensions: ".yaml|.yml"
+
+field_order:
+  - kind
+  - version
+  - indexed_at
+  - project_root
+  - task_sha256
+  - catalog_status
+  - source_counts
+  - entries
+  - edges
+  - exclusions
+  - omission_digest
+  - metadata_budget_bytes
+  - metadata_bytes_used
+
+record_field_order:
+  source_counts: "source_class|total|included|excluded"
+  entries: "source_id|source_class|path|sha256|title|line_count|doc_type|status|authority|domain_keys|summary|metadata|metadata_truncated"
+  edges: "from_source_id|to_source_id|edge_type|anchor"
+  exclusions: "source_class|path|reason|count"
+
+script_owned_fields: "kind|version|indexed_at|project_root|task_sha256|catalog_status|source_counts|entries|edges|exclusions|omission_digest|metadata_budget_bytes|metadata_bytes_used"
+
+fields:
+  kind: { type: enum, required: true, values: "kg.kickoff_context_index" }
+  version: { type: integer, required: true, values: "2" }
+  indexed_at: { type: timestamp, required: true }
+  project_root: { type: string, required: true }
+  task_sha256: { type: string, required: true, pattern: "^sha256:[a-f0-9]{64}$" }
+  catalog_status: { type: enum_from, required: true, values_from: catalog_status_values }
+  source_counts: { type: map_list, required: true, unique_by: source_class }
+  source_counts[].source_class: { type: enum_from, required: true, values_from: source_classes }
+  source_counts[].total: { type: integer, required: true, min: 0 }
+  source_counts[].included: { type: integer, required: true, min: 0 }
+  source_counts[].excluded: { type: integer, required: true, min: 0 }
+  entries: { type: map_list, required: true, unique_by: "source_id|path" }
+  entries[].source_id: { type: string, required: true, pattern: "^SRC-[A-F0-9]{12}$" }
+  entries[].source_class: { type: enum_from, required: true, values_from: source_classes }
+  entries[].path: { type: string, required: true }
+  entries[].sha256: { type: string, required: true, pattern: "^sha256:[a-f0-9]{64}$" }
+  entries[].title: { type: string_or_null, required: true }
+  entries[].line_count: { type: integer, required: true, min: 0 }
+  entries[].doc_type: { type: string_or_null, required: true }
+  entries[].status: { type: string, required: true }
+  entries[].authority: { type: string, required: true }
+  entries[].domain_keys: { type: string_list, required: true }
+  entries[].summary: { type: string_or_null, required: true }
+  entries[].metadata: { type: json, required: true }
+  entries[].metadata_truncated: { type: boolean, required: true }
+  edges: { type: map_list, required: true }
+  edges[].from_source_id: { type: string, required: true, pattern: "^SRC-[A-F0-9]{12}$" }
+  edges[].to_source_id: { type: string, required: true, pattern: "^SRC-[A-F0-9]{12}$" }
+  edges[].edge_type: { type: enum_from, required: true, values_from: edge_type_values }
+  edges[].anchor: { type: string_or_null, required: true }
+  exclusions: { type: map_list, required: true }
+  exclusions[].source_class: { type: string_or_null, required: true }
+  exclusions[].path: { type: string_or_null, required: true }
+  exclusions[].reason: { type: enum_from, required: true, values_from: exclusion_reason_values }
+  exclusions[].count: { type: integer, required: true, min: 1 }
+  omission_digest: { type: string, required: true, pattern: "^sha256:[a-f0-9]{64}$" }
+  metadata_budget_bytes: { type: integer, required: true, min: 1 }
+  metadata_bytes_used: { type: integer, required: true, min: 0 }

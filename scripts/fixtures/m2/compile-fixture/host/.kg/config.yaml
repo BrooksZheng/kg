@@ -1,0 +1,4 @@
+kind: kg.config
+version: 2
+observation_threshold: 3
+skills_path: .agents/skills

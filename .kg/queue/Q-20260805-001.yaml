@@ -1,0 +1,20 @@
+id: Q-20260805-001
+at: 2026-08-05T02:45:35Z
+kind: promotion
+category: project_contract
+claim: "Promote KN-0034: any table code branches on — rank orders, accepted versions, thresholds, policy matrices — must be read from its protocol file at runtime rather than re-declared in code."
+evidence:
+  - { type: observation, ref: OBS-20260803-007 }
+  - { type: observation, ref: OBS-20260803-009 }
+  - { type: observation, ref: OBS-20260804-001 }
+  - { type: test, ref: "test-v2 Part 4 v2_transaction_journal_resumes_and_revalidates" }
+  - { type: quote, ref: ".mission/kg-v2-refactor/feedback-r42.md D68: apply-compile-plan wrote version 2 journals while loadJournal hardcoded version === 1, so every v2 journal was unreadable and re-entrancy was silently broken." }
+options:
+  - "accept as project contract (activate KN-0034)"
+  - "keep as project_knowledge (advisory only)"
+  - "reject (retire KN-0034)"
+recommendation: "Accept. This is already the standing R-1 discipline and it has caught three defects in M4 alone, one of them (D68) a silent re-entrancy break that unit tests could not see. As advisory knowledge it would not license the protocol self-check to fail a build; as contract it does."
+entry: KN-0034
+source_observations: [OBS-20260803-007, OBS-20260803-009, OBS-20260804-001]
+resolution: accepted
+resolution_note: "Human delegated queue rulings to the compiler agent in-session (裁决有你帮我决定, 2026-07-31); delegation not scoped to a single round. Ruled per the recorded recommendation."

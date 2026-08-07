@@ -1,0 +1,14 @@
+id: OBS-20260805-010
+at: 2026-08-05T08:47:20Z
+source: task_outcome
+claim: "A per-round metric whose window is reset by a separate discretionary command will silently span multiple rounds; the reset must be tied to the round-closing action rather than left as a flag someone remembers to run."
+context:
+  task: "M5 backlog compile round"
+  paths:
+    - .agents/skills/kg-compile/scripts/report-metrics.mjs
+    - .kg/reports/
+evidence:
+  - { type: log, ref: "report-metrics reported 'subtraction ratio this round: 0/14' when this round added 6; the round action log still held the previous round's 8 adds because --clear-round was never run after it, and nothing in the report signalled that the window was wrong" }
+  - { type: quote, ref: "report-metrics.mjs:42 --clear-round is an explicit opt-in branch that exits before any metric is computed" }
+urgency: batch
+compiled_to_kn: KN-0048

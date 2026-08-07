@@ -1,0 +1,11 @@
+{
+  "kind": "kg.compile_plan",
+  "version": 1,
+  "items": [
+    {
+      "observation_id": "OBS-20260731-103",
+      "result_type": "no_change",
+      "reason": "KN-0001 already contains the same claim and scope."
+    }
+  ]
+}

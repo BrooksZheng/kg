@@ -1,0 +1,12 @@
+kind: kg.eval_kickoff_fixture
+version: 2
+task: "为 Payment 到 Order 的写入增加重试"
+project_root: scripts/fixtures/m1/project
+transcript: scripts/fixtures/m1/kickoff-transcript.json
+artifacts_root: scripts/fixtures/m1/kickoff-artifacts/conflict
+must_find:
+  - docs/decisions/0001-payment-order-event-bus.md
+  - docs/traps/payment-direct-write.md
+must_report:
+  - docs/decisions/0001-payment-order-event-bus.md
+distractors: [docs/unrelated/marketing.md]

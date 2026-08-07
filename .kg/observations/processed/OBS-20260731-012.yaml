@@ -1,0 +1,11 @@
+id: OBS-20260731-012
+at: 2026-07-31T10:00:00Z
+source: task_outcome
+claim: "Archived Runner fixtures must preserve raw Runner response bytes while rebasing absolute product paths by basename into an explicitly declared artifacts root guarded by canonical containment and symlink checks."
+context:
+  task: kg-v2-refactor-r25
+  paths: ["scripts/eval-*.mjs", "scripts/fixtures/**"]
+evidence:
+  - { type: diff, ref: "scripts/eval-spec.mjs archived product resolver and scripts/fixtures/m2/spec-0*/kickoff" }
+  - { type: test, ref: "node scripts/test-v2.mjs Part 6 all_six_m2_fixtures_pass_current_evaluators" }
+urgency: batch

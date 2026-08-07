@@ -1,0 +1,19 @@
+kind: kg.eval_kickoff_fixture
+version: 2
+task: "让 compile 通过路径别名或产物 symlink 更新整个 runbook"
+project_root: scripts/fixtures/m2/kickoff-03-project
+transcript: scripts/fixtures/m2/kickoff-03-transcript.json
+artifacts_root: scripts/fixtures/m2/kickoff-03-artifacts
+must_find:
+  - knowledge/KN-0002-compile-managed-runbooks-must-preserve-human.md
+  - docs/runbooks/compile-notes.md
+  - docs/accepted-compile-contract.md
+must_report:
+  - knowledge/KN-0002-compile-managed-runbooks-must-preserve-human.md
+# D47: KN-0001 was removed from distractors. Its filename
+# (existing-compile-baseline) sits inside the task's topical neighborhood, so
+# index-level irrelevance cannot be judged reliably (4/4 honest real sessions
+# deep-read it while correctly skipping the trap distractor below). A
+# distractor must be judgeable as irrelevant from index metadata alone.
+distractors:
+  - docs/traps/legacy-cache-key.md

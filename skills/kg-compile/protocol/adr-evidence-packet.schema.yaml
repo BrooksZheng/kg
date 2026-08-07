@@ -1,0 +1,21 @@
+# kg protocol: evaluator or runner supplied ADR evidence packet.
+
+kind: kg.adr_evidence_packet_schema
+version: 1
+record_kind: kg.adr_evidence_packet
+record_version: 1
+
+field_order:
+  - kind
+  - version
+  - candidates
+
+record_field_order:
+  candidates: "candidate_ref|evidence_refs"
+
+fields:
+  kind: { type: enum, required: true, values: "kg.adr_evidence_packet" }
+  version: { type: integer, required: true, values: "1" }
+  candidates: { type: map_list, required: true, min_items: 1, unique_by: candidate_ref }
+  candidates[].candidate_ref: { type: string, required: true }
+  candidates[].evidence_refs: { type: string_list, required: true, min_items: 1, unique: true }

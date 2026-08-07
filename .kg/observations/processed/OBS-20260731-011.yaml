@@ -1,0 +1,14 @@
+id: OBS-20260731-011
+at: 2026-07-31T07:24:43Z
+source: task_outcome
+claim: "Kickoff indexing must expand valid harness source_refs to existing Markdown entries and record missing targets as harness source_ref_issues without inventing entries."
+context:
+  task: "R2.4 D45 harness source_refs indexing repair"
+  paths:
+    - skills/kg-kickoff/scripts/gather-context.mjs
+    - "scripts/fixtures/m2/kickoff-03-artifacts/**"
+    - scripts/test-v2.mjs
+evidence:
+  - { type: test, ref: "node scripts/test-v2.mjs --part 5: sidecar_source_refs_enter_index_and_support_findings passed" }
+  - { type: test, ref: "node scripts/test-v2.mjs --part 5: missing_sidecar_source_ref_is_reported_without_hallucinated_entry passed" }
+urgency: batch

@@ -1,0 +1,11 @@
+id: OBS-20260805-003
+at: 2026-08-05T03:02:39Z
+source: task_outcome
+claim: "kg-kickoff index metadata extraction consumes document body bytes and stops enumeration when the shared byte budget is exhausted, allowing later eligible sources to disappear behind one global truncation flag."
+context:
+  task: kg-v2-refactor-m5-contract
+  paths: [skills/kg-kickoff/scripts/gather-context.mjs]
+evidence:
+  - { type: diff, ref: "skills/kg-kickoff/scripts/gather-context.mjs:247-262 reads each full file through readBudgeted and breaks the source loop at the limit" }
+urgency: batch
+compiled_to_kn: KN-0043

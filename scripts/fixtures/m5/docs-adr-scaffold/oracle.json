@@ -1,0 +1,48 @@
+{
+  "kind": "kg.evaluation_oracle",
+  "version": 1,
+  "fixture_id": "m5-docs-adr-scaffold",
+  "evaluator": "docs",
+  "expectations": [
+    {
+      "expectation_id": "eligible-candidate",
+      "level": "hard",
+      "criterion_id": null,
+      "assertion": "the queue ownership candidate satisfies all criteria",
+      "expected": "CAND-QUEUE-OWNERSHIP",
+      "derivation": "host/docs/decision-evidence.md#L6"
+    },
+    {
+      "expectation_id": "reversible-near-miss",
+      "level": "hard",
+      "criterion_id": null,
+      "assertion": "the reversible candidate fails hard_to_reverse",
+      "expected": "CAND-REVERSIBLE",
+      "derivation": "host/docs/decision-evidence.md#L9"
+    },
+    {
+      "expectation_id": "context-near-miss",
+      "level": "hard",
+      "criterion_id": null,
+      "assertion": "the self-explaining candidate fails context_not_in_code",
+      "expected": "CAND-CODE-CONTEXT",
+      "derivation": "host/docs/decision-evidence.md#L15"
+    },
+    {
+      "expectation_id": "tradeoff-near-miss",
+      "level": "hard",
+      "criterion_id": null,
+      "assertion": "the single-option candidate fails genuine_tradeoff",
+      "expected": "CAND-NO-TRADEOFF",
+      "derivation": "host/docs/decision-evidence.md#L21"
+    },
+    {
+      "expectation_id": "one-decision-draft",
+      "level": "hard",
+      "criterion_id": null,
+      "assertion": "human approval permits exactly one decision draft",
+      "expected": 1,
+      "derivation": "evidence/transcript.json#L5"
+    }
+  ]
+}

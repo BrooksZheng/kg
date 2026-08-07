@@ -1,0 +1,10 @@
+kind: kg.eval_spec_fixture
+version: 1
+project_root: scripts/fixtures/m1/project
+kickoff_fixture: scripts/fixtures/m1/kickoff.fixture.yaml
+transcript: scripts/fixtures/m1/kickoff-transcript.json
+synthesis: scripts/fixtures/m1/spec-synthesis.yaml
+expected_spec: scripts/fixtures/m1/expected/task-spec.md
+required_sections: "Context|Requirements|Constraints|References|Out of Scope|Acceptance Criteria|Open Questions|Session History"
+c1_zero_interview_score: 4
+forbid_user_questions: true

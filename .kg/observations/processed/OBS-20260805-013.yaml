@@ -1,0 +1,16 @@
+id: OBS-20260805-013
+at: 2026-08-05T09:15:42Z
+source: task_outcome
+claim: "A degenerate line range and a single-line anchor denote the same location, so a writer that accepts both without canonicalizing hands downstream checkers two spellings of one fact and they reject each other's."
+context:
+  task: "R5.4 G-A1 real session"
+  paths:
+    - skills/kg-scan/scripts/write-agent-report.mjs
+    - skills/kg-scan/SKILL.md
+    - scripts/eval-scan-agent.mjs
+evidence:
+  - { type: log, ref: "G-A1 attempt-02 failed all three deterministic checks; the agent's semantics were exactly correct — right contradiction pair, distractor excluded, refunds gap with runbook and reference missing — and it failed only because it wrote #L3-L3 where the source-derived oracle produces #L3" }
+  - { type: quote, ref: "skills/kg-scan/SKILL.md:174 'Use narrow #Lstart or #Lstart-Lend anchors' — the agent followed the instruction it was given" }
+  - { type: quote, ref: "protocol/scan-agent-report.schema.yaml:57 source_refs is an unpatterned string_list, so nothing rejects the range spelling at write time" }
+urgency: batch
+compiled_to_kn: KN-0050

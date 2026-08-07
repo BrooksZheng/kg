@@ -1,0 +1,16 @@
+artifact_id: HAR-R42-MANAGED
+type: markdown_document
+path: docs/runbooks/managed.md
+ownership: managed
+status: active
+source_kn_ids: []
+source_refs: ["docs/accepted-r42.md#L14"]
+content_hash: sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+machine_segment_hash: sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+human_segment_hash: null
+outside_hash: sha256:81d9a961854c7b5e156a56ea7b0b9fb340d48435de3c01e3ae2cc0e47c520fcb
+proposal_id: null
+candidate_path: null
+generator_version: kg-compile/2.0.0-m2
+last_verified: 2026-08-03
+update_policy: automatic

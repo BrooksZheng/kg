@@ -1,0 +1,15 @@
+id: OBS-20260731-001
+at: 2026-07-31T03:15:49Z
+source: task_outcome
+claim: "Brownfield bootstrap plans must bind evidence line references to the inventory-time source snapshot; inventory records per-file hashes and bootstrap revalidates them before rendering so source edits cannot silently retarget facts."
+context:
+  task: kg-v2-r21-docs-bootstrap
+  paths:
+    - scripts/lib/repository.mjs
+    - skills/kg-docs/scripts/bootstrap.mjs
+    - scripts/test-v2.mjs
+evidence:
+  - { type: diff, ref: "scripts/lib/repository.mjs and skills/kg-docs/scripts/bootstrap.mjs" }
+  - { type: test, ref: "node scripts/test-v2.mjs --part 2 case reject_source_drift_after_inventory" }
+urgency: batch
+compiled_to_kn: KN-0023

@@ -1,0 +1,11 @@
+kind: kg.kickoff_conflicts
+version: 2
+recorded_at: 2026-08-06T07:11:34.185Z
+session_id: KSESSION-B791B7C94249
+assessment: no_conflict
+conflicts: []
+no_conflict_reason_refs:
+  - "docs/decisions/0001-payment-order-event-bus.md#L15"
+  - "docs/decisions/0001-payment-order-event-bus.md#L19"
+  - "docs/traps/payment-direct-write.md#L18"
+  - "knowledge/KN-0001-payment-boundary.md#L3"

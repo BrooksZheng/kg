@@ -1,298 +1,327 @@
-// Install kg into a host repository. Idempotent: re-running never duplicates
-// the anchor block, never overwrites an existing config, and refreshes
-// discovery wiring in place.
-//
-// Usage:
-//   node skills/kg-init/scripts/install.mjs [host-root] [--copy] \
-//     [--threshold N] [--budget N] [--docs-profile PROFILE] \
-//     [--project-stage STAGE]
-//
-//   host-root    defaults to $KG_ROOT or cwd
-//   --copy       copy skills into .agents/skills/ instead of symlinking
-//                (use when the host cannot reference the plugin checkout,
-//                e.g. vendoring kg into a repo that ships without it)
-//   --threshold  observation_threshold for a fresh config (default 5)
-//   --budget     agents_block_budget_lines for a fresh config (default 30)
-//   --docs-profile  none | lean | standard (default none for compatibility)
-//   --project-stage greenfield | brownfield (default greenfield)
-//
-// What it does:
-//   1. .kg/ tree: config.yaml (fresh installs only), observations/,
-//      observations/processed/, queue/, reports/ — plus knowledge/.
-//   2. AGENTS.md managed block: plants <!-- kg:begin/end --> anchors (creates
-//      the file if absent, appends if present — content outside the anchors
-//      is never touched) and renders the resident block.
-//   3. Platform ignore (best-effort secondary defense): adds `.kg/` to
-//      .cursorignore. The PRIMARY defense is the hard rule inside the block.
-//   4. Platform discovery: Cursor finds skills under .agents/skills/ —
-//      symlink (default) or copy each kg skill there. Codex needs no wiring:
-//      it reaches the skills through the AGENTS.md block pointers.
+// Install kg into a host repository after machine classification.
 
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { kyaml, host, agentsBlock } from "./_lib.mjs";
-
-const args = process.argv.slice(2);
-const copyMode = args.includes("--copy");
-function flagValue(name, fallback) {
-  const i = args.indexOf(name);
-  if (i < 0) return fallback;
-  const v = Number.parseInt(args[i + 1], 10);
-  if (!Number.isInteger(v) || v <= 0) host.fail(`${name} needs a positive integer`);
-  return v;
-}
-function enumFlag(name, fallback, allowed) {
-  const i = args.indexOf(name);
-  if (i < 0) return fallback;
-  const value = args[i + 1];
-  if (!allowed.includes(value)) host.fail(`${name} must be one of: ${allowed.join(" | ")}`);
-  return value;
-}
-const threshold = flagValue("--threshold", host.CONFIG_DEFAULTS.observation_threshold);
-const budget = flagValue("--budget", host.CONFIG_DEFAULTS.agents_block_budget_lines);
-const docsProfile = enumFlag("--docs-profile", "none", ["none", "lean", "standard"]);
-const projectStage = enumFlag("--project-stage", "greenfield", ["greenfield", "brownfield"]);
-const valueFlags = new Set(["--threshold", "--budget", "--docs-profile", "--project-stage"]);
-const positional = args.filter((a, i) => !a.startsWith("--") && !valueFlags.has(args[i - 1]));
-const hostRoot = path.resolve(positional[0] ?? process.env.KG_ROOT ?? process.cwd());
-
-if (!fs.existsSync(hostRoot)) host.fail(`host root does not exist: ${hostRoot}`);
+import { kyaml, host } from "./_lib.mjs";
+import { detectMigration, ensureAgentsV2Text, MigrationError, SKILL_NAMES } from "./migration-lib.mjs";
 
 const SCRIPTS_DIR = path.dirname(fileURLToPath(import.meta.url));
 const SKILL_ROOT = path.resolve(SCRIPTS_DIR, "..");
 const PLUGIN_ROOT = path.resolve(SCRIPTS_DIR, "..", "..", "..");
-const DOC_TEMPLATES_DIR = path.join(SKILL_ROOT, "assets", "project-docs");
-const SKILL_NAMES = ["kg-init", "kg-observe", "kg-compile", "kg-scan"];
-const paths = host.kgPaths(hostRoot);
-const log = (msg) => console.log(`kg: ${msg}`);
+const DOCS_README_SOURCE = path.join(SKILL_ROOT, "assets", "project-docs", "docs", "README.md");
+const PROFILE_DIRECTORIES = {
+  none: [],
+  lean: ["docs", "docs/architecture", "docs/decisions"],
+  standard: [
+    "docs",
+    "docs/architecture",
+    "docs/decisions",
+    "docs/rfcs",
+    "docs/api",
+    "docs/standards",
+    "docs/runbooks",
+    "docs/traps",
+    "docs/domain",
+    "docs/proposals",
+  ],
+};
+const MANAGED_EMPTY_DIRECTORIES = [
+  ".kg",
+  ".kg/observations",
+  ".kg/observations/processed",
+  ".kg/queue",
+  ".kg/reports",
+  ".kg/migration",
+  "knowledge",
+  "harness/artifacts",
+  "harness/skills",
+  "harness/scripts",
+];
+const log = (message) => console.log(`kg: ${message}`);
 
-// --- 1. directory tree -------------------------------------------------------
+function fail(message) {
+  throw new MigrationError(message);
+}
 
-for (const dir of [paths.kg, paths.observations, paths.processed, paths.queue, paths.reports, paths.knowledge]) {
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-    log(`created ${path.relative(hostRoot, dir)}/`);
+function parseArgs(argv) {
+  const parsed = {
+    copy: false,
+    threshold: host.CONFIG_DEFAULTS.observation_threshold,
+    docsProfile: "none",
+    projectStageHint: null,
+    root: null,
+  };
+  const valueFlags = new Set(["--threshold", "--docs-profile", "--project-stage"]);
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg === "--copy") {
+      parsed.copy = true;
+      continue;
+    }
+    if (valueFlags.has(arg)) {
+      const value = argv[index + 1];
+      if (!value || value.startsWith("--")) fail(`${arg} needs a value`);
+      if (arg === "--threshold") {
+        const threshold = Number.parseInt(value, 10);
+        if (!Number.isInteger(threshold) || threshold <= 0) fail("--threshold needs a positive integer");
+        parsed.threshold = threshold;
+      }
+      if (arg === "--docs-profile") {
+        if (!Object.hasOwn(PROFILE_DIRECTORIES, value)) fail("--docs-profile must be one of: none | lean | standard");
+        parsed.docsProfile = value;
+      }
+      if (arg === "--project-stage") {
+        if (!["greenfield", "brownfield"].includes(value)) {
+          fail("--project-stage must be one of: greenfield | brownfield");
+        }
+        parsed.projectStageHint = value;
+      }
+      index += 1;
+      continue;
+    }
+    if (arg.startsWith("--")) fail(`unknown option: ${arg}`);
+    if (parsed.root !== null) fail("host root may be provided only once");
+    parsed.root = arg;
+  }
+  parsed.root = path.resolve(parsed.root ?? process.env.KG_ROOT ?? process.cwd());
+  return parsed;
+}
+
+function exists(target) {
+  try {
+    fs.lstatSync(target);
+    return true;
+  } catch (error) {
+    if (error?.code === "ENOENT") return false;
+    throw error;
   }
 }
 
-if (fs.existsSync(paths.config)) {
-  log("config.yaml exists — left untouched");
-} else {
+function ensureDirectory(root, relative) {
+  const target = path.join(root, ...relative.split("/"));
+  if (exists(target)) {
+    if (!fs.statSync(target).isDirectory()) fail(`${relative} exists and is not a directory`);
+    return false;
+  }
+  fs.mkdirSync(target, { recursive: true });
+  log(`created ${relative}/`);
+  return true;
+}
+
+function preflightDirectories(root, relatives) {
+  for (const relative of [...new Set(relatives)]) {
+    const target = path.join(root, ...relative.split("/"));
+    if (exists(target) && !fs.statSync(target).isDirectory()) {
+      fail(`${relative} exists and is not a directory`);
+    }
+  }
+}
+
+function installResult(detection, status, nextAction) {
+  return {
+    kind: "kg.install_result",
+    version: 2,
+    root: detection.root,
+    classification: detection.classification,
+    status,
+    next_action: nextAction,
+    mutated: false,
+    problems: detection.problems,
+  };
+}
+
+function blockForClassification(detection) {
+  if (detection.classification === "v1") {
+    console.log(JSON.stringify(installResult(detection, "phase0_required", "generate_migration_plan"), null, 2));
+    process.exitCode = 2;
+    return true;
+  }
+  if (detection.classification === "partial_broken") {
+    const nextAction = detection.requires_human ? "request_human" : "generate_repair_plan";
+    console.log(JSON.stringify(installResult(detection, "repair_required", nextAction), null, 2));
+    process.exitCode = 2;
+    return true;
+  }
+  return false;
+}
+
+function preflightSkillSources() {
+  for (const name of SKILL_NAMES) {
+    const source = path.join(PLUGIN_ROOT, "skills", name);
+    for (const required of ["SKILL.md", "scripts", "scripts/lib", "protocol"]) {
+      const target = path.join(source, ...required.split("/"));
+      const valid = required === "SKILL.md"
+        ? exists(target) && fs.statSync(target).isFile()
+        : exists(target) && fs.statSync(target).isDirectory();
+      if (!valid) fail(`plugin skill ${name} is missing ${required}: ${target}`);
+    }
+  }
+}
+
+function copyDirectory(source, destination) {
+  if (host.canonicalPath(source) === host.canonicalPath(destination)) {
+    fail(`refusing to copy a directory onto itself: ${source}`);
+  }
+  fs.rmSync(destination, { recursive: true, force: true });
+  fs.cpSync(source, destination, { recursive: true });
+}
+
+function wireAgentSkills(root, copyMode) {
+  const skillsDirectory = path.join(root, ".agents", "skills");
+  fs.mkdirSync(skillsDirectory, { recursive: true });
+  for (const name of SKILL_NAMES) {
+    const source = path.join(PLUGIN_ROOT, "skills", name);
+    const destination = path.join(skillsDirectory, name);
+    if (copyMode) {
+      copyDirectory(source, destination);
+      for (const [sourceParts, destinationParts] of [
+        [["scripts", "lib"], ["scripts", "lib"]],
+        [["protocol"], ["protocol"]],
+      ]) {
+        const sharedSource = path.join(PLUGIN_ROOT, ...sourceParts);
+        const embedded = path.join(destination, ...destinationParts);
+        if (exists(sharedSource)) copyDirectory(sharedSource, embedded);
+        else if (!exists(embedded)) fail(`cannot make ${name} self-contained: missing ${destinationParts.join("/")}`);
+      }
+      log(`copied skill ${name} -> .agents/skills/${name} (self-contained)`);
+      continue;
+    }
+    const target = path.relative(host.canonicalPath(skillsDirectory), host.canonicalPath(source));
+    fs.symlinkSync(target, destination);
+    log(`symlinked .agents/skills/${name} -> ${target}`);
+  }
+}
+
+function wireClaude(root) {
+  const claudeDirectory = path.join(root, ".claude");
+  const claudeFile = path.join(root, "CLAUDE.md");
+  if (!exists(claudeDirectory) && !exists(claudeFile)) return;
+  const agentsSkills = path.join(root, ".agents", "skills");
+  const claudeSkills = path.join(claudeDirectory, "skills");
+  fs.mkdirSync(claudeSkills, { recursive: true });
+  for (const name of SKILL_NAMES) {
+    const source = path.join(agentsSkills, name);
+    const destination = path.join(claudeSkills, name);
+    const target = path.relative(host.canonicalPath(claudeSkills), host.canonicalPath(source));
+    fs.symlinkSync(target, destination);
+    log(`symlinked .claude/skills/${name} -> ${target}`);
+  }
+  const existing = exists(claudeFile) ? fs.readFileSync(claudeFile, "utf8") : "";
+  if (!/^@AGENTS\.md[ \t]*$/m.test(existing)) {
+    const separator = existing === "" || existing.endsWith("\n") ? "" : "\n";
+    fs.writeFileSync(claudeFile, `${existing}${separator}${existing === "" ? "" : "\n"}@AGENTS.md\n`);
+    log(`${existing === "" ? "created" : "updated"} CLAUDE.md with @AGENTS.md import`);
+  }
+}
+
+function desiredCursorignore(root) {
+  const file = path.join(root, ".cursorignore");
+  const existing = exists(file) ? fs.readFileSync(file, "utf8") : "";
+  if (existing.split(/\r?\n/).some((line) => line.trim() === ".kg/")) return null;
+  const separator = existing === "" || existing.endsWith("\n") ? "" : "\n";
+  return `${existing}${separator}# kg: keep uncompiled pipeline state out of normal work context\n.kg/\n`;
+}
+
+function installFreshHost(args, detection) {
+  const root = detection.root.canonical;
+  preflightSkillSources();
+  const claudeMarked = exists(path.join(root, ".claude")) || exists(path.join(root, "CLAUDE.md"));
+  preflightDirectories(root, [
+    ...MANAGED_EMPTY_DIRECTORIES,
+    ...PROFILE_DIRECTORIES[args.docsProfile],
+    ".agents",
+    ".agents/skills",
+    ...(claudeMarked ? [".claude", ".claude/skills"] : []),
+  ]);
+  if (args.docsProfile !== "none" && (!exists(DOCS_README_SOURCE) || !fs.statSync(DOCS_README_SOURCE).isFile())) {
+    fail(`project document README template missing: ${DOCS_README_SOURCE}`);
+  }
+  const readme = path.join(root, "docs", "README.md");
+  if (args.docsProfile !== "none" && exists(readme) && !fs.statSync(readme).isFile()) {
+    fail("docs/README.md exists and is not a file");
+  }
+  const claudeFile = path.join(root, "CLAUDE.md");
+  if (exists(claudeFile) && !fs.statSync(claudeFile).isFile()) fail("CLAUDE.md exists and is not a file");
+  const agentsFile = path.join(root, "AGENTS.md");
+  const originalAgents = exists(agentsFile) ? fs.readFileSync(agentsFile, "utf8") : "";
+  const agents = ensureAgentsV2Text(originalAgents);
+  const cursorignore = desiredCursorignore(root);
+  const detectedStage = detection.classification === "greenfield" ? "greenfield" : "brownfield";
+
+  for (const relative of [...MANAGED_EMPTY_DIRECTORIES, ...PROFILE_DIRECTORIES[args.docsProfile]]) {
+    ensureDirectory(root, relative);
+  }
+
   const config = {
-    observation_threshold: threshold,
-    agents_block_budget_lines: budget,
+    kind: "kg.config",
+    version: 2,
+    observation_threshold: args.threshold,
     skills_path: ".agents/skills",
   };
   fs.writeFileSync(
-    paths.config,
-    "# kg pipeline configuration (KYAML). Edit freely; kg-init never overwrites.\n" + kyaml.stringify(config),
+    path.join(root, ".kg", "config.yaml"),
+    `# kg pipeline configuration (KYAML).\n${kyaml.stringify(config)}`,
+    { flag: "wx" },
   );
-  log(`wrote .kg/config.yaml (threshold ${threshold}, AGENTS budget ${budget})`);
-}
+  log(`wrote .kg/config.yaml (version 2, threshold ${args.threshold})`);
 
-// --- 2. direct-authoring project documents -------------------------------------
-
-const DOCUMENT_PROFILES = {
-  none: [],
-  lean: [
-    "docs/README.md",
-    "docs/architecture/overview.md",
-    "docs/decisions/README.md",
-    "docs/decisions/0000-template.md",
-    "docs/glossary.md",
-  ],
-  standard: [
-    "docs/README.md",
-    "docs/architecture/overview.md",
-    "docs/decisions/README.md",
-    "docs/decisions/0000-template.md",
-    "docs/glossary.md",
-    "docs/rfcs/README.md",
-    "docs/rfcs/0000-template.md",
-    "docs/standards/README.md",
-    "docs/development.md",
-  ],
-};
-
-if (docsProfile !== "none") {
-  if (!fs.existsSync(DOC_TEMPLATES_DIR)) host.fail(`project document templates missing: ${DOC_TEMPLATES_DIR}`);
-  const replacements = {
-    "{{PROJECT_NAME}}": path.basename(hostRoot),
-    "{{PROJECT_STAGE}}": projectStage,
-    "{{CREATED_DATE}}": new Date().toISOString().slice(0, 10),
-  };
-  for (const rel of DOCUMENT_PROFILES[docsProfile]) {
-    const src = path.join(DOC_TEMPLATES_DIR, rel);
-    const dest = path.join(hostRoot, rel);
-    if (!fs.existsSync(src)) host.fail(`project document template missing: ${src}`);
-    if (fs.existsSync(dest)) {
-      log(`${rel} exists; left untouched`);
-      continue;
+  if (args.docsProfile !== "none") {
+    if (!exists(readme)) {
+      const content = fs
+        .readFileSync(DOCS_README_SOURCE, "utf8")
+        .replaceAll("{{PROJECT_NAME}}", path.basename(root))
+        .replaceAll("{{PROJECT_STAGE}}", detectedStage)
+        .replaceAll("{{CREATED_DATE}}", new Date().toISOString().slice(0, 10));
+      fs.writeFileSync(readme, content, { flag: "wx" });
+      log(`created docs/README.md (${args.docsProfile} directory profile)`);
     }
-    let content = fs.readFileSync(src, "utf8");
-    for (const [from, to] of Object.entries(replacements)) content = content.replaceAll(from, to);
-    fs.mkdirSync(path.dirname(dest), { recursive: true });
-    fs.writeFileSync(dest, content);
-    log(`created ${rel} (${docsProfile} document profile)`);
   }
-}
 
-// --- 3. AGENTS.md anchors + render --------------------------------------------
-
-const { BEGIN, END } = agentsBlock;
-let agentsText = fs.existsSync(paths.agentsMd) ? fs.readFileSync(paths.agentsMd, "utf8") : null;
-if (agentsText === null) {
-  fs.writeFileSync(paths.agentsMd, `${BEGIN}\n${END}\n`);
-  log("created AGENTS.md with kg anchors");
-} else if (agentsText.includes(BEGIN) && agentsText.includes(END)) {
-  log("AGENTS.md anchors already present");
-} else if (agentsText.includes(BEGIN) || agentsText.includes(END)) {
-  host.fail("AGENTS.md has one anchor but not the other — repair it by hand, then re-run");
-} else {
-  const sep = agentsText.endsWith("\n") ? "\n" : "\n\n";
-  fs.writeFileSync(paths.agentsMd, `${agentsText}${sep}${BEGIN}\n${END}\n`);
-  log("appended kg anchors to existing AGENTS.md (existing content untouched)");
-}
-agentsBlock.applyBlock(hostRoot);
-
-// --- 4. platform ignore (secondary defense) ------------------------------------
-
-const cursorignore = path.join(hostRoot, ".cursorignore");
-const ignoreLine = ".kg/";
-const existing = fs.existsSync(cursorignore) ? fs.readFileSync(cursorignore, "utf8") : "";
-if (existing.split(/\r?\n/).some((l) => l.trim() === ignoreLine)) {
-  log(".cursorignore already covers .kg/");
-} else {
-  const sep = existing === "" || existing.endsWith("\n") ? "" : "\n";
-  fs.writeFileSync(
-    cursorignore,
-    existing + sep + "# kg: keep uncompiled pipeline state out of agent context (secondary defense;\n# the primary defense is the hard rule in the AGENTS.md kg block)\n.kg/\n",
-  );
-  log("added .kg/ to .cursorignore (best-effort secondary defense)");
-}
-
-// --- 5. platform discovery wiring -----------------------------------------------
-
-const agentsSkillsDir = path.join(hostRoot, ".agents", "skills");
-fs.mkdirSync(agentsSkillsDir, { recursive: true });
-
-// Canonical path identity: realpath when the path exists (so symlink aliases
-// of the same directory compare equal), lexical resolve as the fallback for
-// not-yet-existing destinations.
-function canonical(p) {
-  try {
-    return fs.realpathSync(p);
-  } catch {
-    return path.resolve(p);
+  if (agents.text !== originalAgents) {
+    fs.writeFileSync(agentsFile, agents.text);
+    log(`${originalAgents === "" ? "created" : "updated"} AGENTS.md with v2 project entry sections`);
   }
+  if (cursorignore !== null) {
+    fs.writeFileSync(path.join(root, ".cursorignore"), cursorignore);
+    log("added .kg/ to .cursorignore");
+  }
+  wireAgentSkills(root, args.copy);
+  wireClaude(root);
+
+  const verified = detectMigration(root);
+  if (verified.classification !== "v2") {
+    fail(`post-install verification failed with classification ${verified.classification}`);
+  }
+  if (args.projectStageHint !== null && args.projectStageHint !== detectedStage) {
+    log(`ignored --project-stage ${args.projectStageHint}; detector classified the host as ${detectedStage}`);
+  }
+  log(`install complete at ${root}; classification v2 verified`);
+  if (detection.bootstrap_recommended) log("bootstrap recommended: run kg-docs inventory and bootstrap in a separate session");
 }
 
-function copyDir(src, dest) {
-  // Never let a refresh destroy its own source (e.g. installer re-run from
-  // inside a vendored host, where PLUGIN_ROOT resolves into .agents/, or a
-  // src/dest reached through a symlink alias).
-  if (canonical(src) === canonical(dest)) {
-    host.fail(`refusing to copy a directory onto itself: ${src}`);
-  }
-  fs.rmSync(dest, { recursive: true, force: true });
-  fs.cpSync(src, dest, { recursive: true });
+function verifyV2Host(detection) {
+  const root = detection.root.canonical;
+  let created = 0;
+  preflightDirectories(root, MANAGED_EMPTY_DIRECTORIES);
+  for (const relative of MANAGED_EMPTY_DIRECTORIES) created += ensureDirectory(root, relative) ? 1 : 0;
+  const verified = detectMigration(root);
+  if (verified.classification !== "v2") fail(`v2 verification failed with classification ${verified.classification}`);
+  log(created === 0 ? "healthy v2 verified; no changes" : `healthy v2 verified; restored ${created} managed empty directories`);
 }
 
-for (const name of SKILL_NAMES) {
-  const src = path.join(PLUGIN_ROOT, "skills", name);
-  const dest = path.join(agentsSkillsDir, name);
-  if (!fs.existsSync(src)) host.fail(`plugin skill missing: ${src}`);
-  if (canonical(src) === canonical(dest)) {
-    // Re-run from inside a vendored install: the "plugin" IS the host's
-    // .agents/skills tree. Nothing to wire; deleting would self-destruct.
-    log(`vendored install already in place for ${name} — skipped`);
-    continue;
-  }
-  if (copyMode) {
-    copyDir(src, dest);
-    // Make the copied skill self-contained: embed shared lib + protocol where
-    // the _lib.mjs resolver's `./lib` fallback finds them (scripts/lib/ ->
-    // ../../protocol resolves to <skill>/protocol). In the plugin checkout the
-    // root copies are the source of truth and overlay whatever the skill dir
-    // carried; when installing FROM an already-vendored skill (no root
-    // scripts/lib/ next to PLUGIN_ROOT), the recursive copy above already
-    // brought the embedded copies along — just verify they arrived.
-    for (const [rootRel, destRel] of [
-      [["scripts", "lib"], ["scripts", "lib"]],
-      [["protocol"], ["protocol"]],
-    ]) {
-      const rootSrc = path.join(PLUGIN_ROOT, ...rootRel);
-      const embedded = path.join(dest, ...destRel);
-      if (fs.existsSync(rootSrc)) copyDir(rootSrc, embedded);
-      else if (!fs.existsSync(embedded)) host.fail(`cannot make ${name} self-contained: neither ${rootSrc} nor an embedded ${destRel.join("/")} copy exists`);
-    }
-    log(`copied skill ${name} -> .agents/skills/${name} (self-contained)`);
+try {
+  const args = parseArgs(process.argv.slice(2));
+  if (!exists(args.root) || !fs.statSync(args.root).isDirectory()) fail(`host root does not exist: ${args.root}`);
+  const detection = detectMigration(args.root);
+  if (blockForClassification(detection)) {
+    // The machine result above is the complete outcome for this invocation.
+  } else if (detection.classification === "v2") {
+    verifyV2Host(detection);
   } else {
-    let current = null;
-    try {
-      current = fs.readlinkSync(dest);
-    } catch {
-      if (fs.existsSync(dest)) host.fail(`.agents/skills/${name} exists and is not a symlink — remove it or use --copy`);
-    }
-    const target = path.relative(canonical(agentsSkillsDir), canonical(src));
-    if (current === target) {
-      log(`symlink .agents/skills/${name} already correct`);
-    } else {
-      fs.rmSync(dest, { recursive: true, force: true });
-      fs.symlinkSync(target, dest);
-      log(`symlinked .agents/skills/${name} -> ${target}`);
-    }
+    installFreshHost(args, detection);
   }
-}
-
-// --- 6. Claude Code wiring (only when the host shows Claude markers) ------------
-// Claude Code discovers skills under .claude/skills/ and reads CLAUDE.md, not
-// AGENTS.md. Wire both: symlink each skill from .claude/skills/ to the
-// canonical .agents/skills/ copy, and bridge the managed block via the
-// officially recommended `@AGENTS.md` import in CLAUDE.md.
-
-const claudeDir = path.join(hostRoot, ".claude");
-const claudeMd = path.join(hostRoot, "CLAUDE.md");
-if (fs.existsSync(claudeDir) || fs.existsSync(claudeMd)) {
-  const claudeSkillsDir = path.join(claudeDir, "skills");
-  fs.mkdirSync(claudeSkillsDir, { recursive: true });
-  for (const name of SKILL_NAMES) {
-    const canonicalSkill = path.join(agentsSkillsDir, name);
-    const dest = path.join(claudeSkillsDir, name);
-    if (fs.existsSync(dest)) {
-      // Anything already resolving to the canonical copy (e.g. a symlink
-      // planted by `npx skills add`) counts as wired, whatever its link text.
-      if (canonical(dest) === canonical(canonicalSkill)) {
-        log(`.claude/skills/${name} already wired`);
-        continue;
-      }
-      host.fail(`.claude/skills/${name} exists but does not resolve to .agents/skills/${name} — remove it, then re-run`);
-    }
-    const target = path.relative(canonical(claudeSkillsDir), canonical(canonicalSkill));
-    fs.symlinkSync(target, dest);
-    log(`symlinked .claude/skills/${name} -> ${target}`);
-  }
-
-  const claudeText = fs.existsSync(claudeMd) ? fs.readFileSync(claudeMd, "utf8") : null;
-  if (claudeText === null) {
-    fs.writeFileSync(claudeMd, "@AGENTS.md\n");
-    log("created CLAUDE.md importing AGENTS.md (Claude Code does not read AGENTS.md natively)");
-  } else if (claudeText.includes("AGENTS.md")) {
-    log("CLAUDE.md already references AGENTS.md");
-  } else {
-    const sep = claudeText.endsWith("\n") ? "" : "\n";
-    fs.writeFileSync(claudeMd, `${claudeText}${sep}\n@AGENTS.md\n`);
-    log("appended @AGENTS.md import to CLAUDE.md (existing content untouched)");
-  }
-}
-
-log(`install complete at ${hostRoot}`);
-if (docsProfile !== "none") {
-  log("project documents are ready under docs/; draft complete ADRs and RFCs there directly.");
-}
-if (projectStage === "brownfield") {
-  log("next: run the kg-scan skill to bootstrap architecture, API, glossary, and document inventory drafts from existing code.");
-} else {
-  log("next: work normally; record observations via kg-observe; compile when the threshold reminder fires.");
+} catch (error) {
+  console.error(`kg: error: ${error.message}`);
+  process.exitCode = 1;
 }

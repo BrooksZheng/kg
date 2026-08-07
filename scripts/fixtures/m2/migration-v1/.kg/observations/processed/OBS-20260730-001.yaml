@@ -1,0 +1,11 @@
+id: OBS-20260730-001
+at: 2026-07-30T00:00:00Z
+source: task_outcome
+claim: "The processed observation must survive migration unchanged."
+context:
+  task: migration-fixture
+  paths: ["docs/**"]
+evidence:
+  - { type: test, ref: "migration fixture processed observation" }
+urgency: batch
+compiled_to_kn: KN-0001

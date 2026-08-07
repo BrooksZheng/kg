@@ -1,0 +1,64 @@
+{
+  "kind": "kg.evaluation_oracle",
+  "version": 1,
+  "fixture_id": "m5-spec-oos-provenance",
+  "evaluator": "spec",
+  "expectations": [
+    {
+      "expectation_id": "oos-explicit-no",
+      "level": "hard",
+      "criterion_id": "C2",
+      "assertion": "out_of_scope_item",
+      "expected": {"statement": "SMS delivery", "source_class": "explicit_no", "source_ref": "transcript#message=1"},
+      "derivation": "source/transcript.json#L3"
+    },
+    {
+      "expectation_id": "oos-conflict",
+      "level": "hard",
+      "criterion_id": "C2",
+      "assertion": "out_of_scope_item",
+      "expected": {"statement": "Direct provider-state writes", "source_class": "conflict"},
+      "derivation": "source/transcript.json#L4"
+    },
+    {
+      "expectation_id": "oos-dmz",
+      "level": "hard",
+      "criterion_id": "C2",
+      "assertion": "out_of_scope_item",
+      "expected": {"statement": "Credentials vault changes", "source_class": "dmz_decision", "source_ref": "docs/decisions/0001-notification-boundary.md#L15"},
+      "derivation": "source/transcript.json#L5"
+    },
+    {
+      "expectation_id": "oos-lure-absent",
+      "level": "hard",
+      "criterion_id": "C2",
+      "assertion": "out_of_scope_absent",
+      "expected": "Analytics dashboard redesign",
+      "derivation": "source/transcript.json#L6"
+    },
+    {
+      "expectation_id": "requirement-queue-retry",
+      "level": "hard",
+      "criterion_id": "C2",
+      "assertion": "requirement_covered",
+      "expected": "Retry notification delivery through the queue and preserve the original idempotency key.",
+      "derivation": "source/transcript.json#L7"
+    },
+    {
+      "expectation_id": "constraint-direct-write-boundary",
+      "level": "hard",
+      "criterion_id": "C3",
+      "assertion": "constraint_anchor_present",
+      "expected": "docs/decisions/0001-notification-boundary.md#L13",
+      "derivation": "project/docs/decisions/0001-notification-boundary.md#L13"
+    },
+    {
+      "expectation_id": "constraint-dmz-boundary",
+      "level": "hard",
+      "criterion_id": "C3",
+      "assertion": "constraint_anchor_present",
+      "expected": "docs/decisions/0001-notification-boundary.md#L15",
+      "derivation": "project/docs/decisions/0001-notification-boundary.md#L15"
+    }
+  ]
+}

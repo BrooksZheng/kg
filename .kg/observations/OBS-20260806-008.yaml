@@ -1,0 +1,14 @@
+id: OBS-20260806-008
+at: 2026-08-06T15:23:15Z
+source: task_outcome
+claim: "Internal round and milestone codenames leak from planning documents into shipped error messages, where the reader has no way to resolve them; strip them at the boundary between the project process and the product."
+context:
+  task: "kg-v2-R6.4 pre-PR tidy"
+  paths:
+    - skills/kg-init/scripts/migration-lib.mjs
+    - skills/kg-compile/scripts/apply-compile-plan.mjs
+    - docs/architecture/overview.md
+evidence:
+  - { type: quote, ref: "migration-lib.mjs threw \"M2 migration requires a healthy v1 host\" and \"queue contains items that M2 cannot map\" at users of the installed plugin" }
+  - { type: log, ref: "grep for milestone codenames across shipped scripts found 11 sites in five files plus two stale claims in docs/, all written during the round that introduced them" }
+urgency: batch

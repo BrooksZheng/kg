@@ -1,0 +1,14 @@
+id: OBS-20260730-002
+at: 2026-07-30T09:39:00Z
+source: review
+claim: "All kg path-isolation guards must compare .kg path segments case-insensitively, including kickoff reads and evaluator file or citation checks."
+context:
+  task: kg-v2-refactor-m1-round-1-repair
+  paths:
+    - "skills/kg-kickoff/scripts/**"
+    - scripts/eval-kickoff.mjs
+    - scripts/eval-spec.mjs
+evidence:
+  - { type: test, ref: "R4 regression: gather-context rejected .KG/observations/x.yaml with exit 1" }
+urgency: batch
+compiled_to_kn: KN-0021

@@ -1,0 +1,13 @@
+id: OBS-20260805-014
+at: 2026-08-05T09:18:23Z
+source: agent_insight
+claim: "A resident index that emits one line per knowledge entry cannot coexist with a fixed line budget; the render layer must fold or tier before the ledger outgrows the surface, and the crossover has already happened in this repository."
+context:
+  task: "M6 preparation — dogfooding kg-scan against this repository"
+  paths: [AGENTS.md, knowledge/, protocol/scan.yaml]
+evidence:
+  - { type: log, ref: "AGENTS.md's managed block lists 18 entries and is 30 lines — exactly the A-4 target, zero headroom — while 47 entries are active; re-rendering one line per entry needs roughly 59 lines, about double the budget" }
+  - { type: log, ref: "kg-scan against this repository reports 47 legacy_v1_without_v2_trace findings, which is every active entry: the block has not been re-rendered since v1" }
+  - { type: quote, ref: "knowledge/KN-0013: the always-loaded managed block must stay a compact pointer index because instruction compliance degrades as the always-on count grows — the budget is not to be raised" }
+urgency: batch
+compiled_to_kn: KN-0051

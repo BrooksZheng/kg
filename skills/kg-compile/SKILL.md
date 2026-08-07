@@ -18,6 +18,69 @@ Read first: `protocol/routing.yaml` (verdict + categories + autonomy),
 (legal transitions). Scripts live in `skills/kg-compile/scripts/`; run them
 with `node <script>.mjs` from anywhere inside the host repo.
 
+## R4 carrier fence and action provenance
+
+Read `protocol/harness.schema.yaml`, `protocol/compile-plan.schema.yaml`,
+`protocol/compile-report.schema.yaml`, and `protocol/proposal-manifest.schema.yaml`
+before producing a plan. The protocol owns marker syntax, carrier references,
+ownership/update-policy compatibility, and `disposition_rank` ordering.
+
+`human_segment_hash` has two deliberately separate meanings:
+
+- Within one transaction, preflight records the raw human bytes and apply must
+  compare those bytes again. Any difference fails the whole item.
+- Across sessions, the sidecar value is only the last observed human-segment
+  hash. A disk value that differs from it is a normal refresh. The parser must
+  report the new observation and must never classify it as tamper.
+
+Compile update actions carry `actor`, `update_scope`, and `body_action` in the
+plan/report shape. When a human-authored body edit is detected, the future
+update transaction uses `update_scope: evidence_scope_refresh` and
+`body_action: preserved`: the evidence scope is refreshed and the human's
+prose is carried through untouched.
+
+## Deterministic plan/apply path
+
+This section overrides the older per-record publishing instructions below. The compiler agent produces one strict JSON plan. It
+never writes a KN, queue item, carrier, sidecar, processed observation, or
+report directly.
+
+1. Run `compile.mjs --root <host> --output <session-artifacts>/compile-context.json`.
+   Keep the context outside `.kg/`. The script records independent input
+   fingerprints for every pending observation, all KN entries, accepted
+   project documents, harness sidecars, and carrier targets.
+2. Read every file declared by the context. Submit one JSON
+   `kg.compile_plan` with a non-shell file-writing tool. Each observation item
+   must explicitly select exactly one result:
+   `publish_kn_and_carrier`, `queue_only`, or `no_change`.
+3. Run `apply-compile-plan.mjs --root <host> --context <context.json>
+   --plan <plan.json>`. Use `--check` for deterministic preflight or final
+   state verification. The apply script assigns IDs, timestamps, hashes,
+   lifecycle, paths, trace fields, queue record fields, and report paths.
+
+The plan top level is exactly `kind`, `version`, and `items`.
+
+- `publish_kn_and_carrier` has `observation_id`, `result_type`, `knowledge`,
+  and `carrier`. `knowledge` has `claim`, `category`, `scope`, `authority`,
+  `confidence`, and `body`. `carrier` has `artifact_id` and `content`.
+- `queue_only` has `observation_id`, `result_type`, and `queue`. `queue` has
+  `claim`, `evidence`, `options`, and `recommendation`.
+- `no_change` has `observation_id`, `result_type`, and `reason`.
+
+The legacy v1 input still supports one auto-tier `project_knowledge`
+observation to one active KN and one managed automatic Markdown block. Version
+2 plans additionally support update, merge, demote, retire, candidate,
+co-managed carriers, and content-addressed proposals. Human-owned targets
+with a zero compile-owned region fail preflight with the artifact id. Human
+review candidates remain inactive until their promotion queue item is ruled.
+
+The apply script calls `archive-observations.mjs` once per completed
+observation and records the exact arguments in the machine report. The report
+also records the standing limitation of the deterministic layer: it proves
+reference existence and managed-block hash consistency, but whether the
+rendered prose still says what its `source_kn_ids` claim is a semantic
+question, answered by the agent-assisted layer of `kg-scan`.
+
 ## Session procedure
 
 ### 1. Load inputs
@@ -109,10 +172,9 @@ live entry is contested, transition it to `conflicted`.
   `kind: promotion` queue item via `add-queue-item.mjs`. Never activate these
   yourself. For `executable_constraint`, put the concrete test/lint/CI
   proposal in the entry body.
-- **Always human-review**, whatever the category: any change to the AGENTS.md
-  managed block beyond re-rendering the index, and any proposal for a new
-  skill (e.g. a mature procedure graduating to a skill) — `kind: proposal`
-  queue item.
+- **Always human-review**, whatever the category: any proposal for a new
+  skill or script, and any change to a human-owned document. File a
+  `kind: proposal` queue item.
 - **Queue only** (`needs_human_decision`): `add-queue-item.mjs`; no entry.
 
 Lifecycle changes (promote after a human accepts, demote, retire, merge,
@@ -120,8 +182,12 @@ conflict) go through `transition-entry.mjs` — it machine-validates against
 `protocol/lifecycle.yaml`: `--regret` is required on demotion, and archiving
 from a live state (candidate/active/conflicted) requires `--superseded-by`
 (merge — the survivor's `supersedes` back-pointer is written for you) OR
-`--regret` (direct retire). If it rejects a transition, the transition is
-illegal; fix the plan, not the validator.
+  `--regret` (direct retire). If it rejects a transition, the transition is
+  illegal; fix the plan, not the validator.
+
+Queue rulings go through `resolve-queue-item.mjs <Q-id> <accepted|rejected>`.
+The writer rejects duplicate keys, unknown fields, and second rulings, then
+rebuilds the record in the queue protocol field order.
 
 Apply pending human rulings at the start of publishing: for each `.kg/queue/`
 item whose `resolution` is no longer `pending`, execute the ruling
@@ -137,7 +203,7 @@ entries that proved wrong (demote with `--regret`), deprecated entries past
 their usefulness (retire to archived), prose entries that became machine
 constraints (propose the constraint, then retire the prose once it lands).
 
-### 5. Report, render, archive
+### 5. Report and archive
 
 1. Compute metrics: `node .../report-metrics.mjs` (embed its block verbatim).
 2. Write `.kg/reports/REPORT-<YYYYMMDD>-<n>.md` in the user's language:
@@ -147,14 +213,16 @@ constraints (propose the constraint, then retire the prose once it lands).
    pending `.kg/queue/` item with its recommendation. The checklist is the ASYNC
    path; when a human is present, run the ruling interview (§6) instead of
    ending on a checklist dump.
-3. Re-render the AGENTS.md managed block: `node .../render-agents.mjs`. If it
-   fails the line budget, that is the context-bloat alarm — go back to step 4
-   and subtract more; do not raise the budget.
-4. Archive processed observations:
-   `node .../archive-observations.mjs <OBS-id>...` (or `--all` if every
-   pending observation was handled). Malformed/deferred ones stay in the
-   inbox.
-5. Clear the round log: `node .../report-metrics.mjs --clear-round`.
+3. Archive processed observations:
+   run `node .../archive-observations.mjs --observation <OBS-id>
+   --compiled-to-kn <KN-id>` for an observation that produced a KN. For
+   `no_change` or `needs_human_decision`, run the same command with
+   `--verdict <routing-verdict>` in place of `--compiled-to-kn`. The script
+   loads legal no-KN verdicts from `protocol/routing.yaml`, writes a canonical
+   processed copy without `compiled_to_kn`, and then removes the untouched
+   pending original. Exactly one result option is required.
+   Malformed or deferred observations stay in the inbox.
+4. Clear the round log: `node .../report-metrics.mjs --clear-round`.
 
 ### 6. Ruling interview (when a human is present)
 
@@ -172,8 +240,8 @@ telling the human to go read `.kg/queue/`:
   "Defer" — or no answer — is always legal: the item stays pending; never
   re-ask or broaden a deferred item in the same session.
 - Execute each ruling immediately: set `resolution`, record the human's
-  exact words in `resolution_note`, run `transition-entry.mjs`, re-render,
-  re-validate, and show the outcome before moving to the next item.
+  exact words in `resolution_note`, run `transition-entry.mjs`, re-validate,
+  and show the outcome before moving to the next item.
 - Unattended sessions: skip the interview — the report's ruling checklist
   and the queue files are the async path. A human can rule later in ANY
   session: an agent asked to "process the kg queue" (「处理裁决队列」)
@@ -190,13 +258,12 @@ exactly how regret gets recorded.
 
 ## Hard rules
 
-- Never edit files in `.kg/observations/` — the inbox is append-only; you
-  only move processed files via `archive-observations.mjs`.
+- Never edit files in `.kg/observations/`. The inbox is append-only.
+  Processed copies are created only through `archive-observations.mjs`.
 - Never treat ordinary, draft, or proposed project documents as accepted
   authority.
 - Never require an observation before a human or agent can draft a complete
   ADR, RFC, MVP plan, or technical document under `docs/`.
-- Never hand-edit the AGENTS.md managed block; edit entries and re-render.
 - Never bypass `transition-entry.mjs` by editing `lifecycle:` by hand.
 - Conflicts always reach the queue: authority ranks, humans rule.
 - In a ruling interview, evidence is quoted verbatim, never paraphrased;

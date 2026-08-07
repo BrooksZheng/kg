@@ -1,0 +1,23 @@
+# kg protocol: Task Spec Schema.
+# The frontmatter contract is distinct from kg.project_document. Body rules
+# are checked by kg-spec because they describe Markdown structure.
+
+kind: kg.task_spec_schema
+version: 1
+
+document_kind: kg.task_spec
+file_pattern: "docs/specs/TASK-YYYYMMDD-NNN.md"
+
+field_order: [kind, task_id, created_at, status]
+
+fields:
+  kind: { type: enum, required: true, values: "kg.task_spec" }
+  task_id: { type: string, required: true, pattern: "^TASK-[0-9]{8}-[0-9]{3}$" }
+  created_at: { type: timestamp, required: true }
+  status: { type: enum, required: true, values: "draft|confirmed|done|abandoned" }
+
+required_sections: [Context, Requirements, Constraints, References, Out of Scope, Acceptance Criteria, Open Questions, Session History]
+constraints_columns: [Constraint, Source, Source Status, Authority]
+constraint_source_path_pattern: "^(docs/.+\\.md|knowledge/KN-[^/]+\\.md|AGENTS\\.md)#L[1-9][0-9]*$"
+acceptance_format: "GIVEN <precondition> WHEN <action> THEN <outcome>"
+implementation_paths_section: References

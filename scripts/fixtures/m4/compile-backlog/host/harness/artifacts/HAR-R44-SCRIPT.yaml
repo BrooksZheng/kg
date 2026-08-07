@@ -1,0 +1,16 @@
+artifact_id: HAR-R44-SCRIPT
+type: script_proposal
+path: scripts/generated/backlog.mjs
+ownership: human
+status: active
+source_kn_ids: []
+source_refs: ["docs/accepted-r42.md#L14"]
+content_hash: sha256:0000000000000000000000000000000000000000000000000000000000000000
+machine_segment_hash: sha256:0000000000000000000000000000000000000000000000000000000000000000
+human_segment_hash: null
+outside_hash: sha256:0000000000000000000000000000000000000000000000000000000000000000
+proposal_id: null
+candidate_path: null
+generator_version: kg-compile/2.0.0-m2
+last_verified: 2026-08-04
+update_policy: proposal_only

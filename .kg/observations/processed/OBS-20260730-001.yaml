@@ -1,0 +1,15 @@
+id: OBS-20260730-001
+at: 2026-07-30T08:58:05Z
+source: agent_insight
+claim: "Project-relative allowlist readers must reject raw .. path segments before normalization; normalization can collapse docs/../file into an in-root path and bypass the named surface boundary."
+context:
+  task: kg-v2-m1
+  paths:
+    - skills/kg-kickoff/scripts/gather-context.mjs
+    - skills/kg-spec/scripts/produce-spec.mjs
+    - scripts/eval-kickoff.mjs
+    - scripts/eval-spec.mjs
+evidence:
+  - { type: diff, ref: "M1 security review added raw segment checks before path.posix.normalize in context gathering, spec anchors, and evaluators." }
+urgency: batch
+compiled_to_kn: KN-0020

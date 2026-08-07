@@ -1,0 +1,13 @@
+id: OBS-20260731-006
+at: 2026-07-31T06:56:05Z
+source: task_outcome
+claim: "Kickoff finding validation must require the same normalized source path in the context index, deep context, runner file_reads, and the successful deep tool event."
+context:
+  task: kg-v2-r24-kickoff-evaluator
+  paths:
+    - scripts/eval-kickoff.mjs
+    - scripts/test-v2.mjs
+    - skills/kg-kickoff/scripts/gather-context.mjs
+evidence:
+  - { type: test, ref: "Part 5 structured_negative_cases_fail_the_target_criteria rejects unread finding sources and single-source KN/carrier sessions" }
+urgency: batch

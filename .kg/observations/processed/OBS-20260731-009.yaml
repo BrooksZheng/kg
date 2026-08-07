@@ -1,0 +1,13 @@
+id: OBS-20260731-009
+at: 2026-07-31T06:56:06Z
+source: test_failure
+claim: "The M2 compile fixture sidecar source ref docs/accepted-compile-contract.md#L15 exceeds the current 14-line source document, while M2 validation checks only source path existence."
+context:
+  task: kg-v2-r24-compiled-kickoff-fixture
+  paths:
+    - scripts/fixtures/m2/compile-fixture/host/docs/accepted-compile-contract.md
+    - scripts/fixtures/m2/compile-fixture/host/harness/artifacts/HAR-COMPILE-NOTES.yaml
+    - "scripts/fixtures/m2/kickoff-03-project/**"
+evidence:
+  - { type: log, ref: "R2.4 Part 5 first failed with kickoff harness entry 0 invalid: line_exceeds when the source ref line was validated" }
+urgency: batch

@@ -4,7 +4,7 @@
 // source of truth: this module interprets their `fields` specs; it does not
 // hardcode field lists.
 //
-// Run `node scripts/lib/protocol.mjs` for a self-check that all six protocol
+// Run `node scripts/lib/protocol.mjs` for a self-check that all protocol
 // files parse and are internally coherent.
 
 import fs from "node:fs";
@@ -23,9 +23,40 @@ export function loadProtocolFile(name) {
 export const loadObservationSchema = () => loadProtocolFile("observation.schema.yaml");
 export const loadKnowledgeSchema = () => loadProtocolFile("knowledge.schema.yaml");
 export const loadProjectDocumentSchema = () => loadProtocolFile("project-document.schema.yaml");
+export const loadHarnessSchema = () => loadProtocolFile("harness.schema.yaml");
+export const loadCompilePlanSchema = () => loadProtocolFile("compile-plan.schema.yaml");
+export const loadCompileReportSchema = () => loadProtocolFile("compile-report.schema.yaml");
+export const loadQueueSchema = () => loadProtocolFile("queue.schema.yaml");
+export const loadProposalManifestSchema = () => loadProtocolFile("proposal-manifest.schema.yaml");
+export const loadTaskSpecSchema = () => loadProtocolFile("task-spec.schema.yaml");
+export const loadDocumentTaxonomy = () => loadProtocolFile("document-taxonomy.yaml");
+export const loadScanPolicy = () => loadProtocolFile("scan.yaml");
+export const loadScanReportSchema = () => loadProtocolFile("scan-report.schema.yaml");
 export const loadLifecycle = () => loadProtocolFile("lifecycle.yaml");
 export const loadAuthority = () => loadProtocolFile("authority.yaml");
 export const loadRouting = () => loadProtocolFile("routing.yaml");
+export const loadKickoffIndexSchema = () => loadProtocolFile("kickoff-index.schema.yaml");
+export const loadKickoffScopeSchema = () => loadProtocolFile("kickoff-scope.schema.yaml");
+export const loadKickoffDeepSchema = () => hydrateProtocolReferences(loadProtocolFile("kickoff-deep.schema.yaml"));
+export const loadKickoffSessionSchema = () => loadProtocolFile("kickoff-session.schema.yaml");
+export const loadKickoffTurnSchema = () => loadProtocolFile("kickoff-turn.schema.yaml");
+export const loadKickoffConflictSchema = () => loadProtocolFile("kickoff-conflict.schema.yaml");
+export const loadSpecSynthesisSchema = () => loadProtocolFile("spec-synthesis.schema.yaml");
+export const loadAdrAssessmentSchema = () => loadProtocolFile("adr-assessment.schema.yaml");
+export const loadAdrEvidencePacketSchema = () => loadProtocolFile("adr-evidence-packet.schema.yaml");
+export const loadDocsScaffoldRequestSchema = () => hydrateProtocolReferences(loadProtocolFile("docs-scaffold-request.schema.yaml"));
+export const loadDocsScaffoldResultSchema = () => loadProtocolFile("docs-scaffold-result.schema.yaml");
+export const loadScanAgentReportSchema = () => loadProtocolFile("scan-agent-report.schema.yaml");
+
+function hydrateProtocolReferences(schema) {
+  const hydrated = { ...schema };
+  for (const [key, value] of Object.entries(schema)) {
+    if (typeof value === "string" && value.endsWith(".yaml")) {
+      hydrated[key] = loadProtocolFile(value);
+    }
+  }
+  return hydrated;
+}
 
 // --- generic record validation against a schema's `fields` specs -----------
 // Spec paths: `field` (top level), `field.sub` (one-level nested map),
@@ -50,7 +81,7 @@ export function validateRecord(record, schema) {
       topSpecs[specPath] = spec;
     }
   }
-  checkMap(record, topSpecs, "", errors, { subSpecs, itemSpecs });
+  checkMap(record, topSpecs, "", errors, { schema, subSpecs, itemSpecs });
   return errors;
 }
 
@@ -61,7 +92,7 @@ function checkMap(obj, specs, prefix, errors, ctx) {
   for (const [key, spec] of Object.entries(specs)) {
     const label = `${prefix}${key}`;
     const value = obj[key];
-    if (value === undefined || (value === null && spec.type !== "string_or_null" && spec.type !== "map")) {
+    if (value === undefined || (value === null && !["string_or_null", "string_or_list_or_null", "map", "json"].includes(spec.type))) {
       if (spec.required) errors.push(`${label}: required field is missing`);
       continue;
     }
@@ -71,6 +102,10 @@ function checkMap(obj, specs, prefix, errors, ctx) {
 
 function checkValue(value, spec, fieldKey, label, errors, ctx) {
   switch (spec.type) {
+    case "string_allow_empty": {
+      if (typeof value !== "string") errors.push(`${label}: must be a string`);
+      return;
+    }
     case "string":
     case "string_or_null": {
       if (value === null) {
@@ -83,6 +118,18 @@ function checkValue(value, spec, fieldKey, label, errors, ctx) {
       }
       if (spec.pattern && !new RegExp(spec.pattern).test(value)) {
         errors.push(`${label}: \`${value}\` does not match ${spec.pattern}`);
+      }
+      return;
+    }
+    case "string_or_list_or_null": {
+      if (value === null) return;
+      const values = Array.isArray(value) ? value : [value];
+      if (values.length === 0 || !values.every((item) => typeof item === "string" && item.trim() !== "")) {
+        errors.push(`${label}: must be a knowledge id string, list, or null`);
+        return;
+      }
+      if (spec.pattern && !values.every((item) => new RegExp(spec.pattern).test(item))) {
+        errors.push(`${label}: contains an invalid value`);
       }
       return;
     }
@@ -105,6 +152,20 @@ function checkValue(value, spec, fieldKey, label, errors, ctx) {
       }
       return;
     }
+    case "enum_from": {
+      const source = resolveSchemaValue(ctx.schema, spec.values_from);
+      const allowed = Array.isArray(source) ? source.map(String) : Object.keys(source ?? {});
+      if (allowed.length === 0) {
+        errors.push(`${label}: schema bug — values_from \`${spec.values_from}\` is empty or missing`);
+      } else if (typeof value !== "string" || !allowed.includes(value)) {
+        errors.push(`${label}: \`${value}\` is not one of protocol table ${spec.values_from}: ${allowed.join(" | ")}`);
+      }
+      return;
+    }
+    case "boolean": {
+      if (typeof value !== "boolean") errors.push(`${label}: must be a boolean`);
+      return;
+    }
     case "float": {
       if (typeof value !== "number" || Number.isNaN(value)) {
         errors.push(`${label}: must be a number`);
@@ -114,10 +175,38 @@ function checkValue(value, spec, fieldKey, label, errors, ctx) {
       if (spec.max !== undefined && value > spec.max) errors.push(`${label}: above maximum ${spec.max}`);
       return;
     }
+    case "integer": {
+      if (!Number.isInteger(value)) {
+        errors.push(`${label}: must be an integer`);
+        return;
+      }
+      if (spec.values !== undefined && !String(spec.values).split("|").includes(String(value))) {
+        errors.push(`${label}: \`${value}\` is not one of: ${String(spec.values).split("|").join(" | ")}`);
+      }
+      if (spec.min !== undefined && value < spec.min) errors.push(`${label}: below minimum ${spec.min}`);
+      if (spec.max !== undefined && value > spec.max) errors.push(`${label}: above maximum ${spec.max}`);
+      return;
+    }
     case "string_list": {
       if (!Array.isArray(value) || !value.every((v) => typeof v === "string" && v.trim() !== "")) {
         errors.push(`${label}: must be a list of non-empty strings`);
+        return;
       }
+      const pattern = spec.pattern ?? resolveSchemaValue(ctx.schema, spec.pattern_from);
+      if (spec.pattern_from && typeof pattern !== "string") {
+        errors.push(`${label}: schema bug — pattern_from \`${spec.pattern_from}\` is empty or missing`);
+        return;
+      }
+      if (pattern && !value.every((item) => new RegExp(pattern).test(item))) {
+        errors.push(`${label}: contains a value that does not match ${pattern}`);
+      }
+      if (spec.min_items !== undefined && value.length < spec.min_items) {
+        errors.push(`${label}: needs at least ${spec.min_items} item(s)`);
+      }
+      if (spec.max_items !== undefined && value.length > spec.max_items) {
+        errors.push(`${label}: allows at most ${spec.max_items} item(s)`);
+      }
+      if (spec.unique === true && new Set(value).size !== value.length) errors.push(`${label}: must not contain duplicates`);
       return;
     }
     case "map": {
@@ -138,15 +227,45 @@ function checkValue(value, spec, fieldKey, label, errors, ctx) {
       if (spec.min_items !== undefined && value.length < spec.min_items) {
         errors.push(`${label}: needs at least ${spec.min_items} item(s)`);
       }
+      if (spec.max_items !== undefined && value.length > spec.max_items) {
+        errors.push(`${label}: allows at most ${spec.max_items} item(s)`);
+      }
+      for (const uniqueField of String(spec.unique_by ?? "").split("|").filter(Boolean)) {
+        const values = value.map((item) => item[uniqueField]).filter((item) => item !== undefined);
+        if (new Set(values).size !== values.length) errors.push(`${label}: ${uniqueField} must be unique`);
+      }
       const specs = ctx.itemSpecs[fieldKey];
       if (specs) {
         value.forEach((item, i) => checkMap(item, specs, `${label}[${i}].`, errors, ctx));
       }
       return;
     }
+    case "json": {
+      try {
+        if (JSON.stringify(value) === undefined) throw new Error("undefined JSON value");
+      } catch {
+        errors.push(`${label}: must be a JSON value`);
+      }
+      return;
+    }
     default:
       errors.push(`${label}: schema bug — unknown spec type \`${spec.type}\``);
   }
+}
+
+function resolveSchemaValue(schema, dottedPath) {
+  if (typeof dottedPath !== "string" || dottedPath.trim() === "") return undefined;
+  const parts = dottedPath.split(".");
+  function descend(value, index) {
+    if (index === parts.length) return value;
+    const key = parts[index];
+    if (key === "*") {
+      if (value === null || typeof value !== "object") return undefined;
+      return Object.values(value).map((item) => descend(item, index + 1));
+    }
+    return descend(value?.[key], index + 1);
+  }
+  return descend(schema, 0);
 }
 
 // --- markdown frontmatter ---------------------------------------------------
@@ -188,14 +307,11 @@ function isMain() {
 
 if (isMain()) {
   const problems = [];
-  const files = [
-    "observation.schema.yaml",
-    "knowledge.schema.yaml",
-    "project-document.schema.yaml",
-    "lifecycle.yaml",
-    "authority.yaml",
-    "routing.yaml",
-  ];
+  const files = fs
+    .readdirSync(PROTOCOL_DIR, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith(".yaml"))
+    .map((entry) => entry.name)
+    .sort();
   const docs = {};
   for (const f of files) {
     try {
@@ -226,6 +342,374 @@ if (isMain()) {
     const levels = String(kn.fields.authority.values).split("|");
     for (const l of levels) {
       if (!auth.ranking.includes(l)) problems.push(`authority: knowledge authority \`${l}\` missing from ranking`);
+    }
+  }
+  const harness = docs["harness.schema.yaml"];
+  if (routing && harness) {
+    if (
+      routing.version !== 2 ||
+      routing.stages?.observation_to_knowledge !== "observation_to_knowledge" ||
+      routing.stages?.knowledge_to_harness !== "knowledge_to_harness"
+    ) {
+      problems.push("routing: both v2 compile stages are required");
+    }
+    const routedCarriers = Object.keys(routing.harness_carriers ?? {});
+    const allowedCarriers = String(harness.fields?.type?.values ?? "").split("|");
+    for (const carrier of routedCarriers) {
+      if (!allowedCarriers.includes(carrier)) {
+        problems.push(`harness: routed carrier \`${carrier}\` missing from harness type enum`);
+      }
+    }
+    for (const role of ["route_target", "dedupe_baseline", "conflict_baseline"]) {
+      if (!routing.compile_document_roles?.[role]) {
+        problems.push(`routing: compile document role \`${role}\` missing`);
+      }
+    }
+    const requiredHarnessFields = [
+      "artifact_id",
+      "type",
+      "path",
+      "ownership",
+      "status",
+      "source_kn_ids",
+      "source_refs",
+      "content_hash",
+      "generator_version",
+      "last_verified",
+      "update_policy",
+      "machine_segment_hash",
+      "human_segment_hash",
+      "outside_hash",
+      "proposal_id",
+      "candidate_path",
+    ];
+    for (const field of requiredHarnessFields) {
+      if (!harness.fields?.[field]?.required) problems.push(`harness: required field \`${field}\` missing`);
+    }
+    if (harness.fields?.ownership?.values !== "managed|co_managed|human") {
+      problems.push("harness: ownership enum must be managed|co_managed|human");
+    }
+    if (harness.version !== 3 || !Array.isArray(harness.field_order)) {
+      problems.push("harness: version 3 and explicit field_order are required");
+    }
+    for (const markerField of [
+      "managed_begin",
+      "managed_end",
+      "co_managed_human_begin",
+      "co_managed_human_end",
+      "co_managed_machine_begin",
+      "co_managed_machine_end",
+    ]) {
+      if (!harness.marker_syntax?.[markerField]) problems.push(`harness: marker syntax ${markerField} missing`);
+    }
+    for (const field of ["source_obs_ids", "carrier_refs"]) {
+      if (kn.fields?.[field]?.type !== "string_list" || kn.fields?.[field]?.required !== false) {
+        problems.push(`knowledge: optional v2 trace field \`${field}\` missing`);
+      }
+    }
+    const regions = new Set(["machine_block", "machine_segment", "whole_target", "none", "reject"]);
+    for (const ownership of ["managed", "co_managed", "human"]) {
+      const matrix = routing.ownership_update_matrix?.[ownership];
+      for (const policy of ["automatic", "proposal_only", "human_only"]) {
+        if (!regions.has(matrix?.[policy])) problems.push(`routing: invalid ownership matrix cell ${ownership}/${policy}`);
+      }
+    }
+    if (routing.ownership_update_matrix?.human?.proposal_only !== "whole_target") {
+      problems.push("routing: human/proposal_only must name whole_target");
+    }
+    if (routing.ownership_update_matrix?.human?.human_only !== "none") {
+      problems.push("routing: human/human_only must name none");
+    }
+    if (JSON.stringify(routing).includes("whole_target_proposal")) {
+      problems.push("routing: whole_target_proposal is not a region value");
+    }
+  }
+  const routingForShape = routing;
+  const planSchema = docs["compile-plan.schema.yaml"];
+  const reportSchema = docs["compile-report.schema.yaml"];
+  const queueSchema = docs["queue.schema.yaml"];
+  const proposalSchema = docs["proposal-manifest.schema.yaml"];
+  if (routingForShape && planSchema) {
+    const routingActions = [...(routingForShape.actions ?? [])].sort();
+    const planDispositions = [...(planSchema.dispositions ?? [])].sort();
+    if (JSON.stringify(routingActions) !== JSON.stringify(planDispositions)) {
+      problems.push("compile-plan: dispositions must equal routing actions");
+    }
+    const rankKeys = Object.keys(routingForShape.disposition_rank ?? {}).sort();
+    if (JSON.stringify(rankKeys) !== JSON.stringify(routingActions)) {
+      problems.push("routing: disposition_rank must cover every action exactly once");
+    }
+    const ranks = Object.values(routingForShape.disposition_rank ?? {});
+    if (new Set(ranks).size !== ranks.length || !ranks.every((value) => Number.isInteger(value))) {
+      problems.push("routing: disposition_rank values must be unique integers");
+    }
+    if (JSON.stringify([...(routingForShape.plan_actors ?? [])].sort()) !== JSON.stringify([...(planSchema.actors ?? [])].sort())) {
+      problems.push("compile-plan: actors must equal routing plan_actors");
+    }
+    if (JSON.stringify([...(routingForShape.plan_update_scopes ?? [])].sort()) !== JSON.stringify([...(planSchema.update_scopes ?? [])].sort())) {
+      problems.push("compile-plan: update_scopes must equal routing plan_update_scopes");
+    }
+    if (JSON.stringify([...(routingForShape.plan_body_actions ?? [])].sort()) !== JSON.stringify([...(planSchema.body_actions ?? [])].sort())) {
+      problems.push("compile-plan: body_actions must equal routing plan_body_actions");
+    }
+  }
+  if (reportSchema) {
+    if (!Array.isArray(reportSchema.action_field_order) || !reportSchema.action_fields) {
+      problems.push("compile-report: action field order and specs are required");
+    }
+  }
+  if (queueSchema) {
+    const queueFields = Object.keys(queueSchema.fields ?? {});
+    if (JSON.stringify(queueFields) !== JSON.stringify(queueSchema.field_order ?? [])) {
+      problems.push("queue: field_order must match fields insertion order");
+    }
+    if (queueSchema.fields?.resolution_note?.type !== "string_or_null") {
+      problems.push("queue: resolution_note must be nullable");
+    }
+  }
+  if (proposalSchema) {
+    if (JSON.stringify(Object.keys(proposalSchema.fields ?? {})) !== JSON.stringify(proposalSchema.field_order ?? [])) {
+      problems.push("proposal manifest: field_order must match fields insertion order");
+    }
+  }
+  const observation = docs["observation.schema.yaml"];
+  if (
+    observation?.fields?.compiled_to_kn?.type !== "string_or_null" ||
+    observation?.fields?.compiled_to_kn?.required !== false ||
+    observation?.fields?.compiled_to_kn?.pattern !== "^KN-[0-9]{4}$"
+  ) {
+    problems.push("observation: optional compile-owned compiled_to_kn field is invalid");
+  }
+  const taxonomy = docs["document-taxonomy.yaml"];
+  const scan = docs["scan.yaml"];
+  const scanReport = docs["scan-report.schema.yaml"];
+  const scanAgentReport = docs["scan-agent-report.schema.yaml"];
+  const projectDocument = docs["project-document.schema.yaml"];
+  if (taxonomy && projectDocument) {
+    if (projectDocument.version !== 1) problems.push("project-document: version must remain 1");
+    const allowedTypes = String(projectDocument.fields?.doc_type?.values ?? "").split("|");
+    for (const docType of [...(taxonomy.core_types ?? []), taxonomy.spec_type]) {
+      if (!allowedTypes.includes(docType)) {
+        problems.push(`taxonomy: document type \`${docType}\` missing from project-document enum`);
+      }
+      const record = taxonomy.documents?.[docType];
+      for (const key of [
+        "path",
+        "template_path",
+        "diataxis_quadrant",
+        "arc42_sections",
+        "detection_rule",
+        "lazy_create_when",
+      ]) {
+        if (!record?.[key]) problems.push(`taxonomy: ${docType}.${key} missing`);
+      }
+      if ((taxonomy.core_types ?? []).includes(docType) && !record?.create_target_pattern) {
+        problems.push(`taxonomy: ${docType}.create_target_pattern missing`);
+      }
+    }
+    if (taxonomy.tutorials?.diataxis_quadrant !== "excluded" || !taxonomy.tutorials?.exclusion_rationale) {
+      problems.push("taxonomy: tutorials exclusion and rationale are required");
+    }
+  }
+  if (scan) {
+    if (scan.kind !== "kg.scan_policy" || scan.version !== 1) {
+      problems.push("scan: kind/version is invalid");
+    }
+    const surface = scan.resident_surface;
+    if (!surface || surface.path !== "AGENTS.md") problems.push("scan: resident surface must target AGENTS.md");
+    if (!Number.isInteger(surface?.target_lines) || surface.target_lines < 1) {
+      problems.push("scan: resident surface target_lines must be a positive integer");
+    }
+    if (typeof surface?.finding_issue !== "string" || surface.finding_issue.trim() === "") {
+      problems.push("scan: resident surface finding_issue is required");
+    }
+    if (!/^KN-[0-9]{4}$/.test(String(surface?.knowledge_id ?? ""))) {
+      problems.push("scan: resident surface knowledge_id must be a KN id");
+    }
+    if (typeof surface?.guidance !== "string" || surface.guidance.trim() === "") {
+      problems.push("scan: resident surface guidance is required");
+    }
+    const structuralIssues = Object.values(scan.structural_coverage ?? {});
+    if (structuralIssues.length !== 2 || new Set(structuralIssues).size !== 2 ||
+        !structuralIssues.every((value) => typeof value === "string" && value.trim() !== "")) {
+      problems.push("scan: structural coverage issue codes must be two distinct strings");
+    }
+    const semanticIssues = new Set(scanAgentReport?.finding_type_values ?? []);
+    for (const issue of structuralIssues) {
+      if (semanticIssues.has(issue)) problems.push(`scan: structural and semantic coverage issue codes overlap at ${issue}`);
+    }
+  }
+  if (scanReport) {
+    if (scanReport.kind !== "kg.scan_report_schema" || scanReport.version !== 2) {
+      problems.push("scan-report: kind/version is invalid");
+    }
+    if (!Array.isArray(scanReport.field_order) || !Array.isArray(scanReport.finding_field_order)) {
+      problems.push("scan-report: field orders are required");
+    }
+    if (!scanReport.field_order?.includes("coverage_audit") || scanReport.fields?.coverage_audit?.type !== "map") {
+      problems.push("scan-report: taxonomy coverage_audit field is required");
+    }
+  }
+  if (scanAgentReport) {
+    const packetFields = String(scanAgentReport.evidence_packet_field_order ?? "").split("|").filter(Boolean);
+    const sourceFields = String(scanAgentReport.evidence_source_field_order ?? "").split("|").filter(Boolean);
+    if (scanAgentReport.product_kind !== "kg.scan_agent_report" || scanAgentReport.product_version !== 1) {
+      problems.push("scan-agent-report: product kind/version is invalid");
+    }
+    if (scanAgentReport.semantic_gap_issue_code !== "semantic_coverage_gap" ||
+        !scanAgentReport.finding_type_values?.includes(scanAgentReport.semantic_gap_issue_code)) {
+      problems.push("scan-agent-report: semantic gap issue code must come from the finding type table");
+    }
+    if (scanAgentReport.evidence_packet_version !== 1 || packetFields.length !== 5 || sourceFields.length !== 4) {
+      problems.push("scan-agent-report: evidence packet version and field orders are required");
+    }
+    try {
+      new RegExp(scanAgentReport.source_ref_pattern);
+    } catch {
+      problems.push("scan-agent-report: source ref pattern must be a valid regular expression");
+    }
+    if (scanAgentReport.source_ref_canonicalization !== "equal_line_range_to_single_line") {
+      problems.push("scan-agent-report: source ref canonicalization is invalid");
+    }
+    for (const field of ["findings[].source_refs", "findings[].coverage_evidence"]) {
+      if (scanAgentReport.fields?.[field]?.pattern_from !== "source_ref_pattern") {
+        problems.push(`scan-agent-report: ${field} must point to the source ref pattern`);
+      }
+    }
+  }
+  const taskSpec = docs["task-spec.schema.yaml"];
+  const specSynthesis = docs["spec-synthesis.schema.yaml"];
+  if (taskSpec) {
+    if (taskSpec.document_kind !== "kg.task_spec") {
+      problems.push("task-spec: document_kind must be `kg.task_spec`");
+    }
+    if (
+      specSynthesis &&
+      JSON.stringify(taskSpec.required_sections ?? []) !== JSON.stringify(specSynthesis.section_order ?? [])
+    ) {
+      problems.push("task-spec: required_sections must equal spec-synthesis section_order");
+    }
+    if (
+      taskSpec.constraint_source_path_pattern !==
+      "^(docs/.+\\.md|knowledge/KN-[^/]+\\.md|AGENTS\\.md)#L[1-9][0-9]*$"
+    ) {
+      problems.push("task-spec: stable document anchor pattern is invalid");
+    }
+    if (!String(taskSpec.acceptance_format ?? "").includes("GIVEN") ||
+        !String(taskSpec.acceptance_format ?? "").includes("WHEN") ||
+        !String(taskSpec.acceptance_format ?? "").includes("THEN")) {
+      problems.push("task-spec: acceptance format must require GIVEN, WHEN, and THEN");
+    }
+  }
+  for (const [file, schema] of Object.entries(docs)) {
+    if (!schema?.fields) continue;
+    const topFields = Object.keys(schema.fields).filter((field) => !field.includes(".") && !field.includes("[]"));
+    if (!Array.isArray(schema.field_order) && (schema.script_owned_fields || schema.record_field_order)) {
+      problems.push(`${file}: fields require an explicit field_order`);
+    } else if (Array.isArray(schema.field_order) && JSON.stringify(topFields) !== JSON.stringify(schema.field_order)) {
+      problems.push(`${file}: field_order must match top-level fields insertion order`);
+    }
+    for (const [container, orderValue] of Object.entries(schema.record_field_order ?? {})) {
+      const prefix = schema.fields[container]?.type === "map_list" ? `${container}[].` : `${container}.`;
+      const actual = Object.keys(schema.fields)
+        .filter((field) => field.startsWith(prefix))
+        .map((field) => field.slice(prefix.length));
+      const expected = String(orderValue).split("|").filter(Boolean);
+      if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+        problems.push(`${file}: record_field_order.${container} must match nested fields insertion order`);
+      }
+    }
+    for (const [field, spec] of Object.entries(schema.fields)) {
+      let enumSource = resolveSchemaValue(schema, spec.values_from);
+      if (enumSource === undefined) {
+        const first = String(spec.values_from ?? "").split(".")[0];
+        const protocolRef = schema[first];
+        if (typeof protocolRef === "string" && docs[protocolRef]) {
+          enumSource = resolveSchemaValue({ ...schema, [first]: docs[protocolRef] }, spec.values_from);
+        }
+      }
+      if (spec.type === "enum_from" && enumSource === undefined) {
+        problems.push(`${file}: ${field}.values_from does not resolve: ${spec.values_from}`);
+      }
+      const patternSource = resolveSchemaValue(schema, spec.pattern_from);
+      if (spec.pattern_from && typeof patternSource !== "string") {
+        problems.push(`${file}: ${field}.pattern_from does not resolve: ${spec.pattern_from}`);
+      }
+      const pattern = spec.pattern ?? patternSource;
+      if (pattern) {
+        try {
+          new RegExp(pattern);
+        } catch {
+          problems.push(`${file}: ${field} pattern is not a valid regular expression`);
+        }
+      }
+    }
+    const owned = String(schema.script_owned_fields ?? "").split("|").filter(Boolean);
+    for (const field of owned) {
+      if (!schema.fields[field]) problems.push(`${file}: script_owned_fields names unknown field ${field}`);
+    }
+  }
+  const kickoffIndex = docs["kickoff-index.schema.yaml"];
+  if (kickoffIndex) {
+    for (const [sourceClass, row] of Object.entries(kickoffIndex.source_classes ?? {})) {
+      for (const field of ["discovery", "route_source", "index_fields", "deep_qualification"]) {
+        if (!row?.[field]) problems.push(`kickoff-index: source_classes.${sourceClass}.${field} missing`);
+      }
+    }
+  }
+  const kickoffScope = docs["kickoff-scope.schema.yaml"];
+  if (kickoffScope) {
+    for (const [reason, row] of Object.entries(kickoffScope.scope_reasons ?? {})) {
+      if (!row?.basis_type || !row?.description) problems.push(`kickoff-scope: scope_reasons.${reason} is incomplete`);
+    }
+  }
+  const adr = docs["adr-assessment.schema.yaml"];
+  if (adr && Object.keys(adr.criteria ?? {}).length !== adr.fields?.criteria?.min_items) {
+    problems.push("adr-assessment: criteria min_items must equal the protocol criterion count");
+  }
+  const rubric = docs["evaluation-rubric.schema.yaml"];
+  const oracle = docs["evaluation-oracle.schema.yaml"];
+  const scenario = docs["evaluation-scenario.schema.yaml"];
+  if (rubric) {
+    for (const [criterionId, row] of Object.entries(rubric.criteria ?? {})) {
+      const values = String(row?.values ?? "").split("|").map(Number);
+      if (!row?.evaluator || values.some((value) => !Number.isInteger(value)) || Math.max(...values) !== row?.max) {
+        problems.push(`evaluation-rubric: criterion ${criterionId} has invalid values or max`);
+      }
+    }
+    for (const evaluator of rubric.evaluator_values ?? []) {
+      const rows = Object.values(rubric.criteria ?? {}).filter((row) => row.evaluator === evaluator);
+      const rawMax = rows.reduce((sum, row) => sum + row.max, 0);
+      const normalization = rubric.normalization?.[evaluator];
+      const gate = rubric.fixture_gates?.[evaluator];
+      if (rows.length === 0 && normalization) {
+        problems.push(`evaluation-rubric: scored evaluator ${evaluator} has no criteria`);
+      }
+      if (rows.length > 0 && normalization?.raw_max !== rawMax) {
+        problems.push(`evaluation-rubric: ${evaluator} raw_max must equal criterion maxima`);
+      }
+      if (rows.length > 0 && normalization?.raw_max / normalization?.divisor !== normalization?.normalized_max) {
+        problems.push(`evaluation-rubric: ${evaluator} normalization is incoherent`);
+      }
+      if (rows.length > 0 && !gate) problems.push(`evaluation-rubric: ${evaluator} fixture gate missing`);
+      if (gate?.required_exact_criterion && rubric.criteria?.[gate.required_exact_criterion]?.evaluator !== evaluator) {
+        problems.push(`evaluation-rubric: ${evaluator} exact criterion points outside its rubric`);
+      }
+      for (const item of String(gate?.criterion_minimums ?? "").split("|").filter(Boolean)) {
+        const [criterionId, minimum] = item.split(":");
+        const row = rubric.criteria?.[criterionId];
+        if (row?.evaluator !== evaluator || !String(row.values).split("|").includes(minimum)) {
+          problems.push(`evaluation-rubric: ${evaluator} minimum ${item} is not an allowed criterion value`);
+        }
+      }
+    }
+  }
+  if (rubric && oracle && scenario) {
+    for (const evaluator of [scenario.fields?.evaluator, oracle.fields?.evaluator]) {
+      if (evaluator?.type !== "string") problems.push("evaluation fixture evaluator fields must be strings");
+    }
+    if (oracle.fields?.["expectations[].level"]?.type !== "string") {
+      problems.push("evaluation-oracle: expectation level must be validated against the rubric protocol by the loader");
     }
   }
   if (problems.length) {

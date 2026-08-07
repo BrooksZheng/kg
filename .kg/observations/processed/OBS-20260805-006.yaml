@@ -1,0 +1,14 @@
+id: OBS-20260805-006
+at: 2026-08-05T05:55:37Z
+source: task_outcome
+claim: "Kickoff source catalogs must enumerate every protocol-declared source before applying the metadata budget; budget exhaustion may truncate optional metadata but must preserve source identity, tail entries, counts, and an independently reproducible omission digest."
+context:
+  task: "R5.2 kickoff full-surface catalog"
+  paths:
+    - protocol/kickoff-index.schema.yaml
+    - skills/kg-kickoff/scripts/gather-context.mjs
+    - scripts/test-v2.mjs
+evidence:
+  - { type: test, ref: "protocol/kickoff-index.schema.yaml#L8-L86; skills/kg-kickoff/scripts/gather-context.mjs#L657-L723; scripts/test-v2.mjs#L4517-L4525" }
+urgency: batch
+compiled_to_kn: KN-0043

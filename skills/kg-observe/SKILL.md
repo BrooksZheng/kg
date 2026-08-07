@@ -89,29 +89,40 @@ Claim + evidence + scope. One observation = one claim.
 
 ## How to record
 
-Write a KYAML draft (see `protocol/observation.schema.yaml`; strict subset —
-quote strings containing `#` or special characters), then append it:
+Write a strict JSON draft, then let the script validate and store canonical
+KYAML:
 
 ```bash
-node <plugin>/skills/kg-observe/scripts/add-observation.mjs draft.yaml
+node <plugin>/skills/kg-observe/scripts/add-observation.mjs draft.json
 # or pipe:  ... | node .../add-observation.mjs --stdin
 ```
 
-Draft template (`id`/`at`/`urgency` may be omitted — the script fills them):
+Draft template (`urgency` may be omitted; the script derives it):
 
-```yaml
-source: human_correction
-claim: "One-shot URL params must be consumed by a single coordinator."
-context:
-  task: menu-filters
-  paths: [src/app/menu/**]
-evidence:
-  - { type: quote, ref: "human: only one consumer may clear the param" }
+```json
+{
+  "source": "human_correction",
+  "claim": "One-shot URL params must be consumed by a single coordinator.",
+  "context": {
+    "task": "menu-filters",
+    "paths": ["src/app/menu/**"]
+  },
+  "evidence": [
+    {
+      "type": "quote",
+      "ref": "human: only one consumer may clear the param"
+    }
+  ]
+}
 ```
 
 The script validates against the schema and REJECTS malformed drafts with an
-error list; fix the draft and retry — never hand-write files into
+error list. Fix the draft and retry. Never hand-write files into
 `.kg/observations/`.
+
+`id`, `at`, and `compiled_to_kn` are script-owned. Agent JSON containing any
+of them is rejected. Compile writes `compiled_to_kn` only while creating the
+processed archive copy.
 
 ## Fast-track flow (human corrections)
 

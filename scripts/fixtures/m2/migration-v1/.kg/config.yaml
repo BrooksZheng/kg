@@ -1,0 +1,4 @@
+# v1 kg pipeline configuration
+observation_threshold: 3
+agents_block_budget_lines: 24
+skills_path: .agents/skills

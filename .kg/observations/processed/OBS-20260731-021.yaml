@@ -1,0 +1,13 @@
+id: OBS-20260731-021
+at: 2026-07-31T16:44:56Z
+source: test_failure
+claim: "Migration terminal state stored on disk must exclude per-run applied diagnostics so mixed-state repair and idempotent reruns converge to identical bytes."
+context:
+  task: "R3.2 migration protocol hardening"
+  paths:
+    - skills/kg-init/scripts/migration-lib.mjs
+    - scripts/test-v2.mjs
+evidence:
+  - { type: test, ref: "test-v2 Part 1 migration_v1_preserves_all_assets mixed-state resume changed the result file until terminal state was separated from CLI diagnostics" }
+urgency: batch
+compiled_to_kn: KN-0024

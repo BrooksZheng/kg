@@ -1,0 +1,245 @@
+{
+  "kind": "kg.kickoff_context_index",
+  "version": 2,
+  "indexed_at": "2026-08-06T07:13:01.234Z",
+  "project_root": "/Users/brooks/Desktop/workspace/bigbigbo/kg/.mission/kg-v2-refactor/evidence/gk3-r56/attempt-01/workspace/project",
+  "task_sha256": "sha256:5caee6bb3cb0970048f06da8c257a0d922706942254dbc6667d0ec5842980c69",
+  "catalog_status": "complete",
+  "source_counts": [
+    {
+      "source_class": "project_instruction",
+      "total": 0,
+      "included": 0,
+      "excluded": 0
+    },
+    {
+      "source_class": "document_map",
+      "total": 0,
+      "included": 0,
+      "excluded": 0
+    },
+    {
+      "source_class": "taxonomy_document",
+      "total": 1,
+      "included": 1,
+      "excluded": 0
+    },
+    {
+      "source_class": "knowledge_ledger",
+      "total": 2,
+      "included": 2,
+      "excluded": 0
+    },
+    {
+      "source_class": "harness_inventory",
+      "total": 1,
+      "included": 1,
+      "excluded": 0
+    },
+    {
+      "source_class": "harness_document_closure",
+      "total": 2,
+      "included": 2,
+      "excluded": 0
+    }
+  ],
+  "entries": [
+    {
+      "source_id": "SRC-4DBEF9925E41",
+      "source_class": "harness_document_closure",
+      "path": "docs/accepted-compile-contract.md",
+      "sha256": "sha256:e6066e14565012e0fca453bee559d42a5e0d2c644db2df3ef327b1b434a99139",
+      "title": "M2 compile fixture contract",
+      "line_count": 14,
+      "doc_type": "rfc",
+      "status": "accepted",
+      "authority": "formal_decision",
+      "domain_keys": [
+        "accepted",
+        "compile",
+        "contract",
+        "docs",
+        "rfc"
+      ],
+      "summary": null,
+      "metadata": {
+        "closure_edge_type": "harness_source"
+      },
+      "metadata_truncated": false
+    },
+    {
+      "source_id": "SRC-E2E606D1BED9",
+      "source_class": "harness_document_closure",
+      "path": "docs/runbooks/compile-notes.md",
+      "sha256": "sha256:9afa6ed6b466f292676b136982d9043dd21d3400721b5202f842289b0956eac7",
+      "title": "Compile notes",
+      "line_count": 10,
+      "doc_type": "runbook",
+      "status": "unregistered",
+      "authority": "reference_only",
+      "domain_keys": [
+        "compile",
+        "docs",
+        "notes",
+        "runbook",
+        "runbooks"
+      ],
+      "summary": null,
+      "metadata": {
+        "closure_edge_type": "harness_target"
+      },
+      "metadata_truncated": false
+    },
+    {
+      "source_id": "SRC-50F622716CFE",
+      "source_class": "taxonomy_document",
+      "path": "docs/traps/legacy-cache-key.md",
+      "sha256": "sha256:1f3994e50ade9d0d8b43f5549f52c180af291f524969e9526b4f8043ff50c8fd",
+      "title": "Legacy cache key trap",
+      "line_count": 12,
+      "doc_type": "trap",
+      "status": "accepted",
+      "authority": "formal_decision",
+      "domain_keys": [
+        "cache",
+        "docs",
+        "key",
+        "legacy",
+        "trap",
+        "traps"
+      ],
+      "summary": null,
+      "metadata": {},
+      "metadata_truncated": false
+    },
+    {
+      "source_id": "SRC-2B4282E5170C",
+      "source_class": "harness_inventory",
+      "path": "harness/artifacts/HAR-COMPILE-NOTES.yaml",
+      "sha256": "sha256:06771fa5612f2f0546eca25d58cb5c3bd9e4be251bc4449ebd3c39389126eacb",
+      "title": null,
+      "line_count": 16,
+      "doc_type": null,
+      "status": "active",
+      "authority": "inventory_only",
+      "domain_keys": [
+        "artifacts",
+        "compile",
+        "har",
+        "harness",
+        "notes"
+      ],
+      "summary": null,
+      "metadata": {
+        "artifact_id": "HAR-COMPILE-NOTES",
+        "type": "markdown_document",
+        "target_path": "docs/runbooks/compile-notes.md",
+        "ownership": "managed",
+        "status": "active",
+        "source_kn_ids": [
+          "KN-0002"
+        ],
+        "source_refs": [
+          "docs/accepted-compile-contract.md#L14"
+        ],
+        "parse_issues": [],
+        "authority": "inventory_only"
+      },
+      "metadata_truncated": false
+    },
+    {
+      "source_id": "SRC-5AB86187CE57",
+      "source_class": "knowledge_ledger",
+      "path": "knowledge/KN-0001-existing-compile-baseline.md",
+      "sha256": "sha256:4f2e9896e6acbf72303474cfa327d5d3ad54973a5201cbad986dd68830ec39d0",
+      "title": "The existing ledger already covers this fixture observation.",
+      "line_count": 21,
+      "doc_type": null,
+      "status": "active",
+      "authority": "verified_runtime_behavior",
+      "domain_keys": [
+        "0001",
+        "baseline",
+        "compile",
+        "existing",
+        "kn",
+        "knowledge"
+      ],
+      "summary": "The existing ledger already covers this fixture observation.",
+      "metadata": {
+        "knowledge_id": "KN-0001",
+        "claim": "The existing ledger already covers this fixture observation.",
+        "scope": {
+          "paths": [
+            "knowledge/**"
+          ]
+        },
+        "lifecycle": "active",
+        "carrier_refs": []
+      },
+      "metadata_truncated": false
+    },
+    {
+      "source_id": "SRC-98FE7CC74B9E",
+      "source_class": "knowledge_ledger",
+      "path": "knowledge/KN-0002-compile-managed-runbooks-must-preserve-human.md",
+      "sha256": "sha256:aa5fe019c3387509b1f3cdb3334b951b8b2e88ba78fc945e33628b6f16c8642f",
+      "title": "Compile-managed runbooks must preserve human text outside their managed block.",
+      "line_count": 22,
+      "doc_type": null,
+      "status": "active",
+      "authority": "verified_runtime_behavior",
+      "domain_keys": [
+        "0002",
+        "compile",
+        "docs",
+        "human",
+        "kn",
+        "knowledge",
+        "managed",
+        "must",
+        "preserve",
+        "runbooks"
+      ],
+      "summary": "Compile-managed runbooks must preserve human text outside their managed block.",
+      "metadata": {
+        "knowledge_id": "KN-0002",
+        "claim": "Compile-managed runbooks must preserve human text outside their managed block.",
+        "scope": {
+          "paths": [
+            "docs/runbooks/**"
+          ]
+        },
+        "lifecycle": "active",
+        "carrier_refs": [
+          "HAR-COMPILE-NOTES@docs/runbooks/compile-notes.md#kg:managed"
+        ]
+      },
+      "metadata_truncated": false
+    }
+  ],
+  "edges": [
+    {
+      "from_source_id": "SRC-98FE7CC74B9E",
+      "to_source_id": "SRC-E2E606D1BED9",
+      "edge_type": "knowledge_carrier",
+      "anchor": "HAR-COMPILE-NOTES@docs/runbooks/compile-notes.md#kg:managed"
+    },
+    {
+      "from_source_id": "SRC-2B4282E5170C",
+      "to_source_id": "SRC-4DBEF9925E41",
+      "edge_type": "harness_source",
+      "anchor": null
+    },
+    {
+      "from_source_id": "SRC-2B4282E5170C",
+      "to_source_id": "SRC-E2E606D1BED9",
+      "edge_type": "harness_target",
+      "anchor": null
+    }
+  ],
+  "exclusions": [],
+  "omission_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+  "metadata_budget_bytes": 65536,
+  "metadata_bytes_used": 1774
+}

@@ -1,0 +1,15 @@
+id: OBS-20260805-007
+at: 2026-08-05T06:22:16Z
+source: review
+claim: "Evaluator matching defects that interpret a shared tool-event contract must be repaired in a shared audit helper because a local-only fix can recur in the next sibling evaluator."
+context:
+  task: "R5.2 evaluator repair D70"
+  paths:
+    - "scripts/eval-*.mjs"
+    - scripts/lib/eval-tool-audit.mjs
+    - scripts/test-v2.mjs
+evidence:
+  - { type: quote, ref: "human review: D50 fixed substring matching only in eval-spec, then D70 repeated the same defect in eval-docs" }
+  - { type: test, ref: "node scripts/test-v2.mjs: evaluator_tool_audit_counts_only_successful_node_script_execution and all_five_evaluators_share_non_vendored_tool_audit" }
+urgency: batch
+compiled_to_kn: KN-0045

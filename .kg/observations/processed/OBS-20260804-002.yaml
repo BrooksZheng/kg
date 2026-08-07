@@ -1,0 +1,14 @@
+id: OBS-20260804-002
+at: 2026-08-04T03:37:48Z
+source: task_outcome
+claim: "A multi-publish compile must allocate canonical IDs only after full preflight and persist a reservation bound to the plan digest, context digest, allocation ranges, and now before product mutation."
+context:
+  task: "R4.4 multi-publish reservation"
+  paths:
+    - skills/kg-compile/scripts/apply-compile-plan.mjs
+    - scripts/lib/compile-plan.mjs
+evidence:
+  - { type: test, ref: compile_multi_publish_is_preflight_atomic }
+  - { type: test, ref: compile_multi_publish_reservation_resumes_without_new_ids }
+urgency: batch
+compiled_to_kn: KN-0040

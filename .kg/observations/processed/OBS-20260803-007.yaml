@@ -1,0 +1,15 @@
+id: OBS-20260803-007
+at: 2026-08-03T06:35:52Z
+source: task_outcome
+claim: "Compile disposition ranks and ownership/update policy outcomes must be read from protocol/routing.yaml so preflight has one authoritative matrix and rank table."
+context:
+  task: "R4.1 protocol and inverse-map preflight"
+  paths:
+    - protocol/routing.yaml
+    - scripts/lib/compile-plan.mjs
+    - scripts/lib/inverse-map.mjs
+evidence:
+  - { type: test, ref: inverse_map_and_protocol_rank_are_deterministic }
+  - { type: diff, ref: "protocol/routing.yaml: disposition_rank and ownership_update_matrix" }
+urgency: batch
+compiled_to_kn: KN-0034

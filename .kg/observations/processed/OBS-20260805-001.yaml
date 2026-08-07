@@ -1,0 +1,12 @@
+id: OBS-20260805-001
+at: 2026-08-05T02:49:59Z
+source: task_outcome
+claim: "The coverage audit's uncovered_core_type finding is only actionable because it carries the unmet condition and the offending document path; the issue code alone would tell a reader that something is wrong without telling them a draft is the reason."
+context:
+  task: "M4 closure dogfood: kg-scan run against this repository"
+  paths: [skills/kg-scan/scripts/report-builder.mjs, docs/]
+evidence:
+  - { type: log, ref: "scan on kg itself: 0 errors, 49 warnings; architecture, api and glossary each reported uncovered_core_type with unmet_conditions [accepted_not_superseded] and the document path plus status draft, while five other core types reported missing_core_type with no candidate" }
+  - { type: test, ref: "test-v2 Part 7 scan_groups_coverage_by_taxonomy_derived_quadrant" }
+urgency: batch
+compiled_to_kn: KN-0041

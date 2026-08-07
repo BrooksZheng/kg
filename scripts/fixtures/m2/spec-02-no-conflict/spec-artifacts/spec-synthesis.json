@@ -1,0 +1,63 @@
+{
+  "kind": "kg.spec_synthesis",
+  "version": 2,
+  "task": {
+    "title": "Add payment.authorized publication retries"
+  },
+  "context": [
+    "The task already selects the accepted event-bus boundary.",
+    "No kickoff conflict was recorded."
+  ],
+  "requirements": [
+    "Retry payment.authorized publication in the payment service.",
+    "Carry the original idempotency key through every attempt."
+  ],
+  "constraints": [
+    {
+      "constraint": "Payment publishes through the accepted event boundary.",
+      "source_path": "docs/decisions/0001-payment-order-event-bus.md#L19",
+      "source_status": "accepted",
+      "authority": "formal_decision"
+    },
+    {
+      "constraint": "The safe path retries the event publication.",
+      "source_path": "docs/traps/payment-direct-write.md#L18",
+      "source_status": "accepted",
+      "authority": "formal_decision"
+    },
+    {
+      "constraint": "Payment and Order communicate through the active knowledge boundary.",
+      "source_path": "knowledge/KN-0001-payment-boundary.md#L3",
+      "source_status": "active",
+      "authority": "formal_decision"
+    }
+  ],
+  "references": [
+    "services/payment/**",
+    "payment.authorized"
+  ],
+  "out_of_scope": [
+    {
+      "statement": "Replacing the event-bus technology.",
+      "conflict_source_path": null
+    }
+  ],
+  "acceptance_criteria": [
+    "GIVEN a transient publish failure WHEN the payment service retries THEN it reuses the original idempotency key.",
+    "GIVEN the event bus accepts a retry WHEN Order receives duplicates THEN Order applies the event once."
+  ],
+  "open_questions": [
+    "The retry limit remains an implementation choice."
+  ],
+  "session_history": [
+    {
+      "session_id": "ae6fecfb-06ea-40c2-babf-28df7c2f2644",
+      "turn_session_id": "f5f684f4-3125-4223-bc64-2e2c92033344",
+      "product_kinds": [
+        "kg.kickoff_context_index",
+        "kg.kickoff_context",
+        "kg.kickoff_turn"
+      ]
+    }
+  ]
+}

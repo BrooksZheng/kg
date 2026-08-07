@@ -1,0 +1,16 @@
+artifact_id: HAR-R42-HUMAN
+type: markdown_document
+path: docs/policies/human.md
+ownership: human
+status: active
+source_kn_ids: []
+source_refs: ["docs/accepted-r42.md#L14"]
+content_hash: sha256:0000000000000000000000000000000000000000000000000000000000000000
+machine_segment_hash: sha256:0000000000000000000000000000000000000000000000000000000000000000
+human_segment_hash: null
+outside_hash: sha256:0000000000000000000000000000000000000000000000000000000000000000
+proposal_id: null
+candidate_path: null
+generator_version: kg-compile/2.0.0-m2
+last_verified: 2026-08-03
+update_policy: proposal_only

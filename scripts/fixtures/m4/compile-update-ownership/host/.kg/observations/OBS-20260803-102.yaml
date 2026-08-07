@@ -1,0 +1,10 @@
+id: OBS-20260803-102
+at: 2026-08-03T05:01:00Z
+source: task_outcome
+claim: "A co-managed carrier machine segment can be refreshed under its byte fence."
+context:
+  task: r42-co-managed
+  paths: ["docs/runbooks/co-managed.md"]
+evidence:
+  - { type: test, ref: "R4.2 co-managed fixture" }
+urgency: batch

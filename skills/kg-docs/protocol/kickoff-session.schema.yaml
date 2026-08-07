@@ -1,0 +1,35 @@
+# kg protocol: ordered kickoff session identity and turn ledger.
+
+kind: kg.kickoff_session_schema
+version: 1
+product_kind: kg.kickoff_session
+product_version: 1
+session_status_values: [active, completed, abandoned]
+
+field_order:
+  - kind
+  - version
+  - session_id
+  - started_at
+  - updated_at
+  - task_sha256
+  - index_ref
+  - scope_refs
+  - turn_refs
+  - next_turn_sequence
+  - status
+
+script_owned_fields: "kind|version|session_id|started_at|updated_at|task_sha256|index_ref|scope_refs|turn_refs|next_turn_sequence|status"
+
+fields:
+  kind: { type: enum, required: true, values: "kg.kickoff_session" }
+  version: { type: integer, required: true, values: "1" }
+  session_id: { type: string, required: true, pattern: "^KSESSION-[A-F0-9]{12}$" }
+  started_at: { type: timestamp, required: true }
+  updated_at: { type: timestamp, required: true }
+  task_sha256: { type: string, required: true, pattern: "^sha256:[a-f0-9]{64}$" }
+  index_ref: { type: string, required: true }
+  scope_refs: { type: string_list, required: true }
+  turn_refs: { type: string_list, required: true }
+  next_turn_sequence: { type: integer, required: true, min: 1 }
+  status: { type: enum_from, required: true, values_from: session_status_values }

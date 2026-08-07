@@ -3,8 +3,9 @@
 A platform-agnostic agent plugin, shipped as a skill collection, that turns
 accepted project documents and the raw signals of agent work (human
 corrections, task outcomes, test failures, review feedback) into compiled,
-evidence-backed project knowledge, then publishes it into the carriers agents
-natively consume (`AGENTS.md`, reference docs, skills, executable constraints).
+evidence-backed project knowledge, then routes it toward carriers agents
+natively consume, including Markdown documents, skill proposals, and script
+proposals.
 
 > Local-first · Git-native · Evidence-driven · Agent-agnostic
 
@@ -12,6 +13,21 @@ The protocol design and all rulings live in
 [`docs/rfc-001-project-knowledge-growth-protocol.md`](docs/rfc-001-project-knowledge-growth-protocol.md)
 (Chinese — the incubation working language for human-facing docs; skill bodies,
 schemas, and code are English).
+
+## 中文速览
+
+kg 是一个与平台无关的 agent 插件，以 skill 集合分发，把人机协作过程中产生的
+信号——人类纠正、任务结果、测试失败、评审意见——连同已 accepted 的项目文档，
+编译成有证据、可裁决、会退役的原子知识，再投递到 agent 原生消费的载体上。
+
+七个 skill 覆盖一次任务的完整链路：`kg-kickoff` 逐条澄清约束，`kg-spec` 把共识
+固化成 task spec，`kg-docs` 负责文档脚手架与棕地 bootstrap，`kg-observe` 在任务
+中记录信号，`kg-compile` 把信号编译成知识与载体，`kg-scan` 报告 harness 健康度，
+`kg-init` 负责安装与 v1→v2 迁移。日常流程见下方 Daily use，迁移见 Migrating a
+v1 install。
+
+语言约定：面向人的文档、会话内输出、spec 与报告用中文；skill 正文、schema、
+代码与本 README 主体用英文，因为它们的读者是全球的开源使用者和 agent 本身。
 
 ## Why this project exists
 
@@ -41,14 +57,13 @@ kg treats this as a **compilation problem, not a memory problem**:
   detects collisions, ranks authority, and routes each claim — with
   `no_change` as a legal, honest verdict (no fabricating lessons to look
   productive).
-- **Publishing = injection into native carriers.** Compiled knowledge lands
-  where agents already look — the `AGENTS.md` managed block, reference docs
-  under `knowledge/`, skill drafts, test/lint proposals — so there is no
-  retrieval runtime, no database, no vector store to operate.
+- **Publishing targets native carriers.** The v2 protocol separates
+  observation-to-knowledge compilation from knowledge-to-harness routing.
+  Carriers are Markdown document regions, skill proposals, and script
+  proposals — no retrieval runtime, database, or vector store.
 - **Knowledge must also shrink.** A lifecycle state machine plus a mandatory
   subtraction duty (every compile round answers "what did we merge / demote /
   retire") and a regret log keep the corpus small enough to stay credible.
-  The managed block has a hard line budget — bloat is an alarm, not a norm.
 - **Humans rule where it matters.** Low-risk categories auto-activate;
   contracts and machine constraints stop at candidate until a human ruling,
   recorded git-native in a queue — no PR ceremony, no separate service.
@@ -73,15 +88,20 @@ real output, not fixtures.
 
 ```text
 skills/
-  kg-init/      SKILL.md + scripts/ + assets/   setup, profiles, install
+  kg-init/      SKILL.md + scripts/ + assets/   setup, profiles, install, v1 to v2 migration
+  kg-kickoff/   SKILL.md + scripts/ + references/   two-stage retrieval and one-question-at-a-time grilling
+  kg-spec/      SKILL.md + scripts/   zero-interview synthesis of a kickoff session into a task spec
+  kg-docs/      SKILL.md + scripts/   document scaffolds, ADR discipline, brownfield bootstrap
   kg-observe/   SKILL.md + scripts/   record observations (light, in-task)
-  kg-compile/   SKILL.md + scripts/   compile observations into knowledge (heavy, dedicated session)
-  kg-scan/      SKILL.md + scripts/ + references/   bootstrap brownfield docs
-protocol/       the six fixed interfaces: observation, project-document &
-                knowledge schemas, lifecycle, authority, routing
-scripts/lib/    shared Node stdlib modules (KYAML parser, validator, host helpers,
-                AGENTS block renderer) — the SOURCE OF TRUTH; skill scripts reach
-                it via each skill's scripts/_lib.mjs resolver
+  kg-compile/   SKILL.md + scripts/   compile observations into knowledge and carriers (heavy, dedicated session)
+  kg-scan/      SKILL.md + scripts/ + references/   harness health: staleness, references, coverage
+protocol/       every machine-parsed interface: observation, knowledge,
+                project-document, harness, task-spec, kickoff, spec-synthesis,
+                compile, scan, proposal and evaluation schemas, plus the
+                taxonomy, lifecycle, authority, scan and routing tables
+scripts/lib/    shared Node stdlib modules (KYAML parser, validator, host and
+                repository helpers, and protocol loaders); the SOURCE OF TRUTH; skill scripts
+                reach it via each skill's scripts/_lib.mjs resolver
 skills/*/scripts/lib/, skills/*/protocol/
                 committed vendored copies of scripts/lib/ and protocol/ that make
                 every skill dir self-contained (registry installers copy only the
@@ -102,19 +122,21 @@ kg's skill dirs are self-contained, so the standard
 [skills CLI](https://github.com/vercel-labs/skills) works out of the box:
 
 ```bash
-# 1. from the host repo root, install the four skills into .agents/skills/
+# 1. from the host repo root, install the available skills into .agents/skills/
 npx skills add brookszheng/kg
 
-# 2. complete wiring and select a project-document baseline
+# 2. classify the host, complete wiring, and select a directory profile
 node .agents/skills/kg-init/scripts/install.mjs \
   --docs-profile standard \
   --project-stage brownfield
 ```
 
 Step 2 is required: the skills CLI only delivers the skill files; the
-`.kg/` pipeline tree, the direct-authoring `docs/` baseline, and the
-`AGENTS.md` managed block are planted by kg-init. Existing documents are
-never overwritten. Commit everything it created.
+`.kg/` pipeline tree, the direct-authoring directory skeleton, and platform
+wiring are created by kg-init. Detection owns the host classification, while
+`--project-stage` remains a compatibility hint. Init creates only
+`docs/README.md` as document content. Existing documents and human AGENTS
+bytes are preserved. Commit everything it created.
 
 `npx skills add owner/repo` installs from the repo's **default branch**.
 To test a not-yet-merged branch, install from a local checkout instead
@@ -139,10 +161,9 @@ node skills/kg-init/scripts/install.mjs /path/to/host [--copy] \
 
 ### Agent platform coverage
 
-- **Cursor** — discovers skills under `.agents/skills/`; the managed block
-  lives in `AGENTS.md`, which Cursor reads natively.
-- **Codex** — reads `AGENTS.md` natively; the block's pointer lines lead to
-  the skill files. No extra wiring.
+- **Cursor** — discovers skills under `.agents/skills/` and reads project
+  instructions from `AGENTS.md`.
+- **Codex** — reads the human-authored `AGENTS.md` natively. No extra wiring.
 - **Claude Code** — reads `CLAUDE.md` (not `AGENTS.md`) and discovers skills
   under `.claude/skills/`. When the host shows Claude markers (a `.claude/`
   dir or a `CLAUDE.md`), kg-init symlinks `.claude/skills/kg-*` to the
@@ -161,16 +182,16 @@ node skills/kg-init/scripts/install.mjs /path/to/host [--copy] \
   ```
 
   Updates replace only the skill dirs. Host state under `.kg/`, `knowledge/`,
-  `docs/`, the `AGENTS.md` managed block, and `.cursorignore` is never touched
-  by the skills CLI. Re-running kg-init never overwrites an existing config or
-  project document.
+  `docs/`, `AGENTS.md`, and `.cursorignore` is never touched by the skills
+  CLI. Re-running kg-init verifies healthy v2 state and may restore missing
+  managed empty directories. It does not refresh config, project documents,
+  project instructions, or skill contents.
 
 - **Symlink install (Option B default)** — `git pull` the plugin checkout;
   hosts pick it up through the symlinks, nothing else to do.
-- **`--copy` install (Option B)** — `git pull` the plugin checkout, then
-  re-run the installer against the host; it destructively refreshes the
-  vendored skill dirs (and refuses to run if source and destination collapse
-  to the same directory).
+- **`--copy` install (Option B)** — use the explicit repair or update workflow
+  when skill contents need refresh. A healthy v2 installer rerun verifies state
+  without refreshing vendored skill dirs.
 
 ## Releasing (maintainers of this repo)
 
@@ -182,7 +203,8 @@ ship. After editing either, regenerate and commit the vendored copies:
 node scripts/lib/protocol.mjs
 node scripts/sync-vendored.mjs          # refresh skills/*/scripts/lib + skills/*/protocol
 node scripts/sync-vendored.mjs --check  # CI / pre-push guard: exit 1 on drift
-node scripts/test-rfc004.mjs             # setup, document, and scan black-box tests
+node scripts/test-v2.mjs                # seven-part black-box suite across all seven skills
+node scripts/test-rfc004.mjs            # RFC-004 safety boundaries for the authoring plane
 ```
 
 A skill published with drifted copies fails only at the consumer's site —
@@ -191,6 +213,31 @@ run the `--check` before pushing anything that touched `scripts/lib/`,
 
 ## Daily use
 
+A task runs through the skills in this order. Each step leaves an artifact the
+next one reads, so nothing depends on a session remembering the last one.
+
+1. **Kickoff.** `kg-kickoff` retrieves the accepted documents and knowledge that
+   bear on the task, then asks one question at a time — each with a recommended
+   answer and the evidence behind it — and records where the task collides with
+   an accepted constraint.
+2. **Spec.** `kg-spec` synthesizes that session into a task spec under
+   `docs/specs/` without asking anything further: requirements, constraints
+   bound to their document anchors, GIVEN/WHEN/THEN acceptance criteria, and an
+   Out of Scope section tracing back to the conflicts and explicit refusals.
+3. **Work**, against the spec.
+4. **Observe.** `kg-observe` records reusable signals at task end, and
+   immediately on a human correction.
+5. **Compile.** `kg-compile` turns pending observations and accepted documents
+   into atomic knowledge entries, then routes them to carriers — managed
+   document regions, skill proposals, script proposals.
+6. **Scan.** `kg-scan` reports harness health: stale references, broken
+   anchors, coverage gaps by document type, and whether the always-loaded
+   `AGENTS.md` surface still fits its line budget.
+
+`AGENTS.md` stays a short pointer surface — a hard rule, the project's
+commands, and which skill to reach for. Knowledge is not pasted into it;
+kickoff retrieves what a task needs.
+
 Draft complete ADRs, RFCs, and technical plans directly under `docs/`.
 Registered documents move through `draft`, `proposed`, `accepted`, `rejected`,
 and `superseded`. Only a human can authorize `accepted`.
@@ -198,12 +245,19 @@ and `superseded`. Only a human can authorize `accepted`.
 For an existing codebase:
 
 ```bash
-node .agents/skills/kg-scan/scripts/scan-inventory.mjs . --format markdown
+node .agents/skills/kg-docs/scripts/inventory.mjs \
+  --root . --output /path/to/artifacts/repository-inventory.json
+node .agents/skills/kg-docs/scripts/bootstrap.mjs \
+  --project-root . \
+  --inventory /path/to/artifacts/repository-inventory.json \
+  --plan /path/to/artifacts/bootstrap-plan.json
 ```
 
-Then follow `kg-scan/SKILL.md` to shape the evidence into architecture, API,
-glossary, and inventory drafts. Static scanning executes no host code and
-always excludes `.kg/`.
+Follow `kg-docs/SKILL.md` to create the strict JSON plan. Version 2 creates one
+missing draft for every taxonomy core type in one preflighted batch. The
+architecture-only version 1 plan remains compatible. Static inventory executes
+no host code and excludes `.kg/`, secrets, binaries, oversized files,
+dependency and generated directories, and symbolic links.
 
 Validate registered documents:
 
@@ -214,10 +268,7 @@ node .agents/skills/kg-compile/scripts/validate-project-documents.mjs
 ```bash
 # during work, record an observation (see skills/kg-observe/SKILL.md)
 printf '%s\n' \
-  'source: human_correction' \
-  'claim: "..."' \
-  'evidence:' \
-  '  - { type: quote, ref: "..." }' \
+  '{"source":"human_correction","claim":"...","evidence":[{"type":"quote","ref":"..."}]}' \
   | node .agents/skills/kg-observe/scripts/add-observation.mjs --stdin
 
 # when the threshold reminder fires (or immediately for fast_track),
@@ -225,9 +276,38 @@ printf '%s\n' \
 # accepted registered documents, observations, and existing knowledge
 ```
 
+Check harness health at any time:
+
+```bash
+node .agents/skills/kg-scan/scripts/health-check.mjs --root .
+```
+
+Findings are tiered: hard errors gate, warnings do not, so the report stays
+usable on a repository that has not finished cleaning up.
+
 Working agents must never read `.kg/` during tasks — writes go through
-kg-observe only; reads happen only in kg-compile sessions (the managed block
-in the host `AGENTS.md` carries this rule).
+kg-observe only; reads happen only in kg-compile sessions. Host project
+instructions carry this rule.
+
+## Migrating a v1 install
+
+A host running the four-skill v1 layout upgrades through kg-init. Detection is
+read-only and classifies the host first; migration then runs from a sealed
+plan written outside the host, so an interrupted run resumes from the same
+plan rather than re-deriving one against a half-migrated tree.
+
+```bash
+node <plugin>/skills/kg-init/scripts/detect-migration.mjs --root <host>
+node <plugin>/skills/kg-init/scripts/migrate-v1.mjs \
+  --root <host> --skills-source <plugin>/skills --output <outside-host>/plan.json
+node <plugin>/skills/kg-init/scripts/migrate-v1.mjs \
+  --root <host> --execute --plan <outside-host>/plan.json
+```
+
+Knowledge entries, `docs/`, and queue items are preserved; queue items that
+cannot be converted are quarantined rather than dropped. `AGENTS.md` keeps its
+human bytes and loses the v1 managed block. Keep the plan file — it is both
+the recovery input and the executor's identity check.
 
 ## KYAML — the machine-parsed YAML subset
 

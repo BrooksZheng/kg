@@ -1,0 +1,58 @@
+# kg protocol: compiler report shape.
+# Reports retain result groups for M2 consumers and add action provenance for
+# update/body-preservation decisions introduced by M4.
+
+kind: kg.compile_report_schema
+version: 2
+
+field_order:
+  - kind
+  - version
+  - plan_digest
+  - context_digest
+  - generated_at
+  - known_limitations
+  - results
+  - actions
+  - archives
+  - reservation
+
+fields:
+  kind: { type: enum, required: true, values: "kg.compile_report" }
+  version: { type: integer, required: true, values: "2" }
+  plan_digest: { type: string, required: true, pattern: "^[a-f0-9]{64}$" }
+  context_digest: { type: string, required: true, pattern: "^[a-f0-9]{64}$" }
+  generated_at: { type: timestamp, required: true }
+  known_limitations: { type: string_list, required: true }
+  results: { type: map, required: true }
+  actions: { type: map_list, required: true }
+  archives: { type: map_list, required: true }
+  reservation: { type: map, required: false }
+
+action_field_order:
+  - action_id
+  - observation_id
+  - disposition
+  - actor
+  - update_scope
+  - body_action
+  - source_observation_sha256
+  - target_kn_id
+  - artifact_id
+  - result_reason
+  - actions
+  - action_at
+
+action_fields:
+  action_id: { type: string, required: true }
+  observation_id: { type: string, required: true }
+  disposition: { type: string, required: true }
+  actor: { type: string, required: true }
+  update_scope: { type: string, required: true }
+  body_action: { type: string, required: true }
+  source_observation_sha256: { type: string, required: true, pattern: "^[a-f0-9]{64}$" }
+  target_kn_id: { type: string_or_null, required: true, pattern: "^KN-[0-9]{4}$" }
+  artifact_id: { type: string_or_null, required: true, pattern: "^HAR-[A-Z0-9][A-Z0-9._-]*$" }
+  result_reason: { type: string, required: true }
+  actions: { type: string_list, required: true }
+  action_at: { type: timestamp, required: true }

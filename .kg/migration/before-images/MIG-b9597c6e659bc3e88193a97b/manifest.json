@@ -1,0 +1,74 @@
+{
+  "kind": "kg.migration_before_images",
+  "version": 2,
+  "plan_id": "MIG-b9597c6e659bc3e88193a97b",
+  "status": "complete",
+  "items": [
+    {
+      "source_kind": "operation",
+      "target_path": ".kg/config.yaml",
+      "image_path": ".kg/migration/before-images/MIG-b9597c6e659bc3e88193a97b/items/0001",
+      "fingerprint": {
+        "type": "file",
+        "size": 159,
+        "sha256": "dd7a7f868d4185480ac4547eacac04b2a3330507d90cf91cfff7d7f885cda4a2"
+      },
+      "ownership": "rollback_backup"
+    },
+    {
+      "source_kind": "operation",
+      "target_path": "AGENTS.md",
+      "image_path": ".kg/migration/before-images/MIG-b9597c6e659bc3e88193a97b/items/0002",
+      "fingerprint": {
+        "type": "file",
+        "size": 6875,
+        "sha256": "28d7cbdf4fe31faff553358e4be7f61b91cc3dfcad0ba951c5cb76c5852e410e"
+      },
+      "ownership": "rollback_backup"
+    },
+    {
+      "source_kind": "operation",
+      "target_path": ".agents/skills/kg-init",
+      "image_path": ".kg/migration/before-images/MIG-b9597c6e659bc3e88193a97b/items/0003",
+      "fingerprint": {
+        "type": "directory",
+        "entries": 32,
+        "sha256": "3091af1f893020d9a0ef6e60af14a131d97b30af53a142266d062eb8fb304fbf"
+      },
+      "ownership": "rollback_backup"
+    },
+    {
+      "source_kind": "operation",
+      "target_path": ".agents/skills/kg-observe",
+      "image_path": ".kg/migration/before-images/MIG-b9597c6e659bc3e88193a97b/items/0004",
+      "fingerprint": {
+        "type": "directory",
+        "entries": 18,
+        "sha256": "57a2b968ebb5b38229ee949318fa9041e04aad049ab6e24d073d5608f5f0a111"
+      },
+      "ownership": "rollback_backup"
+    },
+    {
+      "source_kind": "operation",
+      "target_path": ".agents/skills/kg-compile",
+      "image_path": ".kg/migration/before-images/MIG-b9597c6e659bc3e88193a97b/items/0005",
+      "fingerprint": {
+        "type": "directory",
+        "entries": 24,
+        "sha256": "22d8f4d2441563187089be9d09ace663a6cad8baa7fd5019162652267b7ef678"
+      },
+      "ownership": "rollback_backup"
+    },
+    {
+      "source_kind": "operation",
+      "target_path": ".agents/skills/kg-scan",
+      "image_path": ".kg/migration/before-images/MIG-b9597c6e659bc3e88193a97b/items/0006",
+      "fingerprint": {
+        "type": "directory",
+        "entries": 20,
+        "sha256": "4fa90af1436431d874a9780785d06a7828692493e11ac1bea98080b0385ed54c"
+      },
+      "ownership": "rollback_backup"
+    }
+  ]
+}

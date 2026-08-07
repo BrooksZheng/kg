@@ -1,0 +1,7 @@
+kind: kg.kickoff_turn
+version: 1
+recorded_at: 2026-07-31T04:00:00.000Z
+session_id: d5492fc5-6902-48a5-89d5-9fc1fa6350e9
+findings:
+  - { source_path: docs/decisions/0001-payment-order-event-bus.md, line: 19, status: accepted, authority: formal_decision }
+question: { question_text: "你希望先确定退避策略，还是先确定重试次数？", assistant_message_index: 1 }

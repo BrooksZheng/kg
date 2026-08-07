@@ -1,13 +1,15 @@
 ---
 name: kg-scan
-description: Bootstrap KG project documentation from an existing brownfield codebase. Use when a human asks to scan, map, document, onboard, or understand an existing repository, or when kg-init Setup identifies a brownfield project and requests architecture, API, glossary, command, or existing-document drafts. Perform static analysis by default, preserve evidence, and keep every generated document in draft until human review.
+description: Report the health of a repository's kg harness — stale source anchors, broken references, schema and hash drift, document coverage gaps, and the always-loaded instruction surface budget. Use when a human asks how healthy the knowledge, documents, or harness are, before a release or review, or when a compile round needs to know what has rotted. Static reads only; findings are tiered so warnings do not gate.
 ---
 
 # kg-scan
 
-Create an evidence-backed starting point for an existing project. Treat the
-scan as a document-authoring task. Do not turn raw scan output directly into
-active KG knowledge.
+Measure whether the harness still matches the repository. Knowledge entries
+point at document lines, carriers claim to render specific entries, proposals
+target specific bytes — every one of those pointers can rot, and this skill is
+what notices. It reports; it never repairs, and it never decides what a
+document should say.
 
 ## Hard boundaries
 
@@ -21,105 +23,140 @@ active KG knowledge.
 - Never overwrite an existing human-authored document silently.
 - Never set a project document to `accepted` without a direct human ruling.
 
-## Workflow
+## Deterministic health check
 
-### 1. Establish scope
+```bash
+node <kg-scan>/scripts/health-check.mjs \
+  --root <project-root> \
+  --now <ISO-timestamp>
+```
 
-Resolve the repository root and the requested scan areas. Default to:
+The report builder is shared by `check-staleness.mjs` and
+`health-check.mjs`. It independently checks source anchors, canonical
+containment, sidecar and knowledge schemas, carrier hashes, proposal target
+hashes, and the KN to carrier inverse map. It never validates a sidecar by
+using the sidecar's own hash as the expected byte source.
 
-- project manifests and development commands
-- architecture and module boundaries
-- public API, CLI, schema, and event surfaces
-- domain terminology
-- existing ADRs, RFCs, standards, and runbooks
+The report is version 2. Ordinary report mode emits findings and returns
+success. `--gates` fails on hard errors or when the configured staleness limit
+is exceeded. Legacy v1 entries with no trace on either side remain warnings.
+The report also measures the configured AGENTS.md resident-surface target;
+an over-budget file is a warning that points to KN-0013 and directs the next
+change toward subtraction.
 
-Honor user exclusions. For a large monorepo, scan one package or domain at a
-time.
+Findings are tiered on purpose. A repository mid-migration is full of
+warnings, and a tool that refuses to run until every one is gone gets turned
+off. Only hard errors gate.
 
-### 2. Build the deterministic inventory
+Use a gate when stale sources must fail automation:
 
-Run:
+```bash
+node <kg-scan>/scripts/health-check.mjs \
+  --root <project-root> \
+  --gates \
+  --max-staleness 0
+```
+
+The command always emits a strict `kg.staleness_report`. Ordinary report mode
+returns success when findings exist. Gate mode returns a nonzero status when
+`staleness_count` exceeds the configured maximum.
+
+The scanner remains static-only. It does not execute host code, follow
+symlinks, or enter `.kg/`.
+
+## Structural coverage and semantic coverage
+
+Keep the two coverage layers separate.
+
+Structural coverage is deterministic. `kg.staleness_report` version 2 derives
+`coverage_audit` from the document taxonomy and accepted registered project
+documents. `missing_core_type` means that no registered document exists for a
+core taxonomy type. `uncovered_core_type` means candidates exist but fail one
+or more explicit coverage conditions. These codes, counts, report bytes, and
+gate behavior belong only to the deterministic builder.
+
+Semantic coverage is agent-assisted. It asks whether a specific module or
+flow has enough explanation, a runbook, or a reference for a human reader.
+Record that judgment only as `semantic_coverage_gap` in a separate
+`kg.scan_agent_report`. Bind it to a canonical `module_identity`, stable source
+refs already present in the evidence packet, existing `coverage_evidence`, and
+explicit `missing_evidence`. Never reuse `missing_core_type` or
+`uncovered_core_type` for this layer.
+
+### Agent-assisted evidence workflow
+
+First save a completed deterministic report. Then prepare a read-only evidence
+packet from the smallest source set that can support semantic review:
+
+```bash
+node <kg-scan>/scripts/health-check.mjs \
+  --root <project-root> \
+  --now <ISO-timestamp> \
+  --output <session>/base-report.json
+
+node <kg-scan>/scripts/prepare-agent-evidence.mjs \
+  --project-root <project-root> \
+  --base-report <session>/base-report.json \
+  --source docs/architecture/example.md \
+  --source src/modules/example/index.mjs \
+  --output <session>/evidence-packet.json
+```
+
+The packet is script-produced agent input and has no `kg.*` product identity.
+Its source bytes, hashes, canonical paths, line counts, and base report binding
+are rechecked by the report writer.
+
+Read the complete packet and submit strict JSON containing only `model`,
+`session_id`, and `findings`. A contradiction needs at least two distinct
+packet source refs and must keep `module_identity` null with empty coverage gap
+fields. A semantic gap needs a canonical module identity, at least one stable
+coverage ref that also appears in `source_refs`, and at least one missing
+evidence key. Follow the source-ref anchor contract in
+`protocol/scan-agent-report.schema.yaml`.
+
+Write the canonical product through:
+
+```bash
+node <kg-scan>/scripts/write-agent-report.mjs \
+  --project-root <project-root> \
+  --base-report <session>/base-report.json \
+  --evidence-packet <session>/evidence-packet.json \
+  --input <session>/agent-input.json \
+  --output <session>/agent-report.json \
+  --now <ISO-timestamp>
+```
+
+`kg.scan_agent_report` is the only agent-layer product. Its confidence and
+severity fields support human review. They never alter deterministic report
+bytes, counts, verdict, or gate exit. Deterministic gate entrypoints accept no
+agent report parameter and import no agent writer.
+
+## Static repository inventory
+
+The inventory is a read-only survey of an unfamiliar repository — manifests and
+commands, module boundaries, public surfaces, terminology, existing decision
+records:
 
 ```bash
 node <kg-scan>/scripts/scan-inventory.mjs <repo-root> --format json
-```
 
-Useful limits:
-
-```bash
 node <kg-scan>/scripts/scan-inventory.mjs <repo-root> \
   --max-files 5000 --max-bytes 512000 --max-hints 200 \
   --exclude path/to/large-area
 ```
 
 The script writes nothing and executes no host code. Treat `truncated: true`
-as an explicit coverage limitation.
+as an explicit coverage limitation, and scan one package or domain at a time
+in a large monorepo.
 
-### 3. Shape the evidence
-
-Read `references/scan-playbook.md`, then inspect the smallest code set needed
-to interpret inventory hints.
-
-Classify every conclusion as:
-
-- observed fact
-- runtime fact, only after authorized execution
-- inference with confidence
-- conflict
-- unknown
-
-Cite file paths and line numbers. Keep current code facts separate from
-architectural intent.
-
-### 4. Author draft documents
-
-Write a dated evidence report to:
-
-```text
-docs/inventory/SCAN-YYYYMMDD.md
-```
-
-Shape useful results into:
-
-```text
-docs/architecture/overview.md
-docs/api/README.md
-docs/glossary.md
-```
-
-If a target is absent, create a complete registered project document with
-`status: draft`. If it already contains human-authored material, create a
-patch proposal under `docs/proposals/` and point to the intended target.
-
-Use the `protocol/project-document.schema.yaml` contract. Ordinary Markdown
-remains valid and does not need KG frontmatter.
-
-### 5. Validate and review
-
-Run:
-
-```bash
-node .agents/skills/kg-compile/scripts/validate-project-documents.mjs
-```
-
-Report:
-
-- coverage and scan limits
-- files created
-- existing files left untouched
-- observed facts
-- inferences and confidence
-- conflicts
-- narrow questions for the human
-
-Keep documents in `draft` or `proposed`. After the human explicitly accepts a
-document, update it to `status: accepted`, add `accepted_at`, validate again,
-and run a separate kg-compile session.
+Turning an inventory into document drafts is `kg-docs`, not this skill: follow
+its brownfield bootstrap path, which preflights the whole batch, keeps every
+generated document in `draft`, and proposes a patch rather than overwriting
+human-authored material.
 
 ## Learning boundary
 
-The scan establishes a baseline through project documents. `kg-observe`
-continues to capture reusable signals discovered during later work. Record a
-scan observation only when the scan process itself teaches a reusable
-project-specific lesson; do not duplicate every API or glossary finding into
-the observation inbox.
+A scan reports on documents; it does not become knowledge by itself.
+`kg-observe` captures reusable signals discovered during work. Record a scan
+observation only when the scan process itself taught a reusable
+project-specific lesson — never one observation per finding.

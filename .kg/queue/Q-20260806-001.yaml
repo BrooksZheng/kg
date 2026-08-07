@@ -1,0 +1,17 @@
+id: Q-20260806-001
+at: 2026-08-06T10:07:09Z
+kind: promotion
+category: project_contract
+claim: "Promote KN-0057: agent-assisted review artifacts must resolve outside the host project root, so reviewing a repository can never write into it."
+evidence:
+  - { type: observation, ref: OBS-20260805-012 }
+  - { type: test, ref: "scripts/test-v2.mjs Part 7 scan_agent_report_is_separate_and_hash_binds_deterministic_report rejects a host-internal output path" }
+options:
+  - "accept as project contract (activate KN-0057)"
+  - "keep as project_knowledge (advisory only)"
+  - "reject (retire KN-0057)"
+recommendation: "Accept. kg-scan's entire safety claim is that it reads and never writes; an output path that can land inside the host breaks that claim silently, and the check is already enforced on the canonical path so a symlink cannot smuggle it back. Advisory status would leave the one rule that makes the skill safe to point at someone else's repository unenforced."
+entry: KN-0057
+source_observations: [OBS-20260805-012]
+resolution: accepted
+resolution_note: "Human delegated queue rulings to the compiler agent in-session (裁决有你帮我决定, 2026-07-31). Ruled per the recorded recommendation: read-only is kg-scan's entire safety argument and the check is already enforced on the canonical path."

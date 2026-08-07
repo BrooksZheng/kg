@@ -1,8 +1,6 @@
-# kg protocol — Knowledge Entry Schema (RFC-001 §5.2)
-# Frontmatter schema for knowledge/*.md. The entry IS the published artifact
-# (reference carrier): KYAML frontmatter (this schema) + a Markdown body in
-# English. Only the AGENTS.md managed block and skill drafts are rendered
-# derivatives — never hand-edit those; edit the entry and re-render.
+# kg protocol: Knowledge Entry Schema.
+# Frontmatter schema for knowledge/*.md. Existing v1 entries remain valid
+# without the two v2 trace fields. Every v2 writer emits both fields.
 #
 # Implementation extensions over the RFC 5.2 sketch (documented deliberately):
 #   - evidence[].type gains `observation` (ref = an OBS-... id) so compiled
@@ -13,15 +11,14 @@
 #     supersedes another entry, the extra merge is recorded in its body).
 
 kind: kg.knowledge_entry
-version: 1
+version: 2
 
 id_format: KN-NNNN
 file_pattern: "knowledge/KN-NNNN-<slug>.md"
 
 fields:
   id: { type: string, required: true, pattern: "^KN-[0-9]{4}$" }
-  # One-sentence normative statement. This exact line is what the AGENTS.md
-  # managed index shows, so keep it self-contained.
+  # One-sentence normative statement.
   claim: { type: string, required: true }
   category: { type: enum, required: true, values: "project_knowledge|procedure|project_contract|executable_constraint" }
   scope: { type: map, required: true }
@@ -33,9 +30,29 @@ fields:
   authority: { type: enum, required: true, values: "user_explicit_constraint|verified_runtime_behavior|machine_constraint|current_code_and_schema|formal_decision|project_knowledge|past_task_conclusion|agent_inference|external_general_knowledge" }
   confidence: { type: float, required: true, min: 0, max: 1 }
   lifecycle: { type: enum, required: true, values: "candidate|active|deprecated|archived|rejected|conflicted" }
-  supersedes: { type: string_or_null, required: true, pattern: "^KN-[0-9]{4}$" }
+  supersedes: { type: string_or_list_or_null, required: true, pattern: "^KN-[0-9]{4}$" }
   superseded_by: { type: string_or_null, required: false, pattern: "^KN-[0-9]{4}$" }
   last_verified: { type: date, required: true }
   # Must be filled when the entry is demoted/retired as wrong or harmful:
   # what damage did the bad knowledge cause (RFC D6 "knowledge regret").
   regret: { type: string_or_null, required: true }
+  source_obs_ids: { type: string_list, required: false }
+  # Canonical carrier references are rebuilt from the carrier side during
+  # compile preflight. A v1 entry may omit this field for migration safety.
+  carrier_refs: { type: string_list, required: false }
+
+field_order:
+  - id
+  - claim
+  - category
+  - scope
+  - evidence
+  - authority
+  - confidence
+  - lifecycle
+  - supersedes
+  - superseded_by
+  - last_verified
+  - regret
+  - source_obs_ids
+  - carrier_refs

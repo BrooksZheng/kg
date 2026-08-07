@@ -1,0 +1,11 @@
+kind: kg.kickoff_turn
+version: 1
+recorded_at: 2026-07-31T04:00:00.000Z
+session_id: c15c41af-3ed3-4218-b3eb-7004429ba947
+findings:
+  - { source_path: knowledge/KN-0002-compile-managed-runbooks-must-preserve-human.md, line: 3, status: active, authority: verified_runtime_behavior }
+  - { source_path: docs/runbooks/compile-notes.md, line: 7, status: unregistered, authority: reference_only }
+  - { source_path: docs/accepted-compile-contract.md, line: 14, status: accepted, authority: formal_decision }
+question:
+  question_text: "你希望保留路径别名方案，还是改为只更新真实路径下的 managed block？"
+  assistant_message_index: 1

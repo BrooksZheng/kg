@@ -1,0 +1,8 @@
+kind: kg.kickoff_conflicts
+version: 2
+recorded_at: 2026-08-06T07:17:32.971Z
+session_id: KSESSION-D8AC01047279
+assessment: conflict
+conflicts:
+  - { conflict_id: KC-C3ECEEC77EB1, summary: "任务要求「更新整个 runbook」替换全部文件内容，与 KN-0002 约束「managed carrier 更新仅替换标记内容且须保留人类文本」冲突", task_message_index: 0, task_message_sha256: sha256:5caee6bb3cb0970048f06da8c257a0d922706942254dbc6667d0ec5842980c69, constraint_source_path: knowledge/KN-0002-compile-managed-runbooks-must-preserve-human.md, constraint_line: 20, constraint_sha256: sha256:aa5fe019c3387509b1f3cdb3334b951b8b2e88ba78fc945e33628b6f16c8642f, finding_id: KF-0CB2589F2507 }
+no_conflict_reason_refs: []

@@ -1,0 +1,13 @@
+id: OBS-20260731-018
+at: 2026-07-31T10:14:11Z
+source: task_outcome
+claim: "At baseline 1d5c246, kg-docs bootstrap renders only a missing docs/architecture/overview.md target and deliberately rejects existing targets, so eight-core-type output and proposal mode remain M3 work."
+context:
+  task: kg-v2-refactor-m3-contract
+  paths:
+    - skills/kg-docs/scripts/bootstrap.mjs
+    - protocol/document-taxonomy.yaml
+    - scripts/test-v2.mjs
+evidence:
+  - { type: diff, ref: "baseline 1d5c246: bootstrap.mjs fixes TARGET to docs/architecture/overview.md and reports proposal mode belongs to M3 when the target exists" }
+urgency: batch

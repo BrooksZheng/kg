@@ -1,0 +1,15 @@
+id: OBS-20260803-011
+at: 2026-08-03T10:00:16Z
+source: test_failure
+claim: "A fresh G-D1 provider failure before the first tool call is an R-5 runner-adapter or provider-network failure and must remain unresolved without retrying in the same environment or weakening deterministic gates."
+context:
+  task: "R4.2 fresh G-D1 attempt-03"
+  paths:
+    - scripts/eval-compile.mjs
+    - .mission/kg-v2-refactor/tools/kg-eval-runner.py
+    - ".mission/kg-v2-refactor/evidence/gd1-r42/attempt-03/**"
+evidence:
+  - { type: log, ref: "attempt-03/runner-output.json: API Error: Unable to connect to API (ENOTFOUND)" }
+  - { type: test, ref: "attempt-03/result.json: no file reads, tool events, permissions, or products" }
+urgency: batch
+compiled_to_kn: KN-0036

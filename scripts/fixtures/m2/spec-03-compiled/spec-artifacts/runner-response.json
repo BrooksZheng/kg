@@ -1,0 +1,50 @@
+{
+  "session_id": "m2-spec-fixture-03",
+  "transcript": [
+    {
+      "role": "user",
+      "content": "Synthesize the supplied compiled kickoff packet without interviewing the user."
+    },
+    {
+      "role": "assistant",
+      "content": "The synthesis JSON is complete and binds the active KN to the managed document.",
+      "tool_calls": []
+    }
+  ],
+  "file_reads": [],
+  "citations": [
+    {
+      "path": "docs/accepted-compile-contract.md",
+      "line": 14
+    },
+    {
+      "path": "knowledge/KN-0002-compile-managed-runbooks-must-preserve-human.md",
+      "line": 3
+    },
+    {
+      "path": "docs/runbooks/compile-notes.md",
+      "line": 3
+    }
+  ],
+  "products": [
+    {
+      "kind": "kg.spec_synthesis",
+      "path": "spec-synthesis.json"
+    }
+  ],
+  "tool_events": [
+    {
+      "name": "Read",
+      "command": "Read spec-packet.json",
+      "at_step": 1,
+      "ok": true
+    },
+    {
+      "name": "Write",
+      "command": "Write spec-synthesis.json",
+      "at_step": 2,
+      "ok": true
+    }
+  ],
+  "permission_denials": []
+}

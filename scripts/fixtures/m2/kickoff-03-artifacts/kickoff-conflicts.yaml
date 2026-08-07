@@ -1,0 +1,4 @@
+kind: kg.kickoff_conflicts
+version: 1
+conflicts:
+  - { summary: "更新整个 runbook 会改写 managed block 外的人类文本", source_path: knowledge/KN-0002-compile-managed-runbooks-must-preserve-human.md, line: 3 }

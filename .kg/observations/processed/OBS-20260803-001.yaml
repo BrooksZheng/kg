@@ -1,0 +1,14 @@
+id: OBS-20260803-001
+at: 2026-08-03T03:20:39Z
+source: task_outcome
+claim: "Bootstrap writers must reapply static inventory eligibility rules while validating stored inventory records, because a hash-valid forged record can reintroduce an excluded host file."
+context:
+  task: kg-v2-r33-bootstrap-all-types
+  paths:
+    - skills/kg-docs/scripts/bootstrap.mjs
+    - scripts/lib/repository.mjs
+    - scripts/test-v2.mjs
+evidence:
+  - { type: test, ref: "Part 2 kn0016_host_code_never_executes forged .env inventory record" }
+urgency: batch
+compiled_to_kn: KN-0033

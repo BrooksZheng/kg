@@ -1,0 +1,10 @@
+id: OBS-20260803-101
+at: 2026-08-03T05:00:00Z
+source: task_outcome
+claim: "Refresh the existing R4.2 fixture claim from the current compile evidence."
+context:
+  task: r42-update
+  paths: ["knowledge/**", "docs/**"]
+evidence:
+  - { type: test, ref: "R4.2 update fixture" }
+urgency: batch

@@ -1,0 +1,79 @@
+{
+  "session_id": "m1-kickoff-fixture-structured-01",
+  "transcript": [
+    {
+      "role": "user",
+      "content": "为 Payment 到 Order 的写入增加重试"
+    },
+    {
+      "role": "assistant",
+      "content": "已读取事件边界与直接写入陷阱。你希望把重试目标限定为事件发布，还是继续尝试直接写 Order 数据库？我推荐限定为事件发布。理由：已接受决策要求复用同一幂等键并禁止 Payment 直接写 Order 数据库。",
+      "tool_calls": []
+    }
+  ],
+  "file_reads": [
+    {
+      "path": "docs/decisions/0001-payment-order-event-bus.md",
+      "at_step": 2
+    },
+    {
+      "path": "docs/traps/payment-direct-write.md",
+      "at_step": 2
+    }
+  ],
+  "citations": [
+    {
+      "path": "docs/decisions/0001-payment-order-event-bus.md",
+      "line": 15
+    },
+    {
+      "path": "docs/traps/payment-direct-write.md",
+      "line": 14
+    }
+  ],
+  "products": [
+    {
+      "kind": "kg.kickoff_context_index",
+      "path": "kickoff-index.json"
+    },
+    {
+      "kind": "kg.kickoff_context",
+      "path": "kickoff-context.json"
+    },
+    {
+      "kind": "kg.kickoff_turn",
+      "path": "kickoff-turn.yaml"
+    },
+    {
+      "kind": "kg.kickoff_conflicts",
+      "path": "kickoff-conflicts.yaml"
+    }
+  ],
+  "tool_events": [
+    {
+      "name": "Bash",
+      "command": "node gather-context.mjs --phase index --output kickoff-index.json",
+      "at_step": 1,
+      "ok": true
+    },
+    {
+      "name": "Bash",
+      "command": "node gather-context.mjs --phase deep --include docs/decisions/0001-payment-order-event-bus.md --include docs/traps/payment-direct-write.md --output kickoff-context.json",
+      "at_step": 2,
+      "ok": true
+    },
+    {
+      "name": "Bash",
+      "command": "node record-conflicts.mjs --output kickoff-conflicts.yaml",
+      "at_step": 3,
+      "ok": true
+    },
+    {
+      "name": "Bash",
+      "command": "node record-turn.mjs --index kickoff-index.json --output kickoff-turn.yaml",
+      "at_step": 4,
+      "ok": true
+    }
+  ],
+  "permission_denials": []
+}

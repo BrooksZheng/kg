@@ -1,0 +1,25 @@
+kind: kg.kickoff_turn
+version: 2
+recorded_at: 2026-08-06T07:17:05.437Z
+session_id: KSESSION-D8AC01047279
+turn_id: KTURN-D8AC01047279-001
+sequence: 1
+user_message_index: 0
+user_message_sha256: sha256:5caee6bb3cb0970048f06da8c257a0d922706942254dbc6667d0ec5842980c69
+user_message: "让 compile 通过路径别名或产物 symlink 更新整个 runbook"
+findings:
+  - { finding_id: KF-68FD1F49543C, source_path: docs/accepted-compile-contract.md, line: 14, status: accepted, authority: formal_decision }
+  - { finding_id: KF-E2101EAA4304, source_path: knowledge/KN-0002-compile-managed-runbooks-must-preserve-human.md, line: 22, status: active, authority: verified_runtime_behavior }
+  - { finding_id: KF-0CB2589F2507, source_path: knowledge/KN-0002-compile-managed-runbooks-must-preserve-human.md, line: 20, status: active, authority: verified_runtime_behavior }
+  - { finding_id: KF-5BB59D48BF41, source_path: docs/runbooks/compile-notes.md, line: 1, status: unregistered, authority: reference_only }
+question:
+  clarification_axis: runbook_update_scope
+  question_text: "「更新整个 runbook」是指替换每个 runbook 的全部文件内容（包括 managed block 外的人类文本），还是仅更新 compile 管理的 managed block？"
+  options: ["仅更新 managed block（保留人类文本）", "替换每个 runbook 的完整文件内容"]
+  recommendation: "仅更新 managed block（保留人类文本）"
+  reason_refs:
+    - "knowledge/KN-0002-compile-managed-runbooks-must-preserve-human.md#L20"
+    - "knowledge/KN-0002-compile-managed-runbooks-must-preserve-human.md#L22"
+  assistant_message_index: 1
+  assistant_message: "「更新整个 runbook」是指替换每个 runbook 的全部文件内容（包括 managed block 外的人类文本），还是仅更新 compile 管理的 managed block？\n\n选项：\n1. 仅更新 managed block（保留人类文本）\n2. 替换每个 runbook 的完整文件内容\n\n推荐：仅更新 managed block（保留人类文本）\n依据：knowledge/KN-0002-compile-managed-runbooks-must-preserve-human.md#L20，knowledge/KN-0002-compile-managed-runbooks-must-preserve-human.md#L22"
+  assistant_message_sha256: sha256:3e531a9195c0058da6a5c5b3bca6713c5608f3cff5306b2641315dd1e397d48d

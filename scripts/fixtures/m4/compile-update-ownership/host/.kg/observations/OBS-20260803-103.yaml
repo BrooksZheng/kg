@@ -1,0 +1,10 @@
+id: OBS-20260803-103
+at: 2026-08-03T05:02:00Z
+source: task_outcome
+claim: "The human-owned policy carrier requires a proposal candidate before any write."
+context:
+  task: r42-human-proposal
+  paths: ["docs/policies/human.md"]
+evidence:
+  - { type: test, ref: "R4.2 proposal fixture" }
+urgency: batch

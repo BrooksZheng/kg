@@ -12,5 +12,5 @@ options:
 recommendation: "option 1 (minimal staleness sweep) — the subtraction duty already forces the question every round but gives the compiler no signal to answer it with; last_verified staleness is computable from existing ledger fields, needs no telemetry, and stays render/report-layer (normal wear per KN-0010). Full usage-tracking (option 2) contradicts the zero-hook skill form and should wait for real fleet evidence."
 entry: null
 source_observations: [OBS-20260717-003]
-resolution: pending
-resolution_note: null
+resolution: accepted
+resolution_note: "Human delegated the ruling to the compiler agent in-session: 裁决有你帮我决定 (2026-07-31). Ruled per the recorded recommendation. Accepted option 1: minimal last_verified staleness sweep in the compile subtraction step, no new telemetry."

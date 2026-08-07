@@ -1,0 +1,14 @@
+id: OBS-20260805-009
+at: 2026-08-05T07:13:17Z
+source: test_failure
+claim: "The migration checkpoint kill driver must wait until the ready file contents equal the target checkpoint, because path existence can race with confirmation-byte writes and kill the child before the checkpoint is durable."
+context:
+  task: "R5.3 full regression gate"
+  paths:
+    - scripts/kill-migration-at-checkpoint.mjs
+    - scripts/test-v2.mjs
+evidence:
+  - { type: log, ref: "Part 1 kill_matrix_converges_at_every_checkpoint failed at after_before_images and after_config_write with was not killed at confirmation" }
+  - { type: test, ref: "scripts/test-v2.mjs Part 1 kill_matrix_converges_at_every_checkpoint passed after content confirmation" }
+urgency: batch
+compiled_to_kn: KN-0047

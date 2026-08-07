@@ -1,0 +1,10 @@
+id: OBS-20260731-101
+at: 2026-07-31T01:00:00Z
+source: task_outcome
+claim: "Compile-managed runbooks must preserve human text outside their managed block."
+context:
+  task: m2d-compile-fixture
+  paths: ["docs/runbooks/**"]
+evidence:
+  - { type: test, ref: "compile fixture publish path" }
+urgency: batch

@@ -1,0 +1,10 @@
+id: OBS-20260803-104
+at: 2026-08-03T05:03:00Z
+source: task_outcome
+claim: "The backlog contains a reviewed observation with no new knowledge action."
+context:
+  task: r44-no-change
+  paths: ["docs/**"]
+evidence:
+  - { type: test, ref: "R4.4 backlog fixture" }
+urgency: batch

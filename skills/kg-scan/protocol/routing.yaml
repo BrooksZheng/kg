@@ -1,59 +1,90 @@
-# kg protocol — Compiler Routing Table (RFC-001 §5.5 / D2)
-# Every observation processed by kg-compile maps to the single verdict below
-# OR to exactly one of the five categories. The category decides the
-# destination carrier and the autonomy tier.
+# kg protocol: two-stage compiler routing.
+# Stage one turns observations into atomic knowledge. Stage two proposes or
+# updates harness carriers from knowledge. Project documents are also compiler
+# inputs with one of three explicit roles.
 
 kind: kg.routing
-version: 1
+version: 2
 
-# A verdict produces NO files — only a line in the compile report. It is a
-# legal and COMMON outcome: recording it distinguishes "reviewed, nothing
-# worth keeping" from "forgot to run", and gives collectors/compilers an
-# honest empty-handed exit (anti-fabrication).
 verdicts: [no_change]
 
-# autonomy:
-#   auto         compiler publishes directly — entry created with
-#                lifecycle: active, AGENTS.md index re-rendered
-#   human_review entry created as candidate + a .kg/queue/ item; a human
-#                ruling promotes (candidate -> active) or rejects
-#   human        no entry at all — only a .kg/queue/ item
+stages:
+  observation_to_knowledge: observation_to_knowledge
+  knowledge_to_harness: knowledge_to_harness
+
+compile_document_roles:
+  route_target: "A document that can receive a managed or co-managed update."
+  dedupe_baseline: "An accepted document used to detect duplicate knowledge."
+  conflict_baseline: "An accepted document used to detect conflicting knowledge."
+
+harness_carriers:
+  markdown_document: markdown_document
+  skill_proposal: skill_proposal
+  script_proposal: script_proposal
+
 categories:
   needs_human_decision:
     description: "Conflicting evidence or a major unknown; goes to the human ruling queue."
     destination: ".kg/queue/"
     autonomy: human
   project_knowledge:
-    description: "Explanatory knowledge — what something is / why it is so."
-    destination: "knowledge/*.md + AGENTS.md managed index line"
+    description: "Explanatory knowledge about the project."
+    destination: "knowledge/*.md"
     autonomy: auto
   procedure:
     description: "Repeatable operation or troubleshooting flow."
-    destination: "knowledge/*.md (mature procedures may be PROPOSED as a standalone skill — the proposal itself is human_review)"
+    destination: "knowledge/*.md"
     autonomy: auto
   project_contract:
     description: "Stable contract, architecture boundary, or acceptance requirement."
-    destination: "AGENTS.md managed block / scoped rule"
+    destination: "knowledge/*.md"
     autonomy: human_review
   executable_constraint:
     description: "Should be turned into a test / lint / type / CI gate."
-    destination: "test / lint / type / CI proposal"
+    destination: "knowledge/*.md"
     autonomy: human_review
 
-# Regardless of category, these ALWAYS require a human ruling via .kg/queue/:
 always_human_review:
-  - "any change to the AGENTS.md managed block beyond re-rendering the index from active entries"
-  - "proposing a new skill (e.g. a procedure graduating to a skill)"
+  - "publishing a skill proposal"
+  - "publishing a script proposal"
+  - "changing a human-owned document"
 
-# Routing actions a compile run may take per entry:
-actions: [add, update, merge, demote, retire]
+# The disposition table is the only rank authority. Writers read this map;
+# they do not carry a second rank table.
+actions: [add, update, merge, demote, retire, candidate, no_change]
+disposition_rank:
+  add: 10
+  update: 20
+  merge: 30
+  demote: 40
+  retire: 50
+  candidate: 60
+  no_change: 70
 
-# Legal `resolution` values on .kg/queue/ items. Anything else is a typo —
-# the metrics script warns, because a misspelled ruling (e.g. `accept`)
-# would otherwise sit "pending" forever, silently.
+# Matrix cells name the compile-owned region. `reject` is a hard preflight
+# result. This is the ownership/update-policy authority for every carrier.
+ownership_update_matrix:
+  managed:
+    automatic: machine_block
+    proposal_only: machine_block
+    human_only: reject
+  co_managed:
+    automatic: machine_segment
+    proposal_only: machine_segment
+    human_only: reject
+  human:
+    automatic: reject
+    proposal_only: whole_target
+    human_only: none
+
+carrier_ref_suffixes:
+  managed: "kg:managed"
+  co_managed_machine: "kg:co_managed:machine"
+  proposal: "kg:proposal"
+
+plan_update_scopes: [full, evidence_scope_refresh, proposal_only]
+plan_body_actions: [updated, preserved, proposal]
+plan_actors: [compile, human]
+plan_sort_key: "disposition_rank|observation_id|target_kn_id|artifact_id"
 queue_resolutions: [pending, accepted, rejected]
-
-# Subtraction duty: every compile run MUST explicitly answer "what did we
-# merge / demote / retire this round". An empty answer is allowed but must be
-# stated in the report — silence is a protocol violation.
 subtraction_duty: true

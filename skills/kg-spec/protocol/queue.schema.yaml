@@ -1,0 +1,36 @@
+# kg protocol: promotion/conflict queue item shape.
+
+kind: kg.queue_item_schema
+version: 2
+
+field_order:
+  - id
+  - at
+  - kind
+  - category
+  - claim
+  - evidence
+  - options
+  - recommendation
+  - entry
+  - source_observations
+  - resolution
+  - resolution_note
+
+fields:
+  id: { type: string, required: true, pattern: "^Q-[0-9]{8}-[0-9]{3}$" }
+  at: { type: timestamp, required: true }
+  kind: { type: enum, required: true, values: "conflict|promotion|proposal" }
+  category: { type: enum, required: true, values: "needs_human_decision|project_contract|executable_constraint" }
+  claim: { type: string, required: true }
+  evidence: { type: map_list, required: true, min_items: 1 }
+  options: { type: string_list, required: true }
+  recommendation: { type: string, required: true }
+  entry: { type: string_or_null, required: true, pattern: "^KN-[0-9]{4}$" }
+  source_observations: { type: string_list, required: true }
+  resolution: { type: enum, required: true, values: "pending|accepted|rejected" }
+  # Null means pending/no human ruling yet. A writer must emit this key once,
+  # in this position, and must reject a second ruling for a non-pending item.
+  resolution_note: { type: string_or_null, required: true }
+
+resolution_values: [pending, accepted, rejected]

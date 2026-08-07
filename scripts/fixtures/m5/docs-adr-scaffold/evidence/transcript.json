@@ -1,0 +1,12 @@
+{
+  "transcript": [
+    {
+      "role": "user",
+      "content": "Draft only CAND-QUEUE-OWNERSHIP after all three criteria pass."
+    }
+  ],
+  "approvals": [
+    {"message_index": 0, "action": "draft:CAND-QUEUE-OWNERSHIP"},
+    {"message_index": 0, "action": "scaffold:decision"}
+  ]
+}

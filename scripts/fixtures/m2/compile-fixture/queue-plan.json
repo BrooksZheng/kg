@@ -1,0 +1,24 @@
+{
+  "kind": "kg.compile_plan",
+  "version": 1,
+  "items": [
+    {
+      "observation_id": "OBS-20260731-102",
+      "result_type": "queue_only",
+      "queue": {
+        "claim": "A human must rule on the fixture conflict before publication.",
+        "evidence": [
+          {
+            "type": "quote",
+            "ref": "compile fixture queue-only path"
+          }
+        ],
+        "options": [
+          "accept the claim",
+          "reject the claim"
+        ],
+        "recommendation": "Keep the claim out of the ledger until a human resolves the conflict."
+      }
+    }
+  ]
+}

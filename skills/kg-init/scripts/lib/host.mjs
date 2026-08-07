@@ -20,9 +20,149 @@ export function findHostRoot(cwd = process.cwd()) {
   }
 }
 
+// Canonicalize existing paths with realpath. When the tail does not exist,
+// resolve the deepest existing ancestor and rebuild the missing tail. Both
+// sides of every path comparison must use this function.
+export function canonicalPath(target) {
+  let current = path.resolve(target);
+  const missing = [];
+  for (;;) {
+    try {
+      return path.resolve(fs.realpathSync(current), ...missing);
+    } catch (error) {
+      if (!["ENOENT", "ENOTDIR", "ELOOP"].includes(error?.code)) throw error;
+      const parent = path.dirname(current);
+      if (parent === current) throw error;
+      missing.unshift(path.basename(current));
+      current = parent;
+    }
+  }
+}
+
+export function normalizeRoot(root, { mustExist = true, forbidKg = true } = {}) {
+  const declared = path.resolve(root);
+  const canonical = canonicalPath(declared);
+  if (forbidKg && (hasPathSegment(declared, ".kg") || hasPathSegment(canonical, ".kg"))) {
+    throw new Error(`root must not be inside a .kg path: ${declared}`);
+  }
+  if (mustExist && (!fs.existsSync(canonical) || !fs.statSync(canonical).isDirectory())) {
+    throw new Error(`root is not a directory: ${declared}`);
+  }
+  return { declared, canonical };
+}
+
+export function symbolicLinksOnPath(target) {
+  const absolute = path.resolve(target);
+  const filesystemRoot = path.parse(absolute).root;
+  const relative = path.relative(filesystemRoot, absolute);
+  const links = [];
+  let current = filesystemRoot;
+  for (const segment of relative.split(path.sep).filter(Boolean)) {
+    current = path.join(current, segment);
+    try {
+      if (fs.lstatSync(current).isSymbolicLink()) links.push(path.resolve(current));
+    } catch (error) {
+      if (["ENOENT", "ENOTDIR"].includes(error?.code)) break;
+      throw error;
+    }
+  }
+  return links;
+}
+
+// Evaluators keep both spellings of their allowed root. Containment compares
+// canonical paths, while the symlink differential compares declared paths so
+// a symlink used to reach the root is allowed and a new symlink below it is
+// rejected in the same way in live and fixture-check modes.
+export function resolveProductPath(rootValue, targetValue, { label = "product", type = "file" } = {}) {
+  const root = normalizeRoot(rootValue);
+  if (typeof targetValue !== "string" || targetValue.trim() === "") {
+    throw new Error(`${label} path must be a non-empty string`);
+  }
+  const declared = path.isAbsolute(targetValue)
+    ? path.resolve(targetValue)
+    : path.resolve(root.declared, ...targetValue.replaceAll("\\", "/").split("/"));
+  const canonical = canonicalPath(declared);
+  if (isOutside(root.canonical, canonical)) throw new Error(`${label} escapes its allowed root`);
+  if (hasPathSegment(declared, ".kg") || hasPathSegment(canonical, ".kg")) {
+    throw new Error(`${label} must not be inside .kg`);
+  }
+  const rootLinks = new Set(symbolicLinksOnPath(root.declared));
+  for (const link of symbolicLinksOnPath(declared)) {
+    if (!rootLinks.has(link)) throw new Error(`${label} path must not contain a symbolic link`);
+  }
+  if (!fs.existsSync(declared)) throw new Error(`${label} does not exist`);
+  const stat = fs.statSync(declared);
+  if ((type === "file" && !stat.isFile()) || (type === "directory" && !stat.isDirectory())) {
+    throw new Error(`${label} is not a ${type}`);
+  }
+  if (fs.lstatSync(declared).isSymbolicLink() && declared !== root.declared) {
+    throw new Error(`${label} must not be a symbolic link`);
+  }
+  return { root, declared, canonical, verdict: "accepted" };
+}
+
+export function hasPathSegment(target, expected) {
+  const wanted = String(expected).toLowerCase();
+  return path
+    .resolve(target)
+    .split(path.sep)
+    .filter(Boolean)
+    .some((segment) => segment.toLowerCase() === wanted);
+}
+
+export function isOutside(root, target) {
+  const canonicalRoot = canonicalPath(root);
+  const canonicalTarget = canonicalPath(target);
+  const relative = path.relative(canonicalRoot, canonicalTarget);
+  return relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative);
+}
+
+export function assertSafeHostRoot(root) {
+  return normalizeRoot(root).canonical;
+}
+
+export function resolveSafeRelative(root, relative, { mustExist = true, allowSymlink = false, forbidKg = true } = {}) {
+  if (typeof relative !== "string" || relative.trim() === "" || path.isAbsolute(relative)) {
+    throw new Error(`path must be a non-empty relative path: ${relative}`);
+  }
+  const portable = relative.replaceAll("\\", "/");
+  const rawSegments = portable.split("/").filter((segment) => segment !== "" && segment !== ".");
+  if (rawSegments.includes("..")) throw new Error(`path escapes root: ${relative}`);
+  if (forbidKg && rawSegments.some((segment) => segment.toLowerCase() === ".kg")) {
+    throw new Error(`path must not enter .kg: ${relative}`);
+  }
+
+  const canonicalRoot = canonicalPath(root);
+  const target = path.resolve(canonicalRoot, ...rawSegments);
+  if (isOutside(canonicalRoot, target)) throw new Error(`path escapes root: ${relative}`);
+
+  let current = canonicalRoot;
+  for (const segment of rawSegments) {
+    current = path.join(current, segment);
+    let stat;
+    try {
+      stat = fs.lstatSync(current);
+    } catch (error) {
+      if (["ENOENT", "ENOTDIR"].includes(error?.code)) break;
+      throw error;
+    }
+    if (!allowSymlink && stat.isSymbolicLink()) throw new Error(`path contains a symbolic link: ${relative}`);
+  }
+
+  const canonicalTarget = canonicalPath(target);
+  if (isOutside(canonicalRoot, canonicalTarget)) throw new Error(`path resolves outside root: ${relative}`);
+  if (forbidKg && hasPathSegment(canonicalTarget, ".kg")) throw new Error(`path resolves through .kg: ${relative}`);
+  if (mustExist && !fs.existsSync(target)) throw new Error(`path does not exist: ${relative}`);
+  return {
+    root: canonicalRoot,
+    full: target,
+    canonical: canonicalTarget,
+    relative: rawSegments.join("/"),
+  };
+}
+
 export const CONFIG_DEFAULTS = {
   observation_threshold: 5,
-  agents_block_budget_lines: 30,
 };
 
 export function loadConfig(hostRoot) {
@@ -80,6 +220,23 @@ export function nextKnowledgeId(paths) {
   }
   if (max + 1 > 9999) fail("knowledge id space exhausted (KN-9999) — the id format needs a protocol revision, not a silently invalid id");
   return `KN-${String(max + 1).padStart(4, "0")}`;
+}
+
+export function knowledgeSlug(claim) {
+  return (
+    String(claim)
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .split("-")
+      .slice(0, 6)
+      .join("-") || "entry"
+  );
+}
+
+export function knowledgeFilename(id, claim) {
+  if (!/^KN-[0-9]{4}$/.test(id)) throw new Error(`invalid knowledge id: ${id}`);
+  return `${id}-${knowledgeSlug(claim)}.md`;
 }
 
 export function fail(message) {

@@ -1,0 +1,13 @@
+id: OBS-20260731-015
+at: 2026-07-31T09:11:46Z
+source: task_outcome
+claim: "Reads of evaluator artifacts outside project_root must be proven by successful read-class tool events because Runner Contract file_reads contains project file reads only."
+context:
+  task: "R2.5 D52 eval-spec repair"
+  paths:
+    - scripts/eval-runner-contract.md
+    - scripts/eval-spec.mjs
+    - "scripts/fixtures/m2/spec-*/spec-artifacts/runner-response.json"
+evidence:
+  - { type: test, ref: "Part 6 passes with empty file_reads and a packet read tool event, then fails when the packet tool event is absent." }
+urgency: batch

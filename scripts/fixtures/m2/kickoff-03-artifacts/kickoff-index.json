@@ -1,0 +1,96 @@
+{
+  "kind": "kg.kickoff_context_index",
+  "version": 1,
+  "project_root": "scripts/fixtures/m2/kickoff-03-project",
+  "task": "让 compile 通过路径别名或产物 symlink 更新整个 runbook",
+  "entries": [
+    {
+      "path": "docs/traps/legacy-cache-key.md",
+      "source": "project_document",
+      "title": "Legacy cache key trap",
+      "status": "accepted",
+      "authority": "formal_decision",
+      "doc_type": "trap",
+      "bytes": 247,
+      "original_bytes": 247,
+      "truncated": false
+    },
+    {
+      "path": "knowledge/KN-0001-existing-compile-baseline.md",
+      "source": "knowledge",
+      "title": "The existing ledger already covers this fixture observation.",
+      "status": "active",
+      "authority": "verified_runtime_behavior",
+      "claim": "The existing ledger already covers this fixture observation.",
+      "scope": {
+        "paths": [
+          "knowledge/**"
+        ]
+      },
+      "bytes": 476,
+      "original_bytes": 476,
+      "truncated": false
+    },
+    {
+      "path": "knowledge/KN-0002-compile-managed-runbooks-must-preserve-human.md",
+      "source": "knowledge",
+      "title": "Compile-managed runbooks must preserve human text outside their managed block.",
+      "status": "active",
+      "authority": "verified_runtime_behavior",
+      "claim": "Compile-managed runbooks must preserve human text outside their managed block.",
+      "scope": {
+        "paths": [
+          "docs/runbooks/**"
+        ]
+      },
+      "bytes": 565,
+      "original_bytes": 565,
+      "truncated": false
+    },
+    {
+      "path": "docs/runbooks/compile-notes.md",
+      "source": "project_document",
+      "title": "compile-notes.md",
+      "status": "unregistered",
+      "authority": "reference_only",
+      "summary": "# Compile notes",
+      "bytes": 322,
+      "original_bytes": 322,
+      "truncated": false
+    },
+    {
+      "path": "docs/accepted-compile-contract.md",
+      "source": "project_document",
+      "title": "M2 compile fixture contract",
+      "status": "accepted",
+      "authority": "formal_decision",
+      "doc_type": "rfc",
+      "bytes": 296,
+      "original_bytes": 296,
+      "truncated": false
+    }
+  ],
+  "harness": [
+    {
+      "path": "harness/artifacts/HAR-COMPILE-NOTES.yaml",
+      "source": "harness",
+      "artifact_id": "HAR-COMPILE-NOTES",
+      "target_path": "docs/runbooks/compile-notes.md",
+      "status": "active",
+      "authority": "inventory_only",
+      "ownership": "managed",
+      "source_kn_ids": [
+        "KN-0002"
+      ],
+      "source_refs": [
+        "docs/accepted-compile-contract.md#L14"
+      ]
+    }
+  ],
+  "budget": {
+    "limit_bytes": 65536,
+    "consumed_bytes": 1906,
+    "remaining_bytes": 63630,
+    "truncated": false
+  }
+}

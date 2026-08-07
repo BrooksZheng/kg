@@ -1,0 +1,12 @@
+id: OBS-20260806-003
+at: 2026-08-06T10:02:48Z
+source: task_outcome
+claim: "A required-slots template (build/test/lint) must let a slot say it is empty; an exact-label match forces a repository with no build step to either lie or fail validation."
+context:
+  task: kg-v2-R6.1
+  paths: [skills/kg-init/scripts/migration-lib.mjs, AGENTS.md]
+evidence:
+  - { type: log, ref: "detect-migration reported V2_AGENTS_INVALID after the Commands comments were changed to 构建（无构建步骤…）" }
+  - { type: diff, ref: "validateCommandsSection now accepts a label that starts with the keyword" }
+urgency: batch
+compiled_to_kn: KN-0054

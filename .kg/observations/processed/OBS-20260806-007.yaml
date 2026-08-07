@@ -1,0 +1,14 @@
+id: OBS-20260806-007
+at: 2026-08-06T10:05:18Z
+source: task_outcome
+claim: "A freshly migrated host has no way to create its first carrier through the product: apply-compile-plan requires an existing harness sidecar and managed target, and no script authors one."
+context:
+  task: "kg-v2-R6.3 dogfood compile round"
+  paths:
+    - skills/kg-compile/scripts/apply-compile-plan.mjs
+    - harness/artifacts/
+evidence:
+  - { type: log, ref: "compile.mjs on this repo returned artifacts: [] after migration, so no publish_kn_and_carrier item can name an artifact_id" }
+  - { type: quote, ref: "apply-compile-plan.mjs:1071 resolves artifact.sidecar_path from the context and fails when it is absent; skills/kg-compile/scripts holds no carrier-creation entrypoint" }
+urgency: batch
+compiled_to_kn: KN-0056

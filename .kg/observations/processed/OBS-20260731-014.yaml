@@ -1,0 +1,10 @@
+id: OBS-20260731-014
+at: 2026-07-31T09:11:46Z
+source: task_outcome
+claim: "Spec runner citations form a verifiable evidence envelope where expected finding sources are required subsets of deduplicated cited paths, while duplicate line citations and valid extra sources are allowed."
+context:
+  task: "R2.5 D51 eval-spec repair"
+  paths: [scripts/eval-spec.mjs, scripts/test-v2.mjs]
+evidence:
+  - { type: test, ref: "Part 6 accepts duplicate line citations and a warned AGENTS.md superset, then rejects a missing expected finding citation." }
+urgency: batch

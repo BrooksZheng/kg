@@ -1,0 +1,18 @@
+id: Q-20260805-002
+at: 2026-08-05T02:45:35Z
+kind: promotion
+category: project_contract
+claim: "Promote KN-0035: a check must not derive its expected value from the same source as the thing it checks; verdicts come from independently re-read bytes or protocol data, never from the renderer's own output."
+evidence:
+  - { type: observation, ref: OBS-20260803-005 }
+  - { type: test, ref: "test-v2 Part 7 scan_reports_registered_document_schema_failures_deterministically" }
+  - { type: quote, ref: ".mission/kg-v2-refactor/feedback-r22.md D35: migration validated installed skills against the same inventory it built them from, so a source missing scripts/lib and protocol installed clean and reported success." }
+options:
+  - "accept as project contract (activate KN-0035)"
+  - "keep as project_knowledge (advisory only)"
+  - "reject (retire KN-0035)"
+recommendation: "Accept. A self-attesting check reports green at full cost and zero value, and D35 shipped a broken install behind one. This is the single most load-bearing rule in the evaluation architecture: every gate, oracle, and scan finding in the project depends on it holding."
+entry: KN-0035
+source_observations: [OBS-20260803-005]
+resolution: accepted
+resolution_note: "Human delegated queue rulings to the compiler agent in-session (裁决有你帮我决定, 2026-07-31); delegation not scoped to a single round. Ruled per the recorded recommendation."

@@ -1,0 +1,10 @@
+kind: kg.kickoff_turn
+version: 1
+recorded_at: 2026-07-31T04:00:00.000Z
+session_id: eaafcadc-066a-4142-8f26-a1c558be88f5
+findings:
+  - { source_path: docs/decisions/0001-payment-order-event-bus.md, line: 15, status: accepted, authority: formal_decision }
+  - { source_path: docs/traps/payment-direct-write.md, line: 14, status: accepted, authority: formal_decision }
+question:
+  question_text: "你希望把重试目标限定为事件发布，还是继续尝试直接写 Order 数据库？"
+  assistant_message_index: 1

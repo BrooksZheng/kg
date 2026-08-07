@@ -1,0 +1,7 @@
+{
+  "kind": "kg.eval_bootstrap_fixture",
+  "version": 3,
+  "project_source": "scripts/fixtures/m3/bootstrap-proposal/host",
+  "oracle": "scripts/fixtures/m3/bootstrap-proposal/oracle.json",
+  "task": "Prepare evidence-backed coverage for every core project-document type while preserving all existing human-authored documents."
+}

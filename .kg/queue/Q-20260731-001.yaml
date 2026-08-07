@@ -1,0 +1,17 @@
+id: Q-20260731-001
+at: 2026-07-31T15:14:26Z
+kind: promotion
+category: project_contract
+claim: "Promote KN-0028: agent-authored machine inputs must be strict JSON; KYAML and Markdown machine surfaces are produced only by validated writer scripts."
+evidence:
+  - { type: observation, ref: OBS-20260730-003 }
+  - { type: test, ref: "2026-07-30 archived C10 replay: scripts/lib/kyaml.mjs line 96 rejected the original constraints list with multi-line list items are not supported after # values were quoted" }
+  - { type: quote, ref: ".mission/kg-v2-refactor/contract-3.md §1.5.1: Agent 创作的机器输入使用严格 JSON。KYAML 与 Markdown 只由校验后的 writer 生成。" }
+options:
+  - "accept as project contract (activate KN-0028)"
+  - "reject (retire KN-0028)"
+recommendation: "Accept. The rule is already the negotiated M3 contract invariant (§1.5.1) and every v2 writer implements it; activating the entry makes it binding knowledge outside the mission docs."
+entry: KN-0028
+source_observations: [OBS-20260730-003]
+resolution: accepted
+resolution_note: "Human delegated the ruling to the compiler agent in-session: 裁决有你帮我决定 (2026-07-31). Ruled per the recorded recommendation."
